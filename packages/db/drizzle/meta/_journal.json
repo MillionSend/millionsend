@@ -470,6 +470,13 @@
       "when": 1793222605075,
       "tag": "0066_complaints_by_send_day",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1793296621109,
+      "tag": "0067_pause_lift",
+      "breakpoints": true
     }
   ]
 }

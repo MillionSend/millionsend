@@ -15,15 +15,16 @@ import {
   emailRecipientsSql,
   fetchAccountScore,
   fetchContentFactors,
-  fetchDeliverabilityHealth,
   freeFuseState,
   getMonitorSettingsRow,
   heldByNewDomainLimit,
   isHoldVerdict,
   listLimitRequests,
+  monitorFlagLine,
   OPERATOR_PARK_REASONS,
   openMediaReview,
   parseAuditActor,
+  pauseLiftStanding,
   recentMonitorSamples,
   redactRevealedText,
   releaseFreeFuse,
@@ -573,7 +574,7 @@ export const consoleSafetyRouter = router({
     );
     const [
       flags,
-      health,
+      pauseLift,
       score,
       factors,
       owners,
@@ -588,7 +589,10 @@ export const consoleSafetyRouter = router({
       requests,
     ] = await Promise.all([
       ctx.db.select().from(f).where(eq(f.teamId, team.id)).orderBy(desc(f.openedAt)).limit(10),
-      fetchDeliverabilityHealth(ctx.db, team.id, { now }),
+      pauseLiftStanding(ctx.db, team.id, {
+        now,
+        monitorFlagRisk: monitorFlagLine(judge.on ? monitorSettings : null),
+      }),
       fetchAccountScore(ctx.db, team.id, { now }),
       fetchContentFactors(ctx.db, team.id, { now }),
       ctx.db
@@ -648,6 +652,7 @@ export const consoleSafetyRouter = router({
       teamWarmupOverview(ctx.db, team.id, now),
       listLimitRequests(ctx.db, { status: "open", teamId: team.id, limit: 500 }),
     ]);
+    const { health } = pauseLift;
     // The judge's answer for each flagged email, when it was drawn; the verdict fields only.
     const ms = schema.monitorSamples;
     const flaggedIds = flagged.map((row) => row.id);
@@ -713,6 +718,18 @@ export const consoleSafetyRouter = router({
         hardBounceRate7d: health.bounceRate,
         sent7d: health.sent,
         complaintSent7d: health.complaintSent,
+        lifted: health.lifted,
+        // What a lift would take out: the pause window's counts as the guardrail judged them.
+        pauseLift: {
+          refusal: pauseLift.refusal,
+          since: pauseLift.since,
+          sent: health.pause.sent,
+          hardBounced: health.pause.hardBounced,
+          rate: health.pause.sent > 0 ? health.pause.hardBounced / health.pause.sent : 0,
+          parked: pauseLift.parked,
+          lastLiftAt: pauseLift.lastLiftAt,
+          nextLiftAt: pauseLift.nextLiftAt,
+        },
       },
       checks: factors.map((factor) => ({
         id: factor.id,

@@ -45,6 +45,7 @@ import {
   linkDomainsAged,
   type MonitorDeps,
   markDomainAgeUnknown,
+  monitorFlagLine,
   monitorSettingsReader,
   ownerDomain,
   pacingHorizonDays,
@@ -598,10 +599,9 @@ await queue.scheduleCrons({
     });
   },
   "safety.flags": async () => {
-    // With the judge off a stored risk opens nothing: the line is unreachable.
     const settings = judge ? await monitorSettings() : null;
     const result = await runSafetyFlags(db, {
-      monitorFlagRisk: settings ? settings.flagRisk : Number.POSITIVE_INFINITY,
+      monitorFlagRisk: monitorFlagLine(settings),
       monitorFlagScore: settings?.flagScore,
     });
     if (result.opened > 0 || result.cleared > 0 || result.graduated > 0) {

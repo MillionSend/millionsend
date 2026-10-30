@@ -766,6 +766,20 @@ export default function MetricsPage() {
               rowPct={
                 data.totals.sent > 0 ? pct2.format(data.totals.hardBounced / data.totals.sent) : "—"
               }
+              secondary={
+                data.liftedHardBounced > 0
+                  ? {
+                      label: t("bounce.lifted"),
+                      note: t("bounce.notCounted"),
+                      hint: t("bounce.liftedHint"),
+                      count: fmt.format(data.liftedHardBounced),
+                      pct:
+                        data.totals.sent > 0
+                          ? pct1.format(data.liftedHardBounced / data.totals.sent)
+                          : "—",
+                    }
+                  : undefined
+              }
             />
             {/* Complaints about each UTC day's mail over its sends that could draw one, as the guardrail counts them. */}
             <RateCard

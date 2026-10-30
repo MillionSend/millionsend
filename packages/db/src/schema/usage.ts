@@ -40,6 +40,11 @@ export const usageCounters = pgTable(
     // complained leave out feedback about mail SES never attempted (core's
     // sesAttempted), which SES's own rates leave out too.
     hardBounced: integer("hard_bounced").notNull().default(0),
+    // A pause lift's snapshot of sent and hard_bounced. The deliverability
+    // guardrail and the account score subtract it; every other reader keeps
+    // the raw columns, which match what SES counted.
+    excludedSent: integer("excluded_sent").notNull().default(0),
+    excludedHardBounced: integer("excluded_hard_bounced").notNull().default(0),
     // Dated by the UTC day the complaint's mail went out, the day SES's own
     // rate files it under, not the day it arrived.
     complained: integer("complained").notNull().default(0),

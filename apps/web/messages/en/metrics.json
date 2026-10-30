@@ -13,7 +13,10 @@
   "bounce": {
     "title": "Hard-bounce rate",
     "bounced": "Hard bounced",
-    "noSends": "{count, plural, =0 {Nothing sent} one {# hard bounce · nothing sent} other {# hard bounces · nothing sent}}"
+    "noSends": "{count, plural, =0 {Nothing sent} one {# hard bounce · nothing sent} other {# hard bounces · nothing sent}}",
+    "lifted": "Left out after review",
+    "notCounted": "not counted",
+    "liftedHint": "We reviewed these hard bounces with you and took them out of your rate, along with the same days' sends up to the review. They still show in the chart and in your email logs. Every bounce since counts as usual."
   },
   "complaint": {
     "title": "Complaint rate",
@@ -69,6 +72,7 @@
       "complaintBasis": "over {sent} sends to inboxes that report spam",
       "bounceBasis": "over {sent} sends",
       "complaintsTooFew": "Not enough mail to inboxes that report spam to judge complaints yet.",
+      "bouncesTooFew": "Not enough sends left in the rate after the review to judge hard bounces yet.",
       "outcomeNote": "The lines follow Google Postmaster: keep complaints under 0.10% and never reach 0.30%.",
       "lift": "How to raise",
       "liftLine": "{title} · account score to {score}",

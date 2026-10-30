@@ -5,7 +5,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const data = vi.hoisted(() => ({ window: undefined as unknown, health: undefined as unknown }));
+const data = vi.hoisted(() => ({
+  window: undefined as unknown,
+  health: undefined as unknown,
+  details: undefined as unknown,
+}));
 
 // The real English catalogs, so the test reads what the cards show.
 vi.mock("next-intl", async (importOriginal) => {
@@ -23,6 +27,11 @@ vi.mock("next-intl", async (importOriginal) => {
   };
 });
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams() }));
+// The drawer portals to document.body, which a server render does not have.
+vi.mock("@/components/drawer", () => ({
+  Drawer: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
+    open ? createElement("div", null, children) : null,
+}));
 // Every trpc helper answers with the procedure's path, so useQuery can tell them apart.
 vi.mock("@/lib/trpc", () => {
   const at = (path: string[]): unknown =>
@@ -39,11 +48,14 @@ vi.mock("@tanstack/react-query", () => ({
         ? data.window
         : options.path === "metrics.health"
           ? data.health
-          : undefined,
+          : options.path === "metrics.accountScoreDetails"
+            ? data.details
+            : undefined,
   }),
 }));
 
 const { default: MetricsPage } = await import("@/app/(dashboard)/metrics/page");
+const { ScoreDetailsDrawer } = await import("@/app/(dashboard)/metrics/score-details");
 
 const DAYS = ["2026-10-16", "2026-10-17", "2026-10-18"];
 const COUNTS = { accepted: 0, delivered: 0, bounced: 0, hardBounced: 0, opened: 0 };
@@ -75,6 +87,7 @@ function load(
     days: DAYS.map((day) => ({ ...ZERO, day, sent: 5_000, delivered: 5_000, complained: 1 })),
     totals: { ...ZERO, sent: 15_000, delivered: 15_000, complained: 3 },
     allTimeDelivered: 15_000,
+    liftedHardBounced: 0,
     today: DAYS[2],
     complaints: {
       days: complaintDays,
@@ -221,6 +234,57 @@ describe("the complaint card's tip", () => {
       "0.02% · 1 of 5,000 to inboxes that report spam",
     ]);
     expect(await hover(0)).toEqual(["Oct 12", "0.05% · 1 of 2,000 to inboxes that report spam"]);
+  });
+});
+
+describe("the hard-bounce card", () => {
+  it("shows what a pause lift left out of the rate, only once there is something", () => {
+    const quiet = card(render({ complaintRate: 0, complaintSent: 0 }), "Hard-bounce rate");
+    expect(quiet).not.toContain("Left out after review");
+    load({ complaintRate: 0, complaintSent: 0 });
+    data.window = { ...(data.window as object), liftedHardBounced: 30 };
+    const lifted = card(renderToStaticMarkup(createElement(MetricsPage)), "Hard-bounce rate");
+    expect(lifted).toMatch(/title="We reviewed these hard bounces with you[^"]*"/);
+    // Over the same 15,000 sends the Hard bounced row divides by.
+    expect(lifted).toMatch(/>Left out after review<.*?>not counted<.*?>30<.*?>0\.2%</s);
+  });
+});
+
+describe("the score details", () => {
+  it("rate hard bounces over the sends a lift left in the rate, judged once there are enough", () => {
+    const details = {
+      windowDays: 30,
+      sent: 1_000,
+      scoreTenths: 100,
+      blendTenths: null,
+      contentScoreTenths: null,
+      outcomeScoreTenths: 100,
+      governorCapTenths: 115,
+      guardrailCapTenths: null,
+      insufficientOutcomeData: false,
+      complaintRate: 0,
+      complaintSent: 1_000,
+      complaintsJudged: true,
+      hardBounceRate: 0.1,
+      bounceSent: 50,
+      bouncesJudged: false,
+      factors: [],
+      checksTotal: 20,
+    };
+    const render = (over: Partial<typeof details> = {}) => {
+      data.details = { ...details, ...over };
+      return renderToStaticMarkup(
+        createElement(ScoreDetailsDrawer, { open: true, onClose: () => {} }),
+      );
+    };
+    const few = render();
+    expect(few).toContain(">over 50 sends<");
+    expect(few).toContain(
+      "Not enough sends left in the rate after the review to judge hard bounces yet.",
+    );
+    const enough = render({ bounceSent: 500, hardBounceRate: 0.01, bouncesJudged: true });
+    expect(enough).toContain(">over 500 sends<");
+    expect(enough).not.toContain("to judge hard bounces yet");
   });
 });
 

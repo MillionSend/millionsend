@@ -6,6 +6,8 @@ import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import {
   counterComplaintSent,
+  counterHardBounced,
+  counterSent,
   type DeliverabilityStatus,
   fetchDeliverabilityHealth,
 } from "./deliverability.js";
@@ -27,7 +29,8 @@ export const ACCOUNT_SCORE_WINDOW_DAYS = 30;
  * Below this many sends in the window, the outcome sub-score is withheld
  * ("not enough data") rather than fabricated from a tiny sample — the
  * headline then falls back to the content sub-score alone. The complaint
- * rate weighs on the outcome only once this many sends could draw one.
+ * rate weighs on the outcome only once this many sends could draw one, and
+ * the hard-bounce rate only once this many count toward it after a pause lift.
  */
 export const MIN_OUTCOME_SENDS = 100;
 
@@ -38,9 +41,12 @@ export interface AccountScoreInput {
   contentRecipients: number;
   /** usage_counters sums over the window. */
   sent: number;
+  /** The hard-bounce rate's denominator: `sent` net of a pause lift. */
+  bounceSent: number;
   /** The sends that could draw a complaint (the complaint rate's denominator). */
   complaintSent: number;
   complained: number;
+  /** Net of a pause lift, like bounceSent. */
   hardBounced: number;
   /** Current guardrail standing — the score must never contradict it. */
   guardrailStatus: DeliverabilityStatus;
@@ -63,6 +69,8 @@ export interface AccountScore {
   insufficientOutcomeData: boolean;
   guardrailStatus: DeliverabilityStatus;
   sent: number;
+  /** Under MIN_OUTCOME_SENDS the hard-bounce rate is reported but left out of the outcome sub-score. */
+  bounceSent: number;
   /** Under MIN_OUTCOME_SENDS the complaint rate is reported but left out of the outcome sub-score. */
   complaintSent: number;
   contentRecipients: number;
@@ -82,7 +90,7 @@ function ramp(rate: number, lo: number, hi: number, max: number): number {
  * spam-rate lines (keep below 0.10%, never reach 0.30%) with a severe tail:
  * complaints ramp 0→6pts across 0.1%–0.3% and 6→10pts across 0.3%–1%;
  * hard bounces ramp 0→4pts across 2%–5% and 4→6pts across 5%–10%.
- * Denominators are `complaintSent` and `sent`, matching evaluateDeliverability
+ * Denominators are `complaintSent` and `bounceSent`, matching evaluateDeliverability
  * — the guardrail and the score must read the same rates or they become two
  * arguing authorities.
  */
@@ -100,9 +108,9 @@ function outcomePenaltyTenths(complaintRate: number, hardBounceRate: number): nu
  * but your sends are paused" is impossible by construction.
  */
 export function computeAccountScore(input: AccountScoreInput): AccountScore {
-  const { sent, complaintSent, complained, hardBounced, guardrailStatus } = input;
+  const { sent, bounceSent, complaintSent, complained, hardBounced, guardrailStatus } = input;
   const complaintRate = complaintSent > 0 ? complained / complaintSent : 0;
-  const hardBounceRate = sent > 0 ? hardBounced / sent : 0;
+  const hardBounceRate = bounceSent > 0 ? hardBounced / bounceSent : 0;
 
   const contentScoreTenths =
     input.contentRecipients > 0
@@ -111,9 +119,10 @@ export function computeAccountScore(input: AccountScoreInput): AccountScore {
 
   const insufficientOutcomeData = sent < MIN_OUTCOME_SENDS;
   const judgedComplaintRate = complaintSent < MIN_OUTCOME_SENDS ? 0 : complaintRate;
+  const judgedBounceRate = bounceSent < MIN_OUTCOME_SENDS ? 0 : hardBounceRate;
   const outcomeScoreTenths = insufficientOutcomeData
     ? null
-    : Math.round(Math.max(0, 100 - outcomePenaltyTenths(judgedComplaintRate, hardBounceRate)));
+    : Math.round(Math.max(0, 100 - outcomePenaltyTenths(judgedComplaintRate, judgedBounceRate)));
 
   const blendTenths =
     outcomeScoreTenths !== null && contentScoreTenths !== null
@@ -146,6 +155,7 @@ export function computeAccountScore(input: AccountScoreInput): AccountScore {
     insufficientOutcomeData,
     guardrailStatus,
     sent,
+    bounceSent,
     complaintSent,
     contentRecipients: input.contentRecipients,
     windowDays: ACCOUNT_SCORE_WINDOW_DAYS,
@@ -221,9 +231,10 @@ export async function fetchAccountScoreInput(
   const [counters] = await db
     .select({
       sent: sql<string>`coalesce(sum(${c.sent}), 0)::bigint`,
+      bounceSent: sql<string>`coalesce(sum(${counterSent}), 0)::bigint`,
       complaintSent: sql<string>`coalesce(sum(${counterComplaintSent}), 0)::bigint`,
       complained: sql<string>`coalesce(sum(${c.complained}), 0)::bigint`,
-      hardBounced: sql<string>`coalesce(sum(${c.hardBounced}), 0)::bigint`,
+      hardBounced: sql<string>`coalesce(sum(${counterHardBounced}), 0)::bigint`,
     })
     .from(c)
     .where(and(eq(c.teamId, teamId), gte(c.day, window.since)));
@@ -242,6 +253,7 @@ export async function fetchAccountScoreInput(
     contentWeightedTenths: Number(content?.weighted ?? 0),
     contentRecipients: Number(content?.recipients ?? 0),
     sent: Number(counters?.sent ?? 0),
+    bounceSent: Number(counters?.bounceSent ?? 0),
     complaintSent: Number(counters?.complaintSent ?? 0),
     complained: Number(counters?.complained ?? 0),
     hardBounced: Number(counters?.hardBounced ?? 0),

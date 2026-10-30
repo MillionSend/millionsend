@@ -493,6 +493,16 @@ export const ptBR = {
     ],
     button: "Abrir painel",
   },
+  "team.sending_pause_lifted": {
+    subject: "A pausa de envios da sua equipe foi retirada",
+    body: [
+      "Retiramos a pausa de envios de {team}. Novos envios voltaram a ser aceitos, e os bounces permanentes que causaram a pausa não contam mais na sua taxa.{waiting}",
+      "Os e-mails recusados durante a pausa não ficaram guardados. Envie de novo os que ainda forem importantes.",
+      "Daqui em diante, todo bounce conta. Se a taxa de bounce permanente chegar de novo a {limit}, os envios pausam outra vez e só voltam sozinhos quando a taxa ficar abaixo do limite. Se tiver alguma dúvida, é só responder a este e-mail.",
+    ],
+    button: "Abrir métricas",
+    extra: { waiting: " Os e-mails que estavam esperando já estão saindo." },
+  },
   "monitor.alert": {
     subject: "Monitor de conteúdo: uma equipe precisa de uma olhada",
     body: [

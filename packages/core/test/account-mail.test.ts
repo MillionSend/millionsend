@@ -212,6 +212,7 @@ describe("new domain limit mail", () => {
       "domain.limit_lifted",
       "domain.limit_kept",
       "domain.limit_requested",
+      "team.sending_pause_lifted",
     ] as const;
     for (const catalog of [en, ptBR]) {
       const entries: AccountMailEntry[] = kinds.map((kind) => catalog[kind]);
@@ -237,6 +238,34 @@ describe("new domain limit mail", () => {
         values: VALUES,
       });
       expect(mail.text, kind).not.toMatch(/tier|operator|trust/i);
+    }
+  });
+});
+
+describe("pause lift mail", () => {
+  it("says waiting mail is going out only when some was waiting, in either language", () => {
+    for (const [locale, counted, waiting] of [
+      ["en", "no longer count toward its bounce rate.", "Mail that was waiting is going out now."],
+      [
+        "pt-BR",
+        "não contam mais na sua taxa.",
+        "Os e-mails que estavam esperando já estão saindo.",
+      ],
+    ] as const) {
+      const text = (phrase: string) =>
+        buildAccountMail({
+          kind: "team.sending_pause_lifted",
+          locale,
+          url: "https://app.example/metrics",
+          values: { ...VALUES, waiting: phrase },
+        }).text;
+      const phrase = accountMailPhrase({
+        locale,
+        kind: "team.sending_pause_lifted",
+        key: "waiting",
+      });
+      expect(text(phrase)).toContain(`${counted} ${waiting}\n\n`);
+      expect(text("")).toContain(`${counted}\n\n`);
     }
   });
 });

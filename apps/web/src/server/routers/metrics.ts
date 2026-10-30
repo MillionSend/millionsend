@@ -90,7 +90,9 @@ export const metricsRouter = router({
       // Grouped by position: the same expression bound twice would carry two
       // parameter numbers and read as two different expressions.
       const localDate = sql`((${h.hour} at time zone ${tz}::text)::date)::text`;
-      const [rows, [allTime], complaintRows] = await Promise.all([
+      // The first local day's midnight, as an instant.
+      const rangeStart = sql`(${firstDay}::text::date::timestamp at time zone ${tz}::text)`;
+      const [rows, [allTime], complaintRows, [lifted]] = await Promise.all([
         ctx.db
           .select({
             day: sql<string>`${localDate}`,
@@ -105,13 +107,7 @@ export const metricsRouter = router({
             prefetched: sql<number>`sum(${h.prefetched})::int`,
           })
           .from(h)
-          .where(
-            and(
-              eq(h.teamId, ctx.teamId),
-              // From the first local day's midnight, as an instant.
-              gte(h.hour, sql`(${firstDay}::text::date::timestamp at time zone ${tz}::text)`),
-            ),
-          )
+          .where(and(eq(h.teamId, ctx.teamId), gte(h.hour, rangeStart)))
           .groupBy(sql`1`)
           .orderBy(sql`1`),
         // ::bigint — the all-time sum of int columns overflows int4 for large
@@ -133,6 +129,19 @@ export const metricsRouter = router({
           })
           .from(c)
           .where(and(eq(c.teamId, ctx.teamId), gte(c.day, utcDayList[0] ?? utcToday))),
+        // ponytail: the totals sum hourly rows into the viewer's local days,
+        // but a lift's snapshot lives on the daily (UTC) rows only, so this
+        // sums every UTC day the local range touches and can run a few hours
+        // past its edges; an hourly snapshot column would match exactly.
+        ctx.db
+          .select({ hardBounced: sql<number>`coalesce(sum(${c.excludedHardBounced}), 0)::int` })
+          .from(c)
+          .where(
+            and(
+              eq(c.teamId, ctx.teamId),
+              gte(c.day, sql`(${rangeStart} at time zone 'UTC')::date`),
+            ),
+          ),
       ]);
 
       // Zero-fill so the chart always renders one bar per calendar day.
@@ -164,6 +173,8 @@ export const metricsRouter = router({
         days,
         totals,
         allTimeDelivered: Number(allTime?.delivered ?? 0),
+        // Hard bounces pause lifts left out of the guardrail; totals keep them.
+        liftedHardBounced: lifted?.hardBounced ?? 0,
         today,
         complaints: {
           days: utcDayList.map((day) => ({
@@ -213,6 +224,7 @@ export const metricsRouter = router({
     return {
       ...computeAccountScore(input),
       complaintsJudged: input.complaintSent >= MIN_OUTCOME_SENDS,
+      bouncesJudged: input.bounceSent >= MIN_OUTCOME_SENDS,
       checksTotal: CHECKS.length,
       factors: factors.map((factor) => ({
         id: factor.id,

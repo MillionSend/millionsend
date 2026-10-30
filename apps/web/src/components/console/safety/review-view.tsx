@@ -1,13 +1,14 @@
 "use client";
 
 import { AUDIT_ACTIONS } from "@millionsend/core/audit-actions";
+import type { PauseLiftRefusal } from "@millionsend/core/deliverability";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useCallback, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
 import { CopyChip } from "@/components/copy-chip";
 import { DotParts } from "@/components/dot-parts";
-import { KvRow } from "@/components/kv-row";
+import { KV_SENTENCE, KvRow } from "@/components/kv-row";
 import { ListFooter } from "@/components/list-footer";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -24,9 +25,19 @@ import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
+import { trpcErrorCode } from "@/lib/trpc-error";
 import { useTeamActions } from "../team-actions";
+import { LiftPauseDialog, useLiftRefusal } from "../teams/hold-dialogs";
 import { LinkedTeams } from "../teams/linked-teams";
-import { CardHead, LINK_BUTTON, LoadErrorCard, Rate7d, ReasonLabel, usePlanLabel } from "./parts";
+import {
+  CardHead,
+  FlagStatusBadge,
+  LINK_BUTTON,
+  LoadErrorCard,
+  Rate7d,
+  ReasonLabel,
+  usePlanLabel,
+} from "./parts";
 import { RevealCell, type RevealTeam, useContentReveal } from "./reveal";
 import { WaitingList } from "./waiting-list";
 
@@ -37,11 +48,8 @@ const DIALOG_LEAD: React.CSSProperties = {
   color: "var(--ms-muted)",
   textWrap: "pretty",
 };
-// The monitoring rows are sentences, not figures: sans, left, the body size.
-const KV_VALUE: React.CSSProperties = {
-  fontFamily: "var(--ms-font-sans)",
-  fontSize: 13,
-};
+// The safety.flags run a lift kicks clears the guardrail flag about 30 s later.
+const FLAG_SYNC_MS = 35_000;
 const SEVERITY_DOT: Record<string, string> = {
   critical: "var(--ms-danger)",
   major: "var(--ms-danger)",
@@ -72,6 +80,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const setOverride = useMutation(trpc.console.monitor.setOverride.mutationOptions());
   const clearOverride = useMutation(trpc.console.monitor.clearOverride.mutationOptions());
   const resumeMonitor = useMutation(trpc.console.monitor.resumeBroadcasts.mutationOptions());
+  const lift = useMutation(trpc.console.teams.liftPause.mutationOptions());
+  const liftRefusal = useLiftRefusal();
+  const teamsT = useTranslations("console.teams");
   const monitorT = useTranslations("console.safety.review.monitor");
   const tiers = useTranslations("console.safety.tiers");
 
@@ -111,6 +122,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const [flagDialog, setFlagDialog] = useState(false);
   const [note, setNote] = useState("");
   const [emailTab, setEmailTab] = useState<"flagged" | "all">("flagged");
+  const [lifting, setLifting] = useState(false);
+  const flagSync = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(flagSync.current), []);
   const closeFlagDialog = useCallback(() => {
     setFlagDialog(false);
     setNote("");
@@ -192,6 +206,32 @@ export function ReviewView({ teamId }: { teamId: string }) {
       },
     );
   };
+  const { pauseLift } = standing;
+  const liftReason = pauseLift.refusal ? liftRefusal(pauseLift.refusal, pauseLift) : null;
+  const submitLift = (input: { reference: string; note: string; notify: boolean }) =>
+    lift.mutate(
+      { id: team.id, ...input },
+      {
+        onSuccess: ({ hardBounces }) => {
+          setLifting(false);
+          toast(teamsT("toast.lifted", { team: team.name, bounces: hardBounces }));
+          refetch();
+          clearTimeout(flagSync.current);
+          flagSync.current = setTimeout(refetch, FLAG_SYNC_MS);
+        },
+        onError: async (error) => {
+          if (trpcErrorCode(error) !== "PRECONDITION_FAILED") {
+            toast(teamsT("toast.error", { message: error.message }), "danger");
+            return;
+          }
+          setLifting(false);
+          // From a fresh read: the page's own dates are as old as the button that was clicked.
+          const { data } = await query.refetch();
+          const fresh = data?.standing.pauseLift ?? pauseLift;
+          toast(liftRefusal(error.message as PauseLiftRefusal, fresh), "danger");
+        },
+      },
+    );
 
   const heldForReview = team.suspensionReason === "review";
   const standingBadge = heldForReview
@@ -230,11 +270,11 @@ export function ReviewView({ teamId }: { teamId: string }) {
         }
         actions={
           <>
-            <RequestAccessButton
-              on={contentReveal}
-              disabled={!contentReveal || flaggedEmails.length === 0}
+            <HeaderButton
+              primary
               label={revealT("request")}
-              off={revealT("off")}
+              disabled={!contentReveal || flaggedEmails.length === 0}
+              reason={contentReveal ? null : revealT("off")}
               onClick={revealRequest(flaggedEmails[0] ?? null)}
             />
             <button
@@ -248,6 +288,14 @@ export function ReviewView({ teamId }: { teamId: string }) {
             >
               {safety(team.broadcastsPausedByOperatorAt ? "menu.resume" : "menu.pause")}
             </button>
+            {standing.guardrail === "paused" ? (
+              <HeaderButton
+                label={safety("menu.lift")}
+                disabled={liftReason !== null}
+                reason={liftReason}
+                onClick={() => setLifting(true)}
+              />
+            ) : null}
             {flag ? (
               <Tooltip
                 inline
@@ -352,7 +400,23 @@ export function ReviewView({ teamId }: { teamId: string }) {
             complaintSends={standing.complaintSent7d > 0}
           />
         </Tile>
-        <Tile label={t("tiles.bounces")}>
+        <Tile
+          label={
+            standing.lifted.hardBounced > 0 ? (
+              <Tooltip
+                inline
+                text={t("tiles.bouncesLifted", {
+                  bounces: standing.lifted.hardBounced,
+                  sent: standing.lifted.sent,
+                })}
+              >
+                {t("tiles.bounces")}
+              </Tooltip>
+            ) : (
+              t("tiles.bounces")
+            )
+          }
+        >
           <Rate7d rate={standing.hardBounceRate7d} sent={standing.sent7d} />
         </Tile>
         <Tile label={t("tiles.sent7d")}>{nf.format(standing.sent7d)}</Tile>
@@ -427,7 +491,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
         ) : (
           <>
             <dl className="ms-kv ms-kv-cols" style={{ marginBottom: 16 }}>
-              <KvRow label={monitorT("tier")} valueStyle={KV_VALUE}>
+              <KvRow label={monitorT("tier")} valueStyle={KV_SENTENCE}>
                 {[
                   monitorT("tierValue", {
                     tier: tiers(monitor.tier),
@@ -436,14 +500,14 @@ export function ReviewView({ teamId }: { teamId: string }) {
                   ...monitor.decision.elevated.map((e) => monitorT(`elevated.${e}`)),
                 ].join(" · ")}
               </KvRow>
-              <KvRow label={monitorT("samples")} valueStyle={KV_VALUE}>
+              <KvRow label={monitorT("samples")} valueStyle={KV_SENTENCE}>
                 {monitorT("samplesValue", {
                   samples: monitor.samples7d,
                   flagged: monitor.flagged7d,
                   unjudged: monitor.unjudged7d,
                 })}
               </KvRow>
-              <KvRow label={monitorT("verdicts")} valueStyle={KV_VALUE}>
+              <KvRow label={monitorT("verdicts")} valueStyle={KV_SENTENCE}>
                 {monitor.topReasons.length > 0
                   ? monitorT.rich("verdictsReasons", {
                       clean: monitor.judged7d - monitor.flagged7d,
@@ -456,26 +520,26 @@ export function ReviewView({ teamId }: { teamId: string }) {
                       flagged: monitor.flagged7d,
                     })}
               </KvRow>
-              <KvRow label={monitorT("lastSample")} valueStyle={KV_VALUE}>
+              <KvRow label={monitorT("lastSample")} valueStyle={KV_SENTENCE}>
                 {monitor.lastSampleAt ? (
                   <RelativeTime date={monitor.lastSampleAt} />
                 ) : (
                   common("none")
                 )}
               </KvRow>
-              <KvRow label={monitorT("model")} valueStyle={KV_VALUE}>
+              <KvRow label={monitorT("model")} valueStyle={KV_SENTENCE}>
                 {monitor.judge.on
                   ? `${monitor.judge.provider} · ${monitor.judge.model}`
                   : monitorT("modelOff")}
               </KvRow>
-              <KvRow label={monitorT("override")} valueStyle={KV_VALUE}>
+              <KvRow label={monitorT("override")} valueStyle={KV_SENTENCE}>
                 {monitor.override
                   ? monitorT("overrideValue", {
                       until: formatDayTime(monitor.override.until, locale),
                     })
                   : monitorT("overrideNone")}
               </KvRow>
-              <KvRow label={monitorT("pause")} valueStyle={KV_VALUE}>
+              <KvRow label={monitorT("pause")} valueStyle={KV_SENTENCE}>
                 {monitor.broadcastsPausedAt
                   ? monitorT("pauseValue", {
                       since: formatDayTime(monitor.broadcastsPausedAt, locale),
@@ -547,8 +611,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
           <CardHead title={t("flagTitle")} />
           {flag ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
-              <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <ReasonLabel reason={flag.reason} detail={flag.detail} />
+                {flagOpen ? null : <FlagStatusBadge status="cleared" suspendedAt={null} />}
               </div>
               <div style={{ color: "var(--ms-muted)" }}>
                 {t(flag.openedBy ? "flagOpenedBy" : "flagOpenedAuto")} ·{" "}
@@ -818,6 +883,15 @@ export function ReviewView({ teamId }: { teamId: string }) {
           </button>
         </ModalFooter>
       </Modal>
+      {lifting ? (
+        <LiftPauseDialog
+          name={team.name}
+          lift={pauseLift}
+          pending={lift.isPending}
+          onClose={() => setLifting(false)}
+          onSubmit={submitLift}
+        />
+      ) : null}
       {actions.dialogs}
       {reveal.dialogs}
     </>
@@ -1303,29 +1377,38 @@ function ReasonCodes({ codes }: { codes: string[] }) {
   ));
 }
 
-/** The header's primary action; the tooltip exists only when there is a reason to give. */
-function RequestAccessButton({
-  on,
-  disabled,
+/**
+ * A header action; the tooltip exists only when there is a reason to give.
+ * The inline trigger takes the focus a disabled button cannot, so the
+ * reason reaches a keyboard user too.
+ */
+function HeaderButton({
   label,
-  off,
+  primary = false,
+  disabled,
+  reason,
   onClick,
 }: {
-  on: boolean;
-  disabled: boolean;
   label: string;
-  off: string;
+  primary?: boolean;
+  disabled: boolean;
+  reason: string | null;
   onClick: () => void;
 }) {
   const button = (
-    <button type="button" className="ms-btn ms-btn-primary" disabled={disabled} onClick={onClick}>
+    <button
+      type="button"
+      className={`ms-btn ${primary ? "ms-btn-primary" : "ms-btn-secondary"}`}
+      disabled={disabled}
+      onClick={onClick}
+    >
       {label}
     </button>
   );
-  return on ? (
+  return reason === null ? (
     button
   ) : (
-    <Tooltip inline text={off}>
+    <Tooltip inline text={reason}>
       {button}
     </Tooltip>
   );

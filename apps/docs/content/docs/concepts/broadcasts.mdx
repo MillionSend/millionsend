@@ -205,6 +205,10 @@ Gmail and Apple never report one, so their cell shows a dash.
   are 100 such sends. On the Free plan they count from the first email,
   judged together across all the Free teams you created, deleted ones
   included, and a pause holds every one of them.
+- An operator can lift a bounce pause early after a review (on MillionSend
+  Cloud, ask support; on the Free plan the pause lifts on its own within two
+  days). Bounces after the lift count as usual, and a complaint pause is
+  never lifted early.
 - If the platform's aggregate bounce rate in your sender's SES region nears
   the line where SES acts on the account, broadcast sends in that region are
   refused with `403 broadcasts_paused` until the rate recovers. When it is
@@ -218,6 +222,10 @@ See the [API reference](/api-reference) for all broadcast endpoints.
 
 ## Recent changes
 
+- An operator can now lift a bounce pause early after a review (on
+  MillionSend Cloud, ask support; on the Free plan the pause lifts on its own
+  within two days). Bounces after the lift count as usual, and a complaint
+  pause is never lifted early.
 - Complaints are dated by the day their email was sent, as SES dates its own
   rate, not the day they arrive: in the guardrail, the account score and
   the complaint rate on the Metrics page. A late complaint about older mail

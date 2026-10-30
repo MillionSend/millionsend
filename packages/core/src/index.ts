@@ -383,7 +383,10 @@ export {
   MIN_WARN_COMPLAINTS,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
+  PAUSE_LIFT_COOLDOWN_DAYS,
   PAUSE_WINDOW_DAYS,
+  type PauseLiftRefusal,
+  pauseLiftRefusal,
   THROTTLED_BROADCAST_RATE_PER_SECOND,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
@@ -579,6 +582,7 @@ export {
   type MonitorSettingSource,
   type MonitorSettings,
   type MonitorSettingsRow,
+  monitorFlagLine,
   monitorSettingDefault,
   monitorSettingsReader,
   monitorThresholdsOrdered,
@@ -619,6 +623,11 @@ export {
   ownerDomain,
   registrableDomain,
 } from "./org-domain.js";
+export {
+  liftDeliverabilityPause,
+  type PauseLiftStanding,
+  pauseLiftStanding,
+} from "./pause-lift.js";
 export { splitPersonName } from "./person-name.js";
 export {
   findPixCodes,

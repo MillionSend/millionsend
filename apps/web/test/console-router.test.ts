@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { BillingStripe } from "@millionsend/billing";
-import { DAY_MS, recordAudit, upgradesHeld, utcDay } from "@millionsend/core";
+import { DAY_MS, recordAudit, sendRefusal, upgradesHeld, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -21,18 +21,21 @@ import type { TeamRole } from "@/server/membership";
 import { createCaller } from "@/server/routers";
 import { setConsoleTeamsDeps } from "@/server/routers/console/teams";
 
-const h = vi.hoisted(() => ({ sent: [] as { to: string; subject: string }[] }));
+const h = vi.hoisted(() => ({
+  sent: [] as { to: string; subject: string; text: string }[],
+  crons: [] as string[],
+}));
 vi.mock("@/server/system-mail", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/system-mail")>();
   return {
     ...actual,
-    sendAccountMail: (m: { to: string; subject: string }) => void h.sent.push(m),
+    sendAccountMail: (m: { to: string; subject: string; text: string }) => void h.sent.push(m),
   };
 });
 
 // The console kicks the quota drain after a raise; no pg-boss in tests.
 vi.mock("@/server/queue", () => ({
-  getQueue: async () => ({ runCronNow: async () => {} }),
+  getQueue: async () => ({ runCronNow: async (name: string) => void h.crons.push(name) }),
   enqueueEmailSend: async () => {},
   enqueueWebhookDeliveries: async () => {},
   enqueueRecipientErase: async () => {},
@@ -1911,5 +1914,104 @@ describe("console.safety.list and a 7-day window with nothing to rate", () => {
     await db
       .delete(schema.teams)
       .where(inArray(schema.teams.id, [gmailOnly, reporting, quiet, lastWeek]));
+  });
+});
+
+describe("console.teams.liftPause", () => {
+  // The clock stands still: the lift and the review take their pause window
+  // from their own now, a day later than this test's if UTC midnight passed.
+  beforeAll(() => {
+    vi.useFakeTimers({ now: new Date().setUTCHours(12, 30, 0, 0), toFake: ["Date"] });
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
+  it("lifts a bounce pause once per cooldown, telling the owner but keeping the review's notes from the team", async () => {
+    vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@millionsend.test>");
+    const c = schema.usageCounters;
+    const lifting = await createTeam(db, "lift-acme");
+    await db.insert(schema.teamMembers).values({ teamId: lifting, userId: MEMBER, role: "owner" });
+    await db
+      .insert(c)
+      .values({ teamId: lifting, day: utcDay(Date.now()), sent: 200, hardBounced: 20 });
+    await db.insert(schema.emails).values({
+      teamId: lifting,
+      from: "hi@acme.example",
+      to: ["ada@example.com"],
+      subject: "Welcome",
+      latestStatus: "queued_quota",
+    });
+    h.sent = [];
+    h.crons = [];
+
+    const { standing } = await operator().console.safety.review({ teamId: lifting });
+    expect(standing.guardrail).toBe("paused");
+    expect(standing.pauseLift).toEqual({
+      refusal: null,
+      since: utcDay(Date.now() - DAY_MS),
+      sent: 200,
+      hardBounced: 20,
+      rate: 0.1,
+      parked: 1,
+      lastLiftAt: null,
+      nextLiftAt: null,
+    });
+
+    const lift = {
+      id: lifting,
+      reference: "Ticket 1042",
+      note: "A sign-up form let fake addresses through. It checks them now.",
+    };
+    await expect(member().console.teams.liftPause(lift)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      operator().console.teams.liftPause({ ...lift, reference: "  " }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    expect(await operator().console.teams.liftPause(lift)).toEqual({ sent: 200, hardBounces: 20 });
+    expect(await sendRefusal(db, lifting)).toBeNull();
+    const after = (await operator().console.safety.review({ teamId: lifting })).standing;
+    expect(after).toMatchObject({
+      guardrail: "ok",
+      sent7d: 200,
+      lifted: { sent: 200, hardBounced: 20 },
+      pauseLift: { refusal: "not_paused", sent: 0, hardBounced: 0 },
+    });
+    expect(after.pauseLift.lastLiftAt).toBeInstanceOf(Date);
+    expect(h.sent).toMatchObject([
+      { to: "bob@example.com", subject: "Your sending pause is lifted" },
+    ]);
+    expect(h.sent[0]?.text).toContain(
+      "no longer count toward its bounce rate. Mail that was waiting is going out now.",
+    );
+    expect(h.crons).toEqual(["quota.drain", "safety.flags"]);
+    const [row] = await auditRows("team.sending_pause_lifted");
+    expect(row).toMatchObject({ teamId: lifting, actorId: `user:${OPERATOR}` });
+    expect(row?.data).toEqual({
+      name: "lift-acme",
+      reference: lift.reference,
+      note: lift.note,
+      since: utcDay(Date.now() - DAY_MS),
+      sent: 200,
+      hardBounces: 20,
+      notified: true,
+    });
+    const owner = await callerFor(MEMBER, lifting, "owner").audit.list({});
+    expect(owner.items.find((r) => r.action === "team.sending_pause_lifted")?.data).toMatchObject({
+      reference: null,
+      note: null,
+      sent: 200,
+    });
+
+    // 12 hard bounces in the 150 sends after the lift: past the line again.
+    await db.update(c).set({ sent: 350, hardBounced: 32 }).where(eq(c.teamId, lifting));
+    expect((await sendRefusal(db, lifting))?.reason).toBe("sending_paused");
+    await expect(operator().console.teams.liftPause(lift)).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: "cooldown",
+    });
+    await db.delete(schema.teams).where(eq(schema.teams.id, lifting));
   });
 });

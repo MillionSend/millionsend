@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_MS, utcDay } from "../src/utc-day.js";
+import { DAY_MS, utcDay, windowStartDay } from "../src/utc-day.js";
 
 describe("utcDay", () => {
   it("formats as YYYY-MM-DD in UTC regardless of local time", () => {
@@ -14,5 +14,12 @@ describe("utcDay", () => {
 
   it("pins the day length constant", () => {
     expect(DAY_MS).toBe(86_400_000);
+  });
+});
+
+describe("windowStartDay", () => {
+  it("counts the day of `at` as the window's last", () => {
+    expect(windowStartDay(2, Date.parse("2026-08-14T00:00:01Z"))).toBe("2026-08-13");
+    expect(windowStartDay(1, new Date("2026-08-14T23:59:59Z"))).toBe("2026-08-14");
   });
 });
