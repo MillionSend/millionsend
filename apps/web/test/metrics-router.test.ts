@@ -454,4 +454,26 @@ describe("metrics.accountScoreDetails", () => {
     expect(enough).toMatchObject({ complaintSent: 100, complaintsJudged: true });
     expect(enough.outcomeScoreTenths).toBeLessThan(100);
   });
+
+  it("judges hard bounces only once enough sends count toward them after a lift", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(0),
+      sent: 1_000,
+      hardBounced: 20,
+      excludedSent: 950,
+      excludedHardBounced: 15,
+    });
+
+    const few = await callerFor(teamId).metrics.accountScoreDetails();
+    expect(few).toMatchObject({ sent: 1_000, bounceSent: 50, bouncesJudged: false });
+    expect(few.hardBounceRate).toBeCloseTo(5 / 50);
+    expect(few.outcomeScoreTenths).toBe(100);
+
+    await db.update(schema.usageCounters).set({ excludedSent: 900 });
+    const enough = await callerFor(teamId).metrics.accountScoreDetails();
+    expect(enough).toMatchObject({ bounceSent: 100, bouncesJudged: true });
+    expect(enough.outcomeScoreTenths).toBeLessThan(100);
+  });
 });

@@ -6,14 +6,14 @@ import { auditRow } from "./audit.js";
 import {
   type DeliverabilityHealth,
   fetchDeliverabilityHealth,
-  PAUSE_LIFT_COOLDOWN_DAYS,
   PAUSE_WINDOW_DAYS,
   type PauseLiftRefusal,
+  pauseLiftCooldownEnd,
   pauseLiftRefusal,
 } from "./deliverability.js";
 import { clearNotifications } from "./notifications.js";
 import { freePoolOwner } from "./plans.js";
-import { DAY_MS, windowStartDay } from "./utc-day.js";
+import { windowStartDay } from "./utc-day.js";
 
 export interface PauseLiftStanding {
   refusal: PauseLiftRefusal | null;
@@ -91,9 +91,7 @@ export async function pauseLiftStanding(
     since: windowStartDay(PAUSE_WINDOW_DAYS, now),
     parked: parked?.n ?? 0,
     lastLiftAt,
-    nextLiftAt: lastLiftAt
-      ? new Date(lastLiftAt.getTime() + PAUSE_LIFT_COOLDOWN_DAYS * DAY_MS)
-      : null,
+    nextLiftAt: lastLiftAt ? pauseLiftCooldownEnd(lastLiftAt) : null,
     name: team.name,
   };
 }

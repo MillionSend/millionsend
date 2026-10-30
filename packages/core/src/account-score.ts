@@ -29,7 +29,8 @@ export const ACCOUNT_SCORE_WINDOW_DAYS = 30;
  * Below this many sends in the window, the outcome sub-score is withheld
  * ("not enough data") rather than fabricated from a tiny sample — the
  * headline then falls back to the content sub-score alone. The complaint
- * rate weighs on the outcome only once this many sends could draw one.
+ * rate weighs on the outcome only once this many sends could draw one, and
+ * the hard-bounce rate only once this many count toward it after a pause lift.
  */
 export const MIN_OUTCOME_SENDS = 100;
 
@@ -68,6 +69,8 @@ export interface AccountScore {
   insufficientOutcomeData: boolean;
   guardrailStatus: DeliverabilityStatus;
   sent: number;
+  /** Under MIN_OUTCOME_SENDS the hard-bounce rate is reported but left out of the outcome sub-score. */
+  bounceSent: number;
   /** Under MIN_OUTCOME_SENDS the complaint rate is reported but left out of the outcome sub-score. */
   complaintSent: number;
   contentRecipients: number;
@@ -116,9 +119,10 @@ export function computeAccountScore(input: AccountScoreInput): AccountScore {
 
   const insufficientOutcomeData = sent < MIN_OUTCOME_SENDS;
   const judgedComplaintRate = complaintSent < MIN_OUTCOME_SENDS ? 0 : complaintRate;
+  const judgedBounceRate = bounceSent < MIN_OUTCOME_SENDS ? 0 : hardBounceRate;
   const outcomeScoreTenths = insufficientOutcomeData
     ? null
-    : Math.round(Math.max(0, 100 - outcomePenaltyTenths(judgedComplaintRate, hardBounceRate)));
+    : Math.round(Math.max(0, 100 - outcomePenaltyTenths(judgedComplaintRate, judgedBounceRate)));
 
   const blendTenths =
     outcomeScoreTenths !== null && contentScoreTenths !== null
@@ -151,6 +155,7 @@ export function computeAccountScore(input: AccountScoreInput): AccountScore {
     insufficientOutcomeData,
     guardrailStatus,
     sent,
+    bounceSent,
     complaintSent,
     contentRecipients: input.contentRecipients,
     windowDays: ACCOUNT_SCORE_WINDOW_DAYS,

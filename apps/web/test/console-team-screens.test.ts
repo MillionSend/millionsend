@@ -16,6 +16,12 @@ const h = vi.hoisted(() => ({
   monitor: undefined as unknown,
   guard: vi.fn(),
   mutated: [] as unknown[],
+  /** The last mutate call's callbacks. */
+  callbacks: undefined as
+    | { onSuccess?: (data: unknown) => void; onError?: (error: unknown) => Promise<void> }
+    | undefined,
+  refetch: vi.fn<() => Promise<{ data: unknown }>>(),
+  toast: vi.fn(),
 }));
 
 // The real English catalogs, so the test reads what the operator reads.
@@ -63,11 +69,14 @@ vi.mock("@tanstack/react-query", () => ({
           isPending: false,
           isError: false,
           isSuccess: true,
-          refetch: () => {},
+          refetch: h.refetch,
         }
       : { data: undefined, isPending: true, isError: false, isSuccess: false, error: null },
   useMutation: () => ({
-    mutate: (variables: unknown) => h.mutated.push(variables),
+    mutate: (variables: unknown, callbacks?: typeof h.callbacks) => {
+      h.mutated.push(variables);
+      h.callbacks = callbacks;
+    },
     reset: () => {},
     isPending: false,
     isSuccess: false,
@@ -78,6 +87,7 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 // The guard's prompts need a browser; a server render can only check it is wired.
 vi.mock("@/lib/use-unsaved-warning", () => ({ useUnsavedChangesWarning: h.guard }));
+vi.mock("@/components/toast", () => ({ toast: h.toast }));
 vi.mock("@/server/queue", () => ({
   getQueue: async () => ({ runCronNow: async () => {} }),
   enqueueEmailSend: async () => {},
@@ -258,27 +268,37 @@ describe("the review page's Lift sending pause", () => {
   let root: Root;
 
   beforeEach(() => {
+    // The clock stands still, so the review's pause window and this suite's
+    // agree even when a UTC midnight passes mid-test.
+    vi.useFakeTimers({ now: new Date().setUTCHours(12, 30, 0, 0), toFake: ["Date"] });
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
+    h.refetch.mockImplementation(async () => ({ data: h.review }));
   });
 
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
     h.mutated = [];
+    h.callbacks = undefined;
+    h.refetch.mockReset();
+    h.toast.mockReset();
   });
 
   /** A new team's review page, its counters reading `today`, and its lift button if any. */
   async function open(
     slug: string,
-    today?: { sent: number; hardBounced?: number; complained?: number },
+    today?: Omit<typeof schema.usageCounters.$inferInsert, "teamId" | "day">,
+    flag?: Omit<typeof schema.teamFlags.$inferInsert, "teamId">,
   ) {
     const id = await createTeam(db, slug);
     if (today)
       await db.insert(schema.usageCounters).values({ teamId: id, day: utcDay(), ...today });
+    if (flag) await db.insert(schema.teamFlags).values({ teamId: id, ...flag });
     h.review = await createCaller({
       db,
       session: {
@@ -301,6 +321,20 @@ describe("the review page's Lift sending pause", () => {
       Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(field, value);
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
+  const liftDialog = () => container.querySelector('[data-title^="Lift sending pause"]');
+  /** A paused team's lift confirmed in its dialog, the mutation's callbacks left in h.callbacks. */
+  async function confirmLift(slug: string) {
+    const { button } = await open(slug, { sent: 200, hardBounced: 20 });
+    await act(async () => button?.click());
+    await type(liftDialog()?.querySelector("input"), "Ticket 1042");
+    await type(
+      liftDialog()?.querySelector("textarea"),
+      "Fake sign-ups. The form checks addresses now.",
+    );
+    await act(async () =>
+      liftDialog()?.querySelector<HTMLButtonElement>('button[type="submit"]')?.click(),
+    );
+  }
 
   it("is offered while a bounce pause holds, and not at all otherwise", async () => {
     expect((await open("lift-quiet")).button).toBeUndefined();
@@ -350,6 +384,86 @@ describe("the review page's Lift sending pause", () => {
         notify: true,
       },
     ]);
+  });
+
+  it("reads the page at once and again after the flag sync, unless it was left", async () => {
+    await confirmLift("lift-synced");
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    h.refetch.mockClear();
+    const lifted = () => act(async () => h.callbacks?.onSuccess?.({ sent: 200, hardBounces: 20 }));
+    await lifted();
+    expect(h.toast).toHaveBeenCalledWith(
+      "Sending resumed for lift-synced · 20 hard bounces left out",
+    );
+    expect(liftDialog()).toBeNull();
+    expect(h.refetch).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTime(35_000));
+    expect(h.refetch).toHaveBeenCalledTimes(2);
+    // Left before the flag sync runs: nothing reads the page once it is gone.
+    await lifted();
+    await act(async () => root.unmount());
+    await act(async () => vi.advanceTimersByTime(35_000));
+    expect(h.refetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("answers a refused confirm with the refusal, dated from a fresh read", async () => {
+    await confirmLift("lift-refused");
+    const review = h.review as { standing: { pauseLift: object } };
+    h.refetch.mockResolvedValueOnce({
+      data: {
+        ...review,
+        standing: {
+          ...review.standing,
+          pauseLift: {
+            ...review.standing.pauseLift,
+            refusal: "cooldown",
+            lastLiftAt: new Date("2026-08-14T15:00:00.000Z"),
+            nextLiftAt: new Date("2026-09-14T00:00:00.000Z"),
+          },
+        },
+      },
+    });
+    await act(async () =>
+      h.callbacks?.onError?.({ data: { code: "PRECONDITION_FAILED" }, message: "cooldown" }),
+    );
+    expect(liftDialog()).toBeNull();
+    expect(h.toast).toHaveBeenCalledWith(
+      "Lifted on Aug 14. The next lift is possible from Sep 14.",
+      "danger",
+    );
+  });
+
+  it("tells on the hard-bounce tile what a lift left out of the rate", async () => {
+    await open("lift-lifted", {
+      sent: 300,
+      hardBounced: 20,
+      excludedSent: 200,
+      excludedHardBounced: 20,
+    });
+    const label = [...container.querySelectorAll<HTMLElement>(".ms-tooltip-trigger")].find(
+      (el) => el.textContent === "Hard bounces 7d",
+    );
+    await act(async () => label?.focus());
+    expect(document.querySelector(".ms-tooltip")?.textContent).toBe(
+      "The rate leaves out 20 hard bounces and 200 sends lifted after review.",
+    );
+  });
+
+  it("marks a flag the cron has cleared on the Flag card", async () => {
+    await open(
+      "lift-cleared",
+      { sent: 300 },
+      {
+        reason: "guardrail",
+        status: "cleared",
+        detail: { guardrail: "paused", metric: "hard_bounce", rate: 0.07 },
+        clearedAt: new Date(),
+      },
+    );
+    const card = [...container.querySelectorAll("h3")]
+      .find((title) => title.textContent === "Flag")
+      ?.closest(".ms-card");
+    expect(card?.querySelector(".ms-badge")?.textContent).toBe("Cleared");
   });
 });
 

@@ -72,6 +72,7 @@
       "complaintBasis": "over {sent} sends to inboxes that report spam",
       "bounceBasis": "over {sent} sends",
       "complaintsTooFew": "Not enough mail to inboxes that report spam to judge complaints yet.",
+      "bouncesTooFew": "Not enough sends left in the rate after the review to judge hard bounces yet.",
       "outcomeNote": "The lines follow Google Postmaster: keep complaints under 0.10% and never reach 0.30%.",
       "lift": "How to raise",
       "liftLine": "{title} · account score to {score}",

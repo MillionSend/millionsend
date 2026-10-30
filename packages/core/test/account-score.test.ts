@@ -96,6 +96,21 @@ describe("computeAccountScore", () => {
     expect(s.sent).toBe(10_000);
   });
 
+  it("judges hard bounces only once enough sends count toward them after a lift", () => {
+    // 10 of the 99 sends left in the rate bounced: reported, never charged.
+    const few = computeAccountScore(
+      input({ sent: 1_000, bounceSent: MIN_OUTCOME_SENDS - 1, hardBounced: 10 }),
+    );
+    expect(few.hardBounceRate).toBeCloseTo(10 / 99);
+    expect(few.bounceSent).toBe(MIN_OUTCOME_SENDS - 1);
+    expect(few.insufficientOutcomeData).toBe(false);
+    expect(few.outcomeScoreTenths).toBe(100);
+    const enough = computeAccountScore(
+      input({ sent: 1_000, bounceSent: MIN_OUTCOME_SENDS, hardBounced: 10 }),
+    );
+    expect(enough.outcomeScoreTenths).toBe(40);
+  });
+
   it("the governor keeps perfect content from masking bad outcomes", () => {
     const s = computeAccountScore(
       input({

@@ -12,6 +12,7 @@ import {
   MIN_PAUSE_COMPLAINTS,
   MIN_PAUSE_HARD_BOUNCES,
   PAUSE_WINDOW_DAYS,
+  pauseLiftCooldownEnd,
   pauseLiftRefusal,
   THROTTLED_BROADCAST_RATE_PER_SECOND,
   type WindowCounts,
@@ -232,7 +233,10 @@ describe("pauseLiftRefusal", () => {
     expect(refusal({ monitorRisk: 0.5 })).toBe("monitor");
     expect(refusal({ monitorRisk: 0.9, monitorFlagRisk: Number.POSITIVE_INFINITY })).toBeNull();
     expect(refusal({ lastLiftAt: daysAgo(29) })).toBe("cooldown");
-    expect(refusal({ lastLiftAt: daysAgo(30) })).toBeNull();
+    // The cooldown runs to the UTC midnight after 30 days, the day its refusal names.
+    expect(refusal({ lastLiftAt: daysAgo(30) })).toBe("cooldown");
+    expect(pauseLiftCooldownEnd(daysAgo(30))).toEqual(new Date("2026-08-15T00:00:00.000Z"));
+    expect(refusal({ lastLiftAt: new Date("2026-07-15T00:00:00.000Z") })).toBeNull();
   });
 });
 

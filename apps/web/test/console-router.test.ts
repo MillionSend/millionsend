@@ -1918,6 +1918,15 @@ describe("console.safety.list and a 7-day window with nothing to rate", () => {
 });
 
 describe("console.teams.liftPause", () => {
+  // The clock stands still: the lift and the review take their pause window
+  // from their own now, a day later than this test's if UTC midnight passed.
+  beforeAll(() => {
+    vi.useFakeTimers({ now: new Date().setUTCHours(12, 30, 0, 0), toFake: ["Date"] });
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
   it("lifts a bounce pause once per cooldown, telling the owner but keeping the review's notes from the team", async () => {
     vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@millionsend.test>");
     const c = schema.usageCounters;
@@ -1974,7 +1983,9 @@ describe("console.teams.liftPause", () => {
     expect(h.sent).toMatchObject([
       { to: "bob@example.com", subject: "Your sending pause is lifted" },
     ]);
-    expect(h.sent[0]?.text).toContain("Mail that was waiting is going out now.");
+    expect(h.sent[0]?.text).toContain(
+      "no longer count toward its bounce rate. Mail that was waiting is going out now.",
+    );
     expect(h.crons).toEqual(["quota.drain", "safety.flags"]);
     const [row] = await auditRows("team.sending_pause_lifted");
     expect(row).toMatchObject({ teamId: lifting, actorId: `user:${OPERATOR}` });

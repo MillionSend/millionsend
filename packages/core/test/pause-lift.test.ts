@@ -20,14 +20,14 @@ const uc = schema.usageCounters;
 const now = new Date("2026-08-14T12:00:00.000Z");
 const monitorFlagRisk = MONITOR_SETTING_DEFAULTS.flagRisk;
 const day = (daysAgo: number) => utcDay(now.getTime() - daysAgo * DAY_MS);
-const lift = (teamId: string) =>
+const lift = (teamId: string, flagRisk = monitorFlagRisk) =>
   liftDeliverabilityPause(db, {
     teamId,
     operatorUserId: "op-1",
     reference: "Ticket 1042",
     note: "A sign-up form let fake addresses through. It checks them now.",
     notified: true,
-    monitorFlagRisk,
+    monitorFlagRisk: flagRisk,
     now,
   });
 
@@ -129,10 +129,10 @@ describe("liftDeliverabilityPause", () => {
     expect(standing.health.status).toBe("paused");
     expect(standing.refusal).toBe("cooldown");
     expect(standing.lastLiftAt).toEqual(now);
-    expect(standing.nextLiftAt).toEqual(new Date(now.getTime() + 30 * DAY_MS));
+    expect(standing.nextLiftAt).toEqual(new Date("2026-09-14T00:00:00.000Z"));
   });
 
-  it("refuses a suspended team, a Free pool's team and a team with another open flag", async () => {
+  it("refuses a suspended team, a Free pool's team, another open flag and the monitor's risk", async () => {
     const suspended = await pausedTeam("acme-suspended");
     await db
       .update(schema.teams)
@@ -143,14 +143,26 @@ describe("liftDeliverabilityPause", () => {
     await db
       .insert(schema.teamFlags)
       .values({ teamId: branded, reason: "brand", detail: { brand: "Example" } });
+    const monitored = await pausedTeam("acme-monitored");
+    // Settled verdicts over the flag line: the risk reads about 0.73.
+    await db.insert(schema.teamMonitor).values({
+      teamId: monitored,
+      firstSendAt: new Date(now.getTime() - 90 * DAY_MS),
+      riskNum: 9,
+      riskDen: 10,
+      riskUpdatedAt: now,
+    });
 
     expect(await lift(suspended)).toEqual({ refusal: "suspended" });
     expect(await lift(pooled)).toEqual({ refusal: "free" });
     expect(await lift(branded)).toEqual({ refusal: "flagged" });
+    expect(await lift(monitored)).toEqual({ refusal: "monitor" });
     const audit = await db
       .select()
       .from(schema.auditLog)
-      .where(inArray(schema.auditLog.teamId, [suspended, pooled, branded]));
+      .where(inArray(schema.auditLog.teamId, [suspended, pooled, branded, monitored]));
     expect(audit).toEqual([]);
+    // With the judge off there is no flag line to be over.
+    expect(await lift(monitored, Number.POSITIVE_INFINITY)).toMatchObject({ hardBounces: 20 });
   });
 });

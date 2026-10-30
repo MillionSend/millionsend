@@ -72,6 +72,7 @@
       "complaintBasis": "sobre {sent} envios para caixas que avisam sobre spam",
       "bounceBasis": "sobre {sent} envios",
       "complaintsTooFew": "Ainda não dá para avaliar as reclamações: há poucos envios para caixas que avisam sobre spam.",
+      "bouncesTooFew": "Ainda não dá para avaliar os bounces permanentes: sobraram poucos envios na taxa depois da análise.",
       "outcomeNote": "Os limites seguem o Google Postmaster: reclamações abaixo de 0,10% e nunca chegando a 0,30%.",
       "lift": "Como melhorar",
       "liftLine": "{title} · nota da conta sobe para {score}",

@@ -224,6 +224,7 @@ export const metricsRouter = router({
     return {
       ...computeAccountScore(input),
       complaintsJudged: input.complaintSent >= MIN_OUTCOME_SENDS,
+      bouncesJudged: input.bounceSent >= MIN_OUTCOME_SENDS,
       checksTotal: CHECKS.length,
       factors: factors.map((factor) => ({
         id: factor.id,
