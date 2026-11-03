@@ -127,6 +127,7 @@ export interface AcceptEmailPayload {
   subject: string;
   html?: string | undefined;
   text?: string | undefined;
+  tracking?: { open?: false | undefined; click?: false | undefined } | undefined;
   tags?: Record<string, string> | null | undefined;
   /** Custom SMTP headers; transport-owned names are rejected at the wire. */
   headers?: Record<string, string> | undefined;
@@ -639,7 +640,11 @@ export async function acceptEmail(
   const emailId = randomUUID();
   const owner = { teamId: auth.teamId, rowId: emailId };
   const encrypted = await encryptEmailBody(
-    { html: payload.html ?? null, text: payload.text ?? null },
+    {
+      html: payload.html ?? null,
+      text: payload.text ?? null,
+      ...(payload.tracking ? { tracking: payload.tracking } : {}),
+    },
     deps.keyring,
     owner,
   );

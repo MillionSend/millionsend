@@ -64,6 +64,7 @@ import {
   markSegmentsStale,
   monthlyQuotaMessage,
   type NewDomainLimit,
+  needsConfirmationWithdrawal,
   newDomainLimitEtas,
   newDomainLimitFullMessage,
   newDomainLimitPlanCap,
@@ -90,6 +91,7 @@ import {
   reservedSenderRefusal,
   reserveQuota,
   reviewBacklogLimit,
+  revokeContactConfirmation,
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
   type SendRefusal,
@@ -163,6 +165,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { INTERNAL_AUTH, registerMcp } from "./mcp.js";
 import { loggedBody, maskEmailPathSegments } from "./request-log.js";
 import { registerApiKeyRoutes } from "./routes/api-keys.js";
+import { registerContactConfirmationRoutes } from "./routes/contact-confirmations.js";
 import { registerContactPropertyRoutes } from "./routes/contact-properties.js";
 import { type DomainsSesDeps, registerDomainRoutes } from "./routes/domains.js";
 import { registerInboxSendRoutes } from "./routes/inbox-send.js";
@@ -686,6 +689,7 @@ function toAcceptPayload(body: SendEmailRequest, domainId: string | null): Accep
     subject: body.subject,
     html: body.html,
     text: body.text,
+    tracking: body.tracking,
     tags: body.tags ? Object.fromEntries(body.tags.map((t) => [t.name, t.value])) : null,
     headers: body.headers && Object.keys(body.headers).length > 0 ? body.headers : undefined,
     attachments: attachments && attachments.length > 0 ? attachments : undefined,
@@ -1288,6 +1292,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
                 lastName: t.lastName,
                 unsubscribed: t.unsubscribed,
                 properties: t.properties,
+                confirmation: t.confirmation,
               })
               .from(t)
               .where(
@@ -1373,7 +1378,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             // A batch never re-subscribes anyone: unsubscribed:false on an
             // opted-out contact is ignored, and the retained one-click
             // suppression stays. Re-subscribing is the explicit PATCH.
-            const unsubscribe = row.unsubscribed === true && !found.unsubscribed;
+            const recordsWithdrawal =
+              row.unsubscribed === true && needsConfirmationWithdrawal(found.confirmation);
+            const unsubscribe =
+              row.unsubscribed === true && (!found.unsubscribed || recordsWithdrawal);
             idByKey.set(row.key, found.id);
             // A row restating what is stored is not written: updated_at stays,
             // no contact.updated fires. The item still reports "updated" and
@@ -1390,7 +1398,13 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
                 updatedAt: new Date(),
                 ...(row.firstName !== undefined ? { firstName: row.firstName } : {}),
                 ...(row.lastName !== undefined ? { lastName: row.lastName } : {}),
-                ...(unsubscribe ? { unsubscribed: true, unsubscribedAt: new Date() } : {}),
+                ...(unsubscribe
+                  ? {
+                      unsubscribed: true,
+                      unsubscribedAt: new Date(),
+                      confirmation: revokeContactConfirmation(t.confirmation),
+                    }
+                  : {}),
                 ...(Object.keys(row.properties).length > 0
                   ? { properties: sql`${t.properties} || ${JSON.stringify(row.properties)}::jsonb` }
                   : {}),
@@ -1472,7 +1486,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             continue;
           }
           succeed(row, id, "updated");
-          if (row.unsubscribed === true && !update.found.unsubscribed) {
+          if (
+            row.unsubscribed === true &&
+            (!update.found.unsubscribed || needsConfirmationWithdrawal(update.found.confirmation))
+          ) {
             activity.push({ teamId, contactId: id, type: "unsubscribed" });
           }
           for (const [topicId, subscribed] of row.topicSubs) {
@@ -1545,7 +1562,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     // records real flips. Properties are merged, so the stored-map cap is
     // checked against the merged key set.
     const [before] = await db
-      .select({ ...contactSnapshotColumns, properties: t.properties })
+      .select({ ...contactSnapshotColumns, properties: t.properties, confirmation: t.confirmation })
       .from(t)
       .where(teamContactWhere(teamId, idOrEmail));
     if (!before) return undefined;
@@ -1562,7 +1579,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         for (const key of incoming.removed) properties = sql`${properties} - ${key}::text`;
       }
     }
+    const recordsWithdrawal =
+      body.unsubscribed === true && needsConfirmationWithdrawal(before.confirmation);
     const dirty =
+      recordsWithdrawal ||
       (body.first_name !== undefined && body.first_name !== before.firstName) ||
       (body.last_name !== undefined && body.last_name !== before.lastName) ||
       (body.unsubscribed !== undefined && body.unsubscribed !== before.unsubscribed) ||
@@ -1583,6 +1603,9 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
                   }
                 : {}),
               ...(properties !== undefined ? { properties } : {}),
+              ...(body.unsubscribed === true
+                ? { confirmation: revokeContactConfirmation(t.confirmation) }
+                : {}),
             })
             .where(teamContactWhere(teamId, idOrEmail))
             .returning(contactSnapshotColumns)
@@ -1600,7 +1623,11 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         enqueue: contactEvents.enqueue,
       });
     }
-    if (row && body.unsubscribed !== undefined && before.unsubscribed !== body.unsubscribed) {
+    if (
+      row &&
+      body.unsubscribed !== undefined &&
+      (before.unsubscribed !== body.unsubscribed || recordsWithdrawal)
+    ) {
       await recordContactActivity(
         db,
         {
@@ -3792,6 +3819,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   app.on("DELETE", ["/inboxes/:id", "/emails/receiving/:id"], requireAdmin);
   app.on("PATCH", "/inboxes/:id/safety", requireAdmin);
   app.on("DELETE", "/suppressions/:id", requireAdmin);
+  app.on("DELETE", "/contacts/:id/confirmation", requireAdmin);
   app.on("DELETE", ["/contacts/:id", "/audiences/:audienceId/contacts/:id"], (c, next) =>
     c.req.query("erase") === "true" ? requireAdmin(c, next) : next(),
   );
@@ -3828,6 +3856,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
   // registered by registerContactRootRoutes and share the contacts policy.
   app.use("/audiences/*", requireApiKey, enforceRateLimit, requireFullAccess);
   registerContactRootRoutes(app, deps);
+  registerContactConfirmationRoutes(app, deps);
 
   app.use("/contact-properties", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/contact-properties/*", requireApiKey, enforceRateLimit, requireFullAccess);

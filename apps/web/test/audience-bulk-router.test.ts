@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCaller } from "@/server/routers";
 
@@ -270,4 +271,29 @@ describe("audience.contacts.bulkDelete", () => {
       code: "BAD_REQUEST",
     });
   });
+});
+
+it("dashboard withdrawal revokes a pending confirmation even on an inactive contact", async () => {
+  const { teamId, caller } = await seed();
+  const [contact] = await db
+    .insert(schema.contacts)
+    .values({
+      teamId,
+      email: "pending@example.com",
+      unsubscribed: true,
+      confirmation: {
+        requestId: randomUUID(),
+        email: "pending@example.com",
+        requestedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        state: "pending",
+        createdContact: true,
+      },
+    })
+    .returning();
+  if (!contact) throw new Error("Missing contact fixture");
+  await caller.audience.contacts.update({ id: contact.id, unsubscribed: true });
+  const [after] = await db.select().from(schema.contacts).where(eq(schema.contacts.id, contact.id));
+  expect(after?.confirmation?.state).toBe("revoked");
+  expect(after?.unsubscribed).toBe(true);
 });
