@@ -17,6 +17,12 @@ Adicionar um domínio o registra no SES e mostra os registros DNS a criar:
   chave privada nunca é armazenada.
 - **MAIL FROM** — registros MX e SPF (TXT) para o subdomínio de bounce.
 
+Na nuvem, uma equipe adiciona até 10 domínios por hora, ou 100 no Scale. A
+contagem zera a cada hora cheia (UTC); passando disso, a API responde
+`429 rate_limit_exceeded` com `retry-after`, e o painel mostra quantos minutos
+faltam. Um domínio que não é verificado em até 72 horas depois de adicionado é
+apagado, então adicione cada um quando for publicar os registros dele.
+
 Dois sinais de verificação aparecem lado a lado:
 
 - **Status no SES** — o que o SES reporta. O SES faz cache da verificação e

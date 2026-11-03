@@ -1,5 +1,6 @@
 import { redactRevealedText } from "../content-reveal-render.js";
 import { countInvisible, dropInvisible } from "../customer-text.js";
+import { PADDING_MARKS } from "../html.js";
 import {
   type BodyLink,
   extractLinks,
@@ -8,8 +9,13 @@ import {
   UNRESOLVED_DESTINATION,
 } from "../links.js";
 import { maskEmailLocalParts } from "../mask.js";
-import { ownerDomain, registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
-import { decodeEntities, opaqueFactsOf, readBody } from "./body.js";
+import {
+  isLoopbackHost,
+  ownerDomain,
+  registrableDomain,
+  vouchedRegistrableDomain,
+} from "../org-domain.js";
+import { decodeEntities, opaqueFactsOf, readBody, type VisibleHtml } from "./body.js";
 import { type MediaFindings, renderMediaLines } from "./media.js";
 
 /**
@@ -111,9 +117,24 @@ export function clip(text: string, max: number): string {
   return `${text.slice(0, max - tail)} […${text.length - max} characters left out…] ${text.slice(-tail)}`;
 }
 
-/** The name a link's row shows: the registrable domain it lands on, or what kind of link it is. */
-function destinationName(raw: string, link: ResolvedLink): string {
-  if (link.url) return registrableDomain(new URL(link.url).hostname);
+/** Marks a link to the reader's own machine (isLoopbackHost) in the outbound link table. */
+export const LOCAL_ADDRESS_MARK = "(local address)";
+/** The lines the judge's policy reads the message's own words from (questions.ts judgePolicy). */
+export const SUBJECT_LABEL = "Subject:";
+export const VISIBLE_TEXT_LABEL = "Visible text:";
+
+/**
+ * The name a link's row shows: the registrable domain it lands on, or what
+ * kind of link it is. `markLocal` adds LOCAL_ADDRESS_MARK to a loopback
+ * address's: on outbound mail it is a developer's own build, while to an
+ * agent reading received mail it can be the very thing a lure points at.
+ */
+function destinationName(raw: string, link: ResolvedLink, markLocal = false): string {
+  if (link.url) {
+    const host = new URL(link.url).hostname;
+    const name = registrableDomain(host);
+    return markLocal && isLoopbackHost(host) ? `${name} ${LOCAL_ADDRESS_MARK}` : name;
+  }
   if (link.unresolved) return "(unresolved)";
   if (/^\s*mailto:/i.test(raw)) return "mailto";
   if (/^\s*tel:/i.test(raw)) return "tel";
@@ -125,27 +146,30 @@ function destinationName(raw: string, link: ResolvedLink): string {
  * domain the team never used first (an unresolved link among them while
  * the team has not cleared one), then other links off its verified domains,
  * then the rest, each group in document order, so a lure cannot hide behind
- * thirty links to the sender's own site.
+ * thirty links to the sender's own site. With `markLocal`, links to a
+ * loopback address come last of all, marked (destinationName).
  */
 export function linkRows(
   links: BodyLink[],
   verified: string[],
   novel?: ReadonlySet<string>,
+  opts: { markLocal?: boolean } = {},
 ): string[] {
   const owned = new Set(verified.map(ownerDomain));
   const group = (link: BodyLink): number => {
     if (link.unresolved) return novel?.has(UNRESOLVED_DESTINATION) ? 0 : 1;
     if (!link.url) return 2;
     const host = new URL(link.url).hostname;
+    if (opts.markLocal && isLoopbackHost(host)) return 3;
     if (novel?.has(registrableDomain(host)) || novel?.has(ownerDomain(host))) return 0;
     return owned.has(ownerDomain(host)) ? 2 : 1;
   };
-  const groups: BodyLink[][] = [[], [], []];
+  const groups: BodyLink[][] = [[], [], [], []];
   for (const link of links) groups[group(link)]?.push(link);
   const rows = new Set<string>();
   for (const link of groups.flat()) {
     const text = link.source === "form" ? "(form)" : label(decodeEntities(link.text));
-    rows.add(`  ${text} -> ${destinationName(link.raw, link)}`);
+    rows.add(`  ${text} -> ${destinationName(link.raw, link, opts.markLocal)}`);
     if (rows.size >= JUDGE_LINK_ROWS_MAX) break;
   }
   return [...rows];
@@ -157,6 +181,23 @@ export function plainTextDiffers(text: string, visible: string): boolean {
   if (!words) return false;
   const seen = new Set(visible.toLowerCase().match(WORD));
   return words.filter((w) => seen.has(w)).length < PLAIN_TEXT_SHARED_WORDS * words.length;
+}
+
+/**
+ * The hidden characters a block counts: hidden text past the inbox preview
+ * line, its spaces collapsed, the preview (`preview`, the line as the block
+ * shows it) past its cap, and any other invisible character in the preview
+ * (tags, selectors, bidi controls). Template padding (PADDING_MARKS) counts
+ * nowhere: it carries no words, and every section reaches the judge without
+ * it. The preview line itself is shown apart.
+ */
+export function hiddenCharCount(stripped: VisibleHtml | null, preview: string): number {
+  if (!stripped) return 0;
+  return (
+    oneLine(stripped.hidden.replace(PADDING_MARKS, "")).length +
+    Math.max(0, preview.length - JUDGE_PREVIEW_MAX_CHARS) +
+    countInvisible(stripped.preview.replace(PADDING_MARKS, ""))
+  );
 }
 
 function plural(n: number, noun: string): string {
@@ -189,6 +230,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     extractLinks(stripped?.html ?? null, !stripped || plainShown ? input.text : null),
     input.team.verifiedDomains,
     input.novelDomains,
+    { markLocal: true },
   );
   const lines = [
     `Team name: ${oneLine(input.team.name)}`,
@@ -197,7 +239,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     `Plan: ${oneLine(input.team.plan)}`,
     `From: ${oneLine(input.from)}`,
     `Reply-To: ${input.replyTo?.map(oneLine).join(", ") || "(none)"}`,
-    `Subject: ${redacted(input.subject)}`,
+    `${SUBJECT_LABEL} ${redacted(input.subject)}`,
   ];
   if (preview) {
     lines.push(
@@ -205,7 +247,7 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
       `  ${preview.slice(0, JUDGE_PREVIEW_MAX_CHARS)}`,
     );
   }
-  lines.push("Visible text:", `  ${clip(redacted(body.visible), JUDGE_TEXT_MAX_CHARS)}`);
+  lines.push(VISIBLE_TEXT_LABEL, `  ${clip(redacted(body.visible), JUDGE_TEXT_MAX_CHARS)}`);
   if (hidden) {
     lines.push(
       "Hidden text (not shown to the reader):",
@@ -229,12 +271,12 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
     rows.join("\n") || "  (none)",
     `Image count: ${facts.imageRefs.length}`,
     `Attachments: ${attachments || "(none)"}`,
-    `Hidden characters count: ${(stripped?.hiddenChars ?? 0) + body.invisible + plainInvisible}`,
+    `Hidden characters count: ${hiddenCharCount(stripped, preview) + body.invisible + plainInvisible}`,
   );
   lines.push(
     ...renderMediaLines(input.media, {
       redact: redacted,
-      target: (href) => destinationName(href, resolveTextUrl(href)),
+      target: (href) => destinationName(href, resolveTextUrl(href), true),
     }),
   );
   return lines.join("\n");

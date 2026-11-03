@@ -33,6 +33,26 @@ describe("createSesSender", () => {
     expect((sent[0] as { Destination: object }).Destination).not.toHaveProperty("BccAddresses");
   });
 
+  it("tags the send with its Free pool, and leaves out a pool SES could not carry", async () => {
+    const sender = createSesSender("us-east-1");
+    const send = (poolOwnerId?: string) =>
+      sender.sendRaw({
+        raw: Buffer.from(""),
+        emailId: "e3",
+        to: ["ok@example.com"],
+        ...(poolOwnerId ? { poolOwnerId } : {}),
+      });
+    await send("Pool_Owner-01");
+    await send("owner@example.com");
+    await send();
+    const emailIdTag = { Name: "millionsend_email_id", Value: "e3" };
+    expect(sent.map((input) => (input as { EmailTags: unknown }).EmailTags)).toEqual([
+      [emailIdTag, { Name: "millionsend_pool", Value: "Pool_Owner-01" }],
+      [emailIdTag],
+      [emailIdTag],
+    ]);
+  });
+
   it("refuses to send a stored recipient the strict parser rejects", async () => {
     await expect(
       createSesSender("us-east-1").sendRaw({

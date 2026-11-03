@@ -10,6 +10,7 @@ import {
   resultRows,
   rotatedWebhookSecretColumns,
   rotationOverlapEnd,
+  secondsUntil,
   signWebhook,
   WEBHOOK_BACKLOG_COUNT,
   WEBHOOK_EVENT_TYPES,
@@ -18,10 +19,11 @@ import {
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, min, sql } from "drizzle-orm";
 import { z } from "zod";
 import { recordAudit } from "../audit";
 import { getKeyring } from "../keyring";
+import { tooManyRequests } from "../retry-after";
 import { supportViewEventData } from "../support-view";
 import { adminProcedure, router, teamProcedure } from "../trpc";
 
@@ -74,27 +76,31 @@ const SUCCESS_RATE_WINDOW = 30;
 // reachability probe (the ordinary delivery path is async and retried).
 const TEST_DELIVERY_PORTS = new Set(["", "443", "8443"]);
 const TEST_DELIVERY_PER_MINUTE = 10;
+const TEST_DELIVERY_WINDOW_MS = 60_000;
 
 function testPortAllowed(url: string): boolean {
   return env.WEBHOOK_ALLOW_LOCALHOST || TEST_DELIVERY_PORTS.has(new URL(url).port);
 }
 
 /** Test deliveries this team fired in the last minute (DB window: works across app instances). */
-async function recentTestDeliveries(db: Db, teamId: string): Promise<number> {
+async function recentTestDeliveries(
+  db: Db,
+  teamId: string,
+): Promise<{ n: number; oldest: Date | null }> {
   const d = schema.webhookDeliveries;
   const t = schema.webhookEndpoints;
   const [row] = await db
-    .select({ n: sql<number>`count(*)::int` })
+    .select({ n: sql<number>`count(*)::int`, oldest: min(d.createdAt) })
     .from(d)
     .innerJoin(t, eq(d.endpointId, t.id))
     .where(
       and(
         eq(t.teamId, teamId),
         sql`${d.payload}->>'test' = 'true'`,
-        gt(d.createdAt, new Date(Date.now() - 60_000)),
+        gt(d.createdAt, new Date(Date.now() - TEST_DELIVERY_WINDOW_MS)),
       ),
     );
-  return row?.n ?? 0;
+  return { n: row?.n ?? 0, oldest: row?.oldest ?? null };
 }
 
 function toEnabled(status: (typeof schema.webhookEndpoints.$inferSelect)["status"]): boolean {
@@ -408,8 +414,11 @@ export const webhooksRouter = router({
     .input(z.object({ id: z.uuid() }))
     .mutation(async ({ ctx, input }) => {
       await requireEndpoint(ctx.db, ctx.teamId, input.id);
-      if ((await recentTestDeliveries(ctx.db, ctx.teamId)) >= TEST_DELIVERY_PER_MINUTE) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS" });
+      const recent = await recentTestDeliveries(ctx.db, ctx.teamId);
+      if (recent.n >= TEST_DELIVERY_PER_MINUTE) {
+        // The oldest test in the window is the first to leave it and free a place.
+        const freesAt = (recent.oldest?.getTime() ?? Date.now()) + TEST_DELIVERY_WINDOW_MS;
+        throw tooManyRequests(secondsUntil(freesAt));
       }
       const messageId = `msg_${randomBytes(12).toString("base64url")}`;
       const payload = {

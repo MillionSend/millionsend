@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useMemo, useState } from "react";
 import { DOMAIN_REGIONS, regionFlag } from "@/app/(dashboard)/domains/regions";
 import { teamMenuItems, useTeamActions } from "@/components/console/team-actions";
+import { LeadCell, SkeletonLead } from "@/components/lead-cell";
 import { ListFooter } from "@/components/list-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
@@ -15,7 +16,6 @@ import { SortableTh, type SortDir } from "@/components/sortable-th";
 import { StatusDot } from "@/components/status-badge";
 import { Table } from "@/components/table";
 import { TeamLogo } from "@/components/team-logo";
-import { Tooltip } from "@/components/tooltip";
 import { formatDay } from "@/lib/format";
 import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC, useTRPCClient } from "@/lib/trpc";
@@ -46,10 +46,7 @@ function SkeletonRows() {
       {[150, 110, 170, 130, 120, 160].map((width) => (
         <tr key={width}>
           <td>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <Skeleton width={22} height={22} radius={7} />
-              <Skeleton width={width} height={13} />
-            </span>
+            <SkeletonLead width={width} tile={22} />
           </td>
           <td>
             <SkeletonBadge width={52} />
@@ -140,7 +137,12 @@ export function TeamsView() {
     setSort(column);
     setDir(next);
   };
-  const sortable = (column: (typeof SORT_KEYS)[number], right = false, defaultDir?: SortDir) => (
+  const sortable = (
+    column: (typeof SORT_KEYS)[number],
+    right = false,
+    defaultDir?: SortDir,
+    style?: React.CSSProperties,
+  ) => (
     <SortableTh
       column={column}
       label={t(`columns.${column === "name" ? "team" : column}`)}
@@ -149,6 +151,7 @@ export function TeamsView() {
       onSort={onSort}
       right={right}
       {...(defaultDir ? { defaultDir } : {})}
+      {...(style ? { style } : {})}
     />
   );
 
@@ -238,7 +241,7 @@ export function TeamsView() {
           <Table className="nowrap baseline">
             <thead>
               <tr>
-                {sortable("name", false, "asc")}
+                {sortable("name", false, "asc", { width: "100%" })}
                 {sortable("type")}
                 {sortable("domains", true)}
                 {sortable("contacts", true)}
@@ -266,22 +269,12 @@ export function TeamsView() {
                 ) : (
                   rows.map((row) => (
                     <tr key={row.id} className="hoverable" onClick={(event) => openRow(event, row)}>
-                      <td>
-                        <Tooltip
-                          inline
-                          text={t("ownerTip", { email: row.ownerEmail ?? common("none") })}
-                        >
-                          <span className="ms-lead" style={{ gap: 8 }}>
-                            <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
-                            {row.name}
-                          </span>
-                        </Tooltip>
-                        {copied === row.id ? (
-                          <span style={{ marginLeft: 8, color: "var(--ms-muted)", fontSize: 12.5 }}>
-                            ✓ {common("copied")}
-                          </span>
-                        ) : null}
-                      </td>
+                      <LeadCell
+                        tile={<TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />}
+                        value={row.name}
+                        tip={t("ownerTip", { email: row.ownerEmail ?? common("none") })}
+                        action={copied === row.id ? `✓ ${common("copied")}` : undefined}
+                      />
                       <td>
                         <PlanBadge plan={row.plan} planQuota={row.planQuota} />
                       </td>

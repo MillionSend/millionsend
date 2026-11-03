@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   EnvKeyring,
   encryptEmailBody,
@@ -549,6 +549,12 @@ describe("emails.list sources", () => {
     expect((await caller(team).emails.get({ id: parked })).pending).toEqual({ kind: "held" });
     expect((await caller(team).emails.get({ id: queued })).pending).toEqual({ kind: "held" });
     expect((await caller(team).emails.get({ id: tx })).pending).toEqual({ kind: "waiting" });
+
+    // A pause the complaints tripped holds only the teams it names.
+    await db.update(schema.regionBreakers).set({ heldTeams: [randomUUID()] });
+    expect(Object.values(await held()).some(Boolean)).toBe(false);
+    await db.update(schema.regionBreakers).set({ heldTeams: [team] });
+    expect((await held())[parked]).toBe(true);
 
     await db.update(schema.regionBreakers).set({ paused: false });
     expect(Object.values(await held()).some(Boolean)).toBe(false);

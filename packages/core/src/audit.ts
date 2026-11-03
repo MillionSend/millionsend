@@ -29,7 +29,8 @@ export function apiRequestActor(auth: { apiKeyId: string | null; userId?: string
   return auth.userId ? { userId: auth.userId } : "oauth";
 }
 
-function encodeActor(actor: AuditActor): string {
+/** An actor as audit_log.actor_id stores it, for queries that match rows by who acted. */
+export function encodeAuditActor(actor: AuditActor): string {
   if (typeof actor === "string") return actor;
   return "userId" in actor ? `user:${actor.userId}` : `api_key:${actor.apiKeyId}`;
 }
@@ -46,7 +47,7 @@ export function parseAuditActor(actorId: string | null): ParsedAuditActor {
 export function auditRow(event: AuditEvent): typeof schema.auditLog.$inferInsert {
   return {
     teamId: event.teamId,
-    actorId: encodeActor(event.actor),
+    actorId: encodeAuditActor(event.actor),
     action: event.action,
     target: event.target ? `${event.target.type}:${event.target.id}` : null,
     data: event.metadata ?? null,

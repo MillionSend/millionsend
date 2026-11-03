@@ -1,4 +1,9 @@
-import { PLAN_TEAM_LIMIT, SUSPENSION_REASONS } from "@millionsend/core";
+import {
+  DAY_MS,
+  PLAN_TEAM_LIMIT,
+  SUSPENSION_REASONS,
+  TEAM_CREATE_WINDOW_DAYS,
+} from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTestDb, REAL_NAMES, REFUSED_NAMES } from "@millionsend/test-utils";
@@ -185,6 +190,80 @@ describe("team.createTeam", () => {
     });
     vi.stubEnv("IS_CLOUD", "");
     await expect(callerFor("u1").team.createTeam({ name: "Self-host" })).resolves.toBeTruthy();
+  });
+
+  it("on cloud's Free plan, counts the teams created in the last 30 days, deleted ones included", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    await insertUser("u1", "u1@example.com");
+    const created = [];
+    for (let i = 0; i < PLAN_TEAM_LIMIT.free; i++) {
+      created.push(await callerFor("u1").team.createTeam({ name: `Team ${i}` }));
+    }
+    for (const team of created.slice(1)) {
+      await db.delete(schema.teams).where(eq(schema.teams.id, team.teamId));
+    }
+    await expect(callerFor("u1").team.createTeam({ name: "Again" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("a creation older than 30 days no longer counts", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    await insertUser("u1", "u1@example.com");
+    const old = new Date(Date.now() - (TEAM_CREATE_WINDOW_DAYS + 1) * DAY_MS);
+    // Deleted teams' rows outlive them; the audit log is append-only, so older ones are written as such.
+    await db.insert(schema.auditLog).values(
+      Array.from({ length: PLAN_TEAM_LIMIT.free }, (_, i) => ({
+        teamId: crypto.randomUUID(),
+        actorId: "user:u1",
+        action: "team.created",
+        target: `team:old-${i}`,
+        createdAt: old,
+      })),
+    );
+    for (let i = 0; i < PLAN_TEAM_LIMIT.free; i++) {
+      await callerFor("u1").team.createTeam({ name: `Team ${i}` });
+    }
+    await expect(callerFor("u1").team.createTeam({ name: "One more" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
+  it("leaves a paying owner to the owned-team cap, whatever they created and deleted", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    await insertUser("u1", "u1@example.com");
+    const paid = await callerFor("u1").team.createTeam({ name: "Paid" });
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, paid.teamId));
+    for (let i = 0; i < PLAN_TEAM_LIMIT.pro; i++) {
+      const { teamId } = await callerFor("u1").team.createTeam({ name: `Churn ${i}` });
+      await db.delete(schema.teams).where(eq(schema.teams.id, teamId));
+    }
+    await expect(callerFor("u1").team.createTeam({ name: "Kept" })).resolves.toBeTruthy();
+  });
+
+  it("writes one team.created row per creation, and records the creator on cloud only", async () => {
+    await insertUser("u1", "u1@example.com");
+    vi.stubEnv("IS_CLOUD", "true");
+    const cloudTeam = await callerFor("u1").team.createTeam({ name: "Cloud" });
+    vi.stubEnv("IS_CLOUD", "");
+    const selfHosted = await callerFor("u1").team.createTeam({ name: "Self-hosted" });
+    const rows = await db
+      .select({ teamId: schema.auditLog.teamId, actorId: schema.auditLog.actorId })
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, "team.created"));
+    expect(rows).toEqual([
+      { teamId: cloudTeam.teamId, actorId: "user:u1" },
+      { teamId: selfHosted.teamId, actorId: "user:u1" },
+    ]);
+    const owners = await db
+      .select({ id: schema.teams.id, poolOwnerId: schema.teams.poolOwnerId })
+      .from(schema.teams);
+    expect(owners).toEqual(
+      expect.arrayContaining([
+        { id: cloudTeam.teamId, poolOwnerId: "u1" },
+        { id: selfHosted.teamId, poolOwnerId: null },
+      ]),
+    );
   });
 
   it("the ladder's team caps climb with the plan", () => {

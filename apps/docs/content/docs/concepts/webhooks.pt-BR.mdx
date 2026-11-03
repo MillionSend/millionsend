@@ -35,6 +35,10 @@ Eventos de conta não carregam e-mail; `data` descreve a situação da equipe:
 | `quota.reached` | A cota foi usada. Planos diários passam até 50% a mais e depois deixam os envios em espera até a meia-noite UTC; planos mensais cobram excedente quando ele está ativo e, senão, recusam envios pela API e deixam as transmissões em espera até o período renovar. | igual ao anterior |
 | `quota.paused` | Só em planos diários: 50% além da cota, novos envios ficam em espera até a meia-noite UTC, ou até um upgrade de plano liberá-los (uma vez por dia UTC, só na nuvem). | igual ao anterior, sempre `period: "day"` |
 
+No plano Free, as equipes Free que você criou dividem uma cota diária e um só
+histórico de bounces e reclamações: cada um desses eventos dispara uma vez
+para todas elas, numa das equipes que enviaram, com os números somados.
+
 Eventos de audiência disparam quando um contato ou a lista de supressão muda,
 seja quem for que mudou. `data` traz o contato no formato do Resend — `id`,
 `email`, `first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at`

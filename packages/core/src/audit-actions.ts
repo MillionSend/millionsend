@@ -39,6 +39,7 @@ export const AUDIT_ACTIONS = [
   "team.broadcasts_resumed",
   "team.suspended",
   "team.reinstated",
+  "team.sending_pause_lifted",
   // The content monitor's review hold: a suspension the team reads as a pause.
   "team.held_for_review",
   "team.ses_tenant_updated",
@@ -58,6 +59,7 @@ export const AUDIT_ACTIONS = [
   "region.breaker_opened",
   "region.breaker_closed",
   "region.quota_requested",
+  "free_fuse.released",
   "instance.settings_updated",
   "instance.monitor_settings_updated",
   "instance.reserve_updated",

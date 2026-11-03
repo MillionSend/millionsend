@@ -121,9 +121,19 @@ export default function EmailsPage() {
   const cap = usage.data?.period
     ? usage.data.period.overage
       ? null
-      : { limit: usage.data.period.included, accepted: usage.data.period.accepted, monthly: true }
+      : {
+          limit: usage.data.period.included,
+          accepted: usage.data.period.accepted,
+          monthly: true,
+          pooled: false,
+        }
     : usage.data?.today.limit != null
-      ? { limit: usage.data.today.limit, accepted: usage.data.today.accepted, monthly: false }
+      ? {
+          limit: usage.data.today.limit,
+          accepted: usage.data.today.accepted,
+          monthly: false,
+          pooled: usage.data.today.pooled,
+        }
       : null;
   const capReached = cap !== null && cap.accepted >= cap.limit;
 
@@ -193,9 +203,14 @@ export default function EmailsPage() {
       {capReached && cap ? (
         <GradientBanner
           variant="warn"
-          title={t(cap.monthly ? "list.capBanner.reachedMonth" : "list.capBanner.reached", {
-            limit: nf.format(cap.limit),
-          })}
+          title={t(
+            cap.monthly
+              ? "list.capBanner.reachedMonth"
+              : cap.pooled
+                ? "list.capBanner.reachedPooled"
+                : "list.capBanner.reached",
+            { limit: nf.format(cap.limit) },
+          )}
           action={
             // A daily limit exists only on the hosted cloud, so the billing page always exists here.
             <Link href="/settings/billing" style={bannerLinkStyle}>

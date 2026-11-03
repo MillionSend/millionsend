@@ -10,9 +10,13 @@ import {
   fetchAccountScore,
   fetchDeliverabilityHealth,
   forgetAbuseRecords,
+  formatMailPercent,
   guardrailMetricOf,
   isSilentlySuspended,
+  liftDeliverabilityPause,
   liveSupportViewForTeam,
+  monitorFlagLine,
+  PAUSE_BOUNCE_RATE,
   PLAN_RUNGS,
   type Plan,
   raisesQuota,
@@ -38,6 +42,7 @@ import { z } from "zod";
 import { formatMoneyTotals } from "@/lib/format";
 import { escapeLike } from "@/lib/sql";
 import { getStripe } from "../../billing";
+import { judgeStatus, monitorSettingsNow } from "../../console/monitor";
 import {
   consoleCodeVerifiedUntil,
   consoleStepUp,
@@ -49,6 +54,7 @@ import { getQueue } from "../../queue";
 import { operatorProcedure, router } from "../../trpc";
 import {
   auditOperator,
+  kickCron,
   kickQuotaDrain,
   loadTeam,
   mailTeamOwners,
@@ -609,6 +615,47 @@ export const consoleTeamsRouter = router({
         metadata: { name: team.name },
       });
       await kickQuotaDrain();
+    }),
+
+  /** A bounce pause lifted after review; a refusal comes back as its code. */
+  liftPause: operatorProcedure
+    .input(
+      z.object({
+        id: z.uuid(),
+        reference: z.string().trim().min(1).max(200),
+        note: z.string().trim().min(1).max(1000),
+        notify: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.id);
+      const lifted = await liftDeliverabilityPause(ctx.db, {
+        teamId: team.id,
+        operatorUserId: ctx.operator.id,
+        reference: input.reference,
+        note: input.note,
+        notified: input.notify,
+        monitorFlagRisk: monitorFlagLine(
+          judgeStatus().on ? await monitorSettingsNow(ctx.db) : null,
+        ),
+      });
+      if ("refusal" in lifted) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: lifted.refusal });
+      }
+      if (input.notify) {
+        await mailTeamOwners(ctx.db, team, "team.sending_pause_lifted", "/metrics", (locale) => ({
+          limit: formatMailPercent(locale, PAUSE_BOUNCE_RATE),
+          waiting:
+            lifted.parked > 0
+              ? accountMailPhrase({ locale, kind: "team.sending_pause_lifted", key: "waiting" })
+              : "",
+        }));
+      }
+      if (lifted.parked > 0) await kickQuotaDrain();
+      // The guardrail flag is the cron's to clear: cleared in the operator's
+      // name, it would stay cleared through a new pause.
+      await kickCron("safety.flags");
+      return { sent: lifted.sent, hardBounces: lifted.hardBounces };
     }),
 
   /**

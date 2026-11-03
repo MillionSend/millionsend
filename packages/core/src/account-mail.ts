@@ -53,6 +53,7 @@ export const ACCOUNT_MAIL_KINDS = [
   "team.broadcasts_paused",
   "team.suspended",
   "team.reinstated",
+  "team.sending_pause_lifted",
   "monitor.alert",
   "monitor.broadcasts_paused",
   "monitor.team_held",

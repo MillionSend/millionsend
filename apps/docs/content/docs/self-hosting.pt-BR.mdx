@@ -196,7 +196,7 @@ auto-hospedada não tem limites de plano.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Credenciais OAuth do "Continuar com Google". O botão só aparece com ambas definidas. URL de callback: `{APP_BASE_URL}/api/auth/callback/google`. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | O mesmo, para GitHub. URL de callback: `{APP_BASE_URL}/api/auth/callback/github`. |
 | `AUTH_EMAIL_FROM` | Remetente dos e-mails de conta (redefinição de senha, confirmação de e-mail, o código de uso único do console), como `Nome <usuario@dominio>` ou um endereço simples; o domínio precisa ser uma identidade verificada na conta SES desta instância. A recuperação de senha e a confirmação no cadastro só existem com isto definido e credenciais SES configuradas — deixe vazio para pular as duas. Verifique o domínio em uma equipe em **Domínios** e esses e-mails passam a ser registrados lá, com as novas contas como seus contatos (veja [E-mails de conta](#e-mails-de-conta-contatos-e-novidades)). |
-| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login, o cadastro, a redefinição de senha e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Chaves do Cloudflare Turnstile, as duas ou nenhuma. Definidas, o login (inclusive com Google e GitHub), o cadastro, a redefinição de senha, o formulário de novidades do produto e o botão "Enviar e-mail" do onboarding verificam um token de desafio (widgets invisíveis ou gerenciados funcionam). Sem elas, todos os formulários funcionam sem captcha. |
 | `ONBOARDING_EMAIL_FROM` | Remetente do botão "Enviar e-mail" do onboarding, como `Nome <usuario@dominio>` ou um endereço simples em um domínio verificado nesta conta SES. Leva um único e-mail de teste fixo por equipe, para o proprietário da equipe (um endereço confirmado, onde a instância confirma e-mails), e nada mais: um envio a partir dele pela API, SMTP, MCP, uma transmissão ou um teste do painel é recusado (`422 reserved_sender` na API), mesmo para uma equipe que verificou o domínio. Deixe vazio para ocultar o botão. |
 | `NOTIFICATIONS_EMAIL_FROM` | Remetente das notificações de conta aos proprietários da equipe (cota quase ou totalmente usada, taxas de bounce/reclamação em risco ou pausadas) e dos e-mails de convite para a equipe, nos mesmos formatos de `AUTH_EMAIL_FROM`, que é o fallback. Sem nenhum dos dois, só os eventos de webhook saem e os convites ficam só por link. Verifique o domínio em uma equipe para registrar esses e-mails lá. |
 | `INVITES_PER_TEAM_PER_DAY` | Convites que uma equipe, e um membro somando todas as suas equipes, pode criar em um dia corrido, contando os revogados e os de equipes excluídas (padrão `50`). Acima disso, novos convites são recusados até o dia virar. |
@@ -473,7 +473,9 @@ SMTP". As mensagens passam pelo mesmo pipeline de aceitação do
 requisições e eventos de entrega. Enquanto os envios da equipe estão pausados
 pela taxa de bounce ou de reclamação, o relay responde `451 4.7.1` após o
 DATA, e o cliente guarda a mensagem e tenta de novo; uma equipe suspensa
-recebe `550`.
+recebe `550`. Dos headers da própria mensagem, o relay só leva `In-Reply-To` e
+`References`; headers personalizados como `X-*` ou `OTP-Token` precisam do
+`POST /emails`.
 
 Cada mensagem conta no limite por minuto da sua chave de API, o mesmo usado
 pelas requisições dessa chave à API (`API_RATE_LIMIT_PER_MINUTE`, padrão 600),
@@ -1154,6 +1156,13 @@ isso no log e fica com a cópia que tem. Diga a lista o que disser, um provedor
 de e-mail pessoal (Gmail, Outlook, Yahoo, iCloud, Proton, UOL, BOL, Terra e
 parecidos) e um sufixo público (`com.br`, `github.io`) nunca são recusados.
 
+Com `IS_CLOUD=true`, uma mesma rede abre no máximo 3 contas por dia: um
+endereço IPv4 ou um /64 IPv6. Contam os cadastros das últimas 24 horas,
+inclusive os de contas já excluídas, e o 4º é recusado até o mais antigo deles
+completar um dia. Cadastros pelo Google e pelo GitHub contam do mesmo jeito;
+entrar em uma conta que já existe nunca é recusado. Uma instância
+auto-hospedada não tem esse limite.
+
 ## E-mails de conta, contatos e novidades
 
 Os e-mails do próprio MillionSend — redefinição de senha, confirmação de
@@ -1248,14 +1257,11 @@ anteriores confirmam no próximo login. Onde a instância confirma e-mails, o
 e-mail do onboarding só vai para um proprietário que confirmou.
 
 Nada em uma instância auto-hospedada contata millionsend.com por conta
-própria. O assistente de configuração oferece, uma vez e só de forma
-interativa, inscrever o e-mail do operador nas notas de lançamento do
-MillionSend; é o assistente na sua máquina enviando a sua resposta, e um link
-de confirmação chega antes de qualquer coisa ser armazenada. Quando não
-consegue alcançar millionsend.com, ele imprime a página,
+própria. O assistente de configuração mostra onde se inscrever nas notas de
+lançamento do MillionSend,
 [app.millionsend.com/updates?source=self-host](https://app.millionsend.com/updates?source=self-host), e **Configurações →
-Instância** leva à mesma página; o `source` marca você como auto-hospedado
-nos dois casos.
+Instância** leva à mesma página; o `source` marca você como auto-hospedado. Um
+link de confirmação chega antes de qualquer coisa ser armazenada.
 
 ## Console
 
@@ -1282,11 +1288,43 @@ reclamações que o próprio SES mede: o worker a lê no CloudWatch
 centavos de dólar por mês). Uma política `millionsend-ses` anterior a essa
 permissão deixa a taxa sem leitura, e a pausa regional passa a estimá-la pela
 contagem da própria instância, sem contar os e-mails para provedores que
-nunca repassam reclamações ao SES, como o Gmail, com o mesmo limite de 0,4%
+nunca repassam reclamações ao SES, como o Gmail, com o mesmo limite de 0,1%
 usado para a taxa do SES. Para adicioná-la, rode a configuração de novo (o
 que também cria uma nova chave de acesso) ou
 [atualize a política sem recriar nada](#tenants-do-ses-reputação-por-equipe).
 O custo por região é uma estimativa local.
+
+A pausa regional segura as transmissões de uma região do SES, nunca o e-mail
+transacional, antes que o SES aja sobre a conta inteira ali. Ela entra quando
+a taxa de hard bounces da plataforma na região chega a 4%, e aí segura as
+transmissões de todas as equipes até a taxa voltar para baixo do limite.
+Também entra quando a taxa de reclamações do SES chega à linha de revisão
+dele, de 0,1%, e aí segura só as transmissões das equipes cuja própria taxa
+de reclamações nos últimos 30 dias, contados pela data de envio, é de 0,1%
+ou mais; as outras equipes seguem enviando, e a pausa termina quando a taxa
+volta para baixo de 0,08%. Pausada, a região aparece no console como
+"pausadas · N equipes", com os nomes das equipes ao passar o mouse. O
+operador recebe um e-mail quando uma região é pausada ou retomada, uma vez
+por dia enquanto a taxa de reclamações do SES em uma região está em 0,08%
+ou mais, pausada ou não, e quando o SES muda a situação da conta em uma
+região (uma primeira leitura `HEALTHY` não gera aviso). Esses e-mails trazem
+as equipes com mais reclamações nos últimos 30 dias, ou com mais hard bounces
+quando a pausa é por bounces, e contam as reclamações que o SES informou
+sobre e-mails que já não têm registro: registros que passaram da retenção,
+de uma equipe excluída ou de e-mails enviados fora do MillionSend.
+
+No MillionSend Cloud, mais duas proteções valem para as equipes do plano
+Free. Quando uma região é pausada por reclamações, cada equipe Free cujos
+e-mails receberam uma reclamação ali fica em pausa para revisão; liberada,
+ela só volta a ser pausada por uma reclamação mais nova. E a pausa do Free
+entra quando os e-mails das equipes Free enviados nos últimos 7 dias,
+inclusive os de equipes já excluídas, recebem 3 reclamações: até o operador
+liberá-la em Confiança e segurança, todo e-mail de equipe Free para um
+provedor que repassa reclamações fica em espera, enquanto os e-mails para
+Gmail, Apple Mail e T-Online, os e-mails de conta e os das equipes pagas
+seguem saindo. A liberação envia o que estava em espera e recomeça a
+contagem. Uma instância auto-hospedada não tem planos, então nenhuma das
+duas vale nela.
 
 Uma equipe suspensa mantém os dados e as chaves continuam autenticando, mas
 todo envio responde `403 team_suspended` (SMTP `550`; em uma pausa para
@@ -1360,7 +1398,11 @@ guardados, os nomes de remetente, assuntos (cortados em 256 caracteres),
 domínios dos links, telefones e um hash do texto visível. Um IP de uma rede
 de saída compartilhada, em que um endereço representa muita gente
 (Cloudflare WARP, Retransmissão Privada do iCloud, Vivo, Claro e TIM), fica de
-fora, pela base de ASN que o `IP_GEOLOCATION` mantém. Uma equipe nova é
+fora, pela base de ASN que o `IP_GEOLOCATION` mantém. O que a própria
+instância envia também fica de fora: o e-mail do onboarding e qualquer domínio
+sob o domínio compartilhado das caixas, sob os domínios dos remetentes de
+onboarding, de conta e de notificações ou sob o do app, que todas as equipes
+compartilham. Uma equipe nova é
 comparada com elas quando é criada, adiciona um domínio, faz o primeiro
 pagamento e envia. Uma coincidência abre uma sinalização `linked` na lista de
 confiança e segurança e avisa o operador por e-mail sobre os tipos de
@@ -1418,7 +1460,11 @@ avaliação e não muda mais nada. As verificações determinísticas de conteú
 ou sem o avaliador. Quem hospeda por conta própria pode deixá-lo desligado.
 
 **O que ele faz.** Abre a sinalização `monitor` em Confiança e segurança
-quando o risco de uma equipe cruza o limite de sinalização, avisa o operador
+quando o risco de uma equipe cruza o limite de sinalização e o avaliador
+considerou abuso pelo menos uma das mensagens dela, a partir da pontuação de
+sinalização, nos últimos 7 dias (um risco que só avaliações limpas levaram
+acima do limite não abre nada; uma sinalização aberta fica até o risco voltar
+abaixo do limite), avisa o operador
 por e-mail uma vez por dia por equipe acima do limite de alerta e, só para uma
 equipe no nível Nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo de
 10.000 envios em 7 dias), pausa as transmissões quando o risco passa do
@@ -1442,7 +1488,9 @@ transmissões ficam em espera, uma nova transmissão é recusada com
 `403 sending_paused` e, com `SES_TENANTS` ligado, o tenant do SES dela é desativado.
 Uma sequência de avaliações com pontuação menor também pausa a equipe: por padrão, a
 quinta dessas avaliações a partir de 80 em quaisquer sete dias enquanto a
-equipe está no nível Nova. Um link para outro domínio, sozinho, não conta para nenhuma das duas
+equipe está no nível Nova; uma avaliação que poupou a equipe (veja abaixo) e
+cujo e-mail o operador liberou deixa de contar, enquanto todos os domínios
+desse e-mail continuarem liberados. Um link para outro domínio, sozinho, não conta para nenhuma das duas
 regras: e-mail legítimo costuma ter links para outros lugares. O operador é
 avisado por e-mail na hora, com a regra que pausou a
 equipe; o proprietário não. O painel mostra um aviso neutro de "envio pausado
@@ -1469,7 +1517,14 @@ do SES que pausa a equipe fica em espera com o resto do e-mail dela; uma
 avaliada depois do envio já tinha saído, e a pausa barra o que vem depois. Na
 janela inicial, uma mensagem avaliada como do tipo phishing a partir de 80 que
 não pausa nada espera 2 minutos antes de sair: uma rajada chega à contagem de
-repetição dentro deles. `MONITOR_AUTO_HOLD=false` desliga a pausa para
+repetição dentro deles. Um e-mail que só chega às pessoas da própria equipe
+(todo destinatário é o login de um membro ou o simulador de caixas do SES;
+transmissões à parte) nunca espera os 2 minutos, mas fica em espera como
+qualquer e-mail, porque uma chave roubada da equipe poderia mirar uma isca nas
+próprias pessoas dela; a pausa para revisão continua considerando esse e-mail,
+porque testar uma isca primeiro em si mesmo é o primeiro sinal dela.
+Depois que a única pausa de uma equipe já foi usada, nada espera por uma
+pausa que não pode mais vir. `MONITOR_AUTO_HOLD=false` desliga a pausa para
 revisão, e a avaliação antes do SES junto com ela.
 
 **Destinos novos, em qualquer nível.** Uma mensagem também é avaliada antes
@@ -1479,7 +1534,11 @@ cliente de e-mail seguiria (uma âncora, uma área de mapa de imagem, uma ação
 de formulário, um link em SVG ou um URL do texto, lido como o navegador lê e
 passando por até três redirecionadores; um nome como `x.pages.dev`, de um
 serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios
-verificados da equipe. Um link que não dá para ler também conta como destino.
+verificados da equipe. Um link que não dá para ler também conta como destino;
+um link para um endereço de loopback (localhost e seus subdomínios,
+127.0.0.1, `::1`) nunca conta: ali não tem nenhuma página de quem envia, e ele
+nunca se torna conhecido. Um endereço de rede privada conta como qualquer
+outro destino.
 Uma avaliação abaixo de 70 que não aponta nada do tipo phishing torna os
 destinos da mensagem conhecidos da equipe, quando ela levava no máximo 5
 destinos novos; liberar um e-mail em espera por um destino novo, ou esperando
@@ -1509,6 +1568,34 @@ lista de revisão com uma avaliação do tipo phishing a partir de 90, ou a
 partir de 80 com um domínio de link com menos de 7 dias ou de idade
 desconhecida, e o operador recebe e-mail no máximo uma vez por dia por equipe;
 uma equipe depois do nível Nova nunca é pausada para revisão automaticamente.
+Uma equipe no nível Nova é poupada da pausa que uma avaliação traria quando a
+avaliação se apoia só num link de login, troca de senha ou cobrança para o
+nome do próprio produto numa plataforma de apps (`ref.supabase.co`,
+`x.workers.dev`) ou para um endereço de loopback, num e-mail avaliado antes do
+SES que não é transmissão, não se passa por outra marca (pode, se todos os
+links dele, inclusive os lidos nas imagens, forem para um endereço de loopback
+e ele não tiver Reply-To, porque o modelo padrão de um framework assina com o
+nome do próprio framework) e não traz meio de pagamento: a mensagem fica em espera na lista de revisão no lugar da pausa.
+Um link de loopback sozinho não faz o e-mail ser avaliado antes do SES; por
+isso, depois da janela inicial da equipe, essa avaliação num e-mail avaliado
+depois do envio ainda pausa a equipe. Do mesmo jeito, uma equipe no nível
+Nova é poupada da pausa quando a avaliação só vê imitação de marca num aviso
+que uma plataforma de loja ou de agendamento manda em nome de um cliente: um
+e-mail que não é transmissão, não traz código Pix nem arquivo, não tem a
+mensagem em imagens nem num QR code desenhado com caracteres e sai de um
+domínio de envio com pelo menos 7 dias, cujo nome de remetente (From) é o nome
+do domínio para onde vão o Reply-To e um link; além desse domínio, o e-mail só
+leva a domínios registrados (como a página de rastreio de uma transportadora,
+mas nunca a um serviço de arquivos, formulários, sites ou chat em que todos os
+usuários dividem o mesmo nome), sem link que não seja de página web e sem
+nenhuma marca que o monitor conheça no nome, nos domínios ou no assunto. Até o operador liberar um e-mail para esses domínios, isso só
+vale para e-mail avaliado antes do SES e para domínios cuja data de registro
+mostra pelo menos 7 dias (sem data, a pausa continua); depois da liberação,
+esses avisos para eles saem sem ficar em espera nem esperar os 2 minutos, e sem
+pausar a equipe, e a mesma mensagem com outro nome ainda pausa a equipe. Um
+aviso que traz um domínio novo ao lado do site já liberado mantém a liberação
+do site enquanto o novo é avaliado; outro domínio liberado no aviso, como a
+página da transportadora, perde a liberação como antes.
 Essas amostras não contam para nenhum limite diário; uma equipe tem 200 delas
 por dia, e depois disso o e-mail dela com um destino novo espera o próximo dia
 UTC.
@@ -1549,7 +1636,12 @@ versionado do modelo que respondeu. `ABUSE_JUDGE_BASE_URL` (padrão
 `https://api.typesafe.ai`) aponta o avaliador para outro endpoint que serve a
 mesma API; ele faz o POST em `<base>/v1/systemone`. As perguntas que o Jev
 responde estão em `packages/core/src/abuse-judge/questions.ts`, e as sobre os
-nomes no domínio compartilhado das caixas em `names.ts`, ao lado.
+nomes no domínio compartilhado das caixas em `names.ts`, ao lado. Quando o
+assunto ou o texto visível citam o MillionSend como palavra, uma frase entra
+na política: uma equipe que cita o MillionSend como o próprio provedor de
+envio, como fazem os testes de configuração, não está se passando por ele, e
+essa menção não libera mais nada no e-mail. Todas as outras mensagens são
+avaliadas pela política de sempre.
 
 **Para onde vão as amostras.** Toda mensagem sorteada é enviada à TypeSafe, um
 subprocessador que hospeda o serviço nos Estados Unidos. Pelos termos
@@ -1587,7 +1679,8 @@ seu texto e o domínio registrável onde ele chega, lido como o navegador lê e
 passando por até três redirecionadores conhecidos, como o `/url?q=` do
 Google, e os links para domínios que a equipe nunca usou, os que não dá para
 ler e os que saem dos domínios verificados dela listados primeiro (até 30
-linhas); uma linha que avisa quando a mensagem
+linhas), com um link para um endereço de loopback (localhost, 127.0.0.1)
+marcado `(local address)` e listado por último; uma linha que avisa quando a mensagem
 mostra menos de 100 caracteres de texto ao lado de uma imagem, de um anexo
 ou de um QR code desenhado com caracteres ou células de tabela; o número de
 imagens que ela mostra (`<img>`, fundos em CSS, VML do Outlook, SVG); os
@@ -1762,11 +1855,11 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | Uma anomalia (uma checagem de domínio de link, encurtador ou padrão de phishing falhando, menos de 100 caracteres de texto com imagens ou arquivos levando a mensagem, um anexo) multiplica a taxa; duas forçam a amostra |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Sorteios depois do envio por equipe por dia UTC; além disso param em silêncio. E-mail avaliado antes do SES não conta nem tem limite |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Sorteios depois do envio na instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
-| `MONITOR_FLAG_RISK` | 0.5 | A equipe recebe a sinalização `monitor` e é amostrada quatro vezes mais |
+| `MONITOR_FLAG_RISK` | 0.5 | A equipe é amostrada quatro vezes mais e recebe a sinalização `monitor` com uma avaliação de abuso a partir de `MONITOR_FLAG_SCORE` nos últimos 7 dias; a sinalização fica até o risco voltar abaixo deste valor |
 | `MONITOR_ALERT_RISK` | 0.7 | O operador é avisado por e-mail, uma vez por equipe por dia |
 | `MONITOR_PAUSE_RISK` | 0.85 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
-| `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação |
+| `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação, e a sinalização `monitor` pede uma avaliação de abuso a partir dela nos últimos 7 dias |
 | `MONITOR_HOLD_SCORE` | 90 | Só equipes novas: uma avaliação do tipo phishing a partir desta pontuação pausa a equipe para revisão |
 | `MONITOR_HOLD_REPEAT_COUNT` | 5 | Só equipes novas: este número de avaliações do tipo phishing a partir da pontuação abaixo, em até sete dias do primeiro envio da equipe, também a pausa para revisão; 0 desliga |
 | `MONITOR_HOLD_REPEAT_SCORE` | 80 | A pontuação a partir da qual uma avaliação do tipo phishing conta para o número acima |

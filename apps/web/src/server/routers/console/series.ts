@@ -110,7 +110,9 @@ export type FeedbackKind = "hardBounced" | "complained";
  * of the rows instanceCounterSeries sums, so they add up to the card. The
  * rate divides by the team's own sends in the window, as the card does; it
  * is null when the team sent nothing there or drew more than it sent, both
- * feedback about earlier mail (counters take the day it arrives).
+ * feedback about earlier mail. Counters take the hour or day the feedback
+ * arrives, except a daily row's complaints, dated by their mail's send day:
+ * on the day grain, a complaint rate is null only in edge cases.
  */
 export async function teamFeedbackTotals(
   db: Db,

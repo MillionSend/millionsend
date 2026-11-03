@@ -3,8 +3,10 @@ import {
   applyStatusCas,
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,
+  bumpFreePoolUsage,
   bumpHourlyUsage,
   CREDENTIAL_MAIL_KINDS,
+  complaintReportingRecipients,
   countDistinctRecipients,
   decryptEmailBody,
   deliverabilityHold,
@@ -14,10 +16,12 @@ import {
   enqueueWebhookDeliveries,
   evaluateEmailInsights,
   extractAddrSpec,
+  FREE_BURST_WINDOW_MS,
   fetchTeamQuota,
   fetchTeamStanding,
   findSuppressed,
   findTopicOptOuts,
+  freeFuseHolds,
   hashRecipient,
   isOnboardingSender,
   isSharedInboxSender,
@@ -58,6 +62,7 @@ import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { createTransport } from "nodemailer";
+import * as mimeFuncs from "nodemailer/lib/mime-funcs";
 import { MediaPoolError } from "../media/pool.js";
 import { saveMediaReview } from "../media/read.js";
 import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
@@ -91,12 +96,19 @@ export interface SesSender {
     region?: string;
     /** The team's SES tenant; only set once the send's identity and set are associated with it. */
     tenantName?: string;
+    /**
+     * The Free pool the team counts in, tagged on the send so feedback that
+     * outlives the email row still reaches the pool.
+     */
+    poolOwnerId?: string;
   }): Promise<{ messageId: string }>;
 }
 
 export interface SendDeps {
   keyring: Keyring;
   ses: SesSender;
+  /** Cloud: the Free fuse holds Free teams' mail while it is tripped; absent, it never does. */
+  isCloud?: boolean | undefined;
   /** Deployment-wide SES configuration set, used when the domain has none. */
   defaultConfigurationSet?: string | undefined;
   /** ONBOARDING_EMAIL_FROM: the fixed onboarding email carries no team domain (see core isOnboardingSender). */
@@ -123,6 +135,12 @@ export interface SendDeps {
   reschedule?:
     | ((emailId: string, at: Date, priority: EmailSendPriority) => Promise<void>)
     | undefined;
+  /**
+   * A Free pool's burst allowance (core bookFreeBurst): books `n` recipients
+   * and returns when they may go. Wired on Cloud only, since self-host has
+   * no Free pools: absent, no mail waits for it.
+   */
+  freeBurst?: ((db: Db, ownerId: string, n: number, now: Date) => Promise<Date>) | undefined;
   /** SES's 24-hour quota and the broadcast share; absent in tests that never reach it. */
   sesQuota?: SendQuotaControls | undefined;
   /** Arms the webhook drain for the rows written; absent, the reconcile sweep sends them. */
@@ -413,6 +431,46 @@ async function cancelQueuedEmail(db: Db, email: { id: string; teamId: string }):
   });
 }
 
+/**
+ * When an email may go under its Free pool's burst allowance, counted in its
+ * distinct recipients that can report a complaint, Bcc included. Null when no
+ * recipient can report one. The slot is kept on the row and booked under the
+ * row's lock: a wake-up, or a second lane on the same row, reads it back
+ * instead of booking again. A slot more than a burst window old is spent, and
+ * the row books anew: by then the allowance has refilled for later mail, so a
+ * row held past its slot (parked, or rescheduled) would otherwise go out on
+ * top of a full burst.
+ */
+async function freeBurstSlot(
+  db: Db,
+  book: NonNullable<SendDeps["freeBurst"]>,
+  email: typeof schema.emails.$inferSelect,
+  ownerId: string,
+): Promise<Date | null> {
+  const n = complaintReportingRecipients([
+    ...email.to,
+    ...(email.cc ?? []),
+    ...(email.bcc ?? []),
+  ]).length;
+  if (n === 0) return null;
+  const spentBefore = Date.now() - FREE_BURST_WINDOW_MS;
+  if (email.freeBurstAt && email.freeBurstAt.getTime() > spentBefore) return email.freeBurstAt;
+  const e = schema.emails;
+  return db.transaction(async (tx) => {
+    const txDb = tx as unknown as Db;
+    const [row] = await txDb
+      .select({ at: e.freeBurstAt })
+      .from(e)
+      .where(and(eq(e.id, email.id), eq(e.latestStatus, "queued"), isNull(e.sentAt)))
+      .for("update");
+    if (!row) return null;
+    if (row.at && row.at.getTime() > spentBefore) return row.at;
+    const at = await book(txDb, ownerId, n, new Date());
+    await txDb.update(e).set({ freeBurstAt: at }).where(eq(e.id, email.id));
+    return at;
+  });
+}
+
 /** Header names are case-insensitive; the caller's map keeps whatever casing it sent. */
 const hasListUnsubscribe = (headers: Record<string, string> | null | undefined): boolean =>
   Object.keys(headers ?? {}).some((k) => k.toLowerCase() === "list-unsubscribe");
@@ -609,12 +667,9 @@ async function sendQueued(
       await parkQueued(db, email, "sending paused");
       return "parked";
     }
-    if (deps.sesQuota?.bulkExhausted?.(region) || deps.sesQuota?.paused?.(region)) {
-      await parkQueued(
-        db,
-        email,
-        deps.sesQuota.paused?.(region) ? "region broadcasts held" : "SES bulk share reached",
-      );
+    const held = deps.sesQuota?.paused?.(region, email.teamId) ?? false;
+    if (held || deps.sesQuota?.bulkExhausted?.(region)) {
+      await parkQueued(db, email, held ? "region broadcasts held" : "SES bulk share reached");
       return "parked";
     }
   } else if (deps.sesQuota?.exhausted(region)) {
@@ -663,7 +718,33 @@ async function sendQueued(
     );
     return "deferred";
   }
+  // The Free pool the team counts in, from its quota as Cloud reads it, read
+  // once: the burst allowance below, the send's SES tag and the pool's
+  // counters all follow it.
+  const quota = await fetchTeamQuota(db, email.teamId, true);
+  const poolOwnerId = quota?.kind === "day" ? quota.pool?.ownerId : undefined;
+  // A Free pool's mail to providers that report complaints waits its turn in
+  // the pool's burst allowance, still queued, and costs no KMS call while it
+  // waits. Account mail and the onboarding email never wait.
+  if (deps.freeBurst && poolOwnerId && !systemMail && !onboarding) {
+    const slot = await freeBurstSlot(db, deps.freeBurst, email, poolOwnerId);
+    if (slot && slot.getTime() > Date.now()) {
+      // At most a burst window ahead, so a long wait reads the team's plan
+      // again on the way: mail of a team that left Free goes at the next
+      // wake-up, not at a slot hours away. An upgrade cannot wake it sooner,
+      // since the queue keeps one waiting job per email.
+      const wake = Math.min(slot.getTime(), Date.now() + FREE_BURST_WINDOW_MS);
+      await deps.reschedule?.(email.id, new Date(wake), emailSendPriority(email));
+      return "deferred";
+    }
+  }
   const configurationSet = domain?.sesConfigurationSet ?? deps.defaultConfigurationSet;
+  // Before the body is decrypted: a held row costs no KMS call. Account mail
+  // and the onboarding email are the platform's own, never held.
+  if (deps.isCloud && !systemMail && !onboarding && (await freeFuseHolds(db, email))) {
+    await parkQueued(db, email, "Free fuse tripped", "fuse");
+    return "parked";
+  }
 
   const { bodyCiphertext, bodyIv, bodyWrappedDek, bodyKeyVersion } = email;
   if (!bodyCiphertext || !bodyIv || !bodyWrappedDek || bodyKeyVersion === null) {
@@ -929,7 +1010,6 @@ async function sendQueued(
     from: email.from,
     to: email.to,
     ...(email.cc ? { cc: email.cc } : {}),
-    ...(email.bcc ? { bcc: email.bcc } : {}),
     ...(email.replyTo ? { replyTo: email.replyTo } : {}),
     subject: email.subject,
     ...(html ? { html } : {}),
@@ -1011,6 +1091,7 @@ async function sendQueued(
       ...(configurationSet ? { configurationSetName: configurationSet } : {}),
       ...(domain?.region ? { region: domain.region } : {}),
       ...(tenant ? { tenantName: tenant } : {}),
+      ...(poolOwnerId ? { poolOwnerId } : {}),
     });
   let messageId: string;
   try {
@@ -1085,6 +1166,13 @@ async function sendQueued(
       },
     });
   await bumpHourlyUsage(db, { teamId: email.teamId, at: sentAt, counts: { sent: 1 } });
+  if (poolOwnerId) {
+    await bumpFreePoolUsage(db, {
+      ownerId: poolOwnerId,
+      day: utcDay(sentAt),
+      counts: { sent: 1, sent_no_feedback: noFeedback },
+    });
+  }
   if (bulk) deps.sesQuota?.noteBulkSent?.(region);
   // Insights below evaluate the in-memory body.
   await purgeCredential();
@@ -1225,7 +1313,9 @@ interface MimeInput {
   from: string;
   to: string[];
   cc?: string[];
-  bcc?: string[];
+  // No bcc: SES takes Bcc recipients from the send's Destination, and
+  // nodemailer's stream transport would write them into a Bcc header of the
+  // message itself.
   replyTo?: string[];
   subject: string;
   html?: string;
@@ -1234,15 +1324,17 @@ interface MimeInput {
   headers: Record<string, string>;
 }
 
+// nodemailer formats these as msg-ids, never encoding them, and takes no
+// prepared value for References.
+const MSG_ID_HEADERS = new Set(["in-reply-to", "references"]);
+
 async function buildRawMime(input: MimeInput): Promise<Buffer> {
   const transport = createTransport({ streamTransport: true, buffer: true });
   const info = await transport.sendMail({
     from: input.from,
     to: input.to,
     ...(input.cc ? { cc: input.cc } : {}),
-    ...(input.bcc ? { bcc: input.bcc } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
-    subject: input.subject,
     ...(input.html ? { html: input.html } : {}),
     ...(input.text ? { text: input.text } : {}),
     ...(input.attachments
@@ -1263,7 +1355,23 @@ async function buildRawMime(input: MimeInput): Promise<Buffer> {
           }),
         }
       : {}),
-    headers: input.headers,
+    // nodemailer RFC 2047-encodes any header value holding a double quote, so a
+    // structured value like OTP-Token's `"123456"; origin="https://example.com"`
+    // would arrive as an encoded word no receiver parses, and an all-ASCII
+    // subject encoded that way scores as spam (Rspamd SUBJ_EXCESS_QP). Printable
+    // ASCII needs no encoding: it goes out as given, folded at its own
+    // whitespace, unless a word is too long to fold within RFC 5322's
+    // 998-character lines. The subject rides with the headers to get the same.
+    headers: Object.fromEntries(
+      Object.entries({ ...input.headers, Subject: input.subject }).map(([key, value]) => [
+        key,
+        MSG_ID_HEADERS.has(key.toLowerCase()) ||
+        !/^[\t\x20-\x7e]*$/.test(value) ||
+        mimeFuncs.hasLongerLines(mimeFuncs.foldLines(`${key}: ${value}`), 998)
+          ? value
+          : { prepared: true, foldLines: true, value },
+      ]),
+    ),
   });
   return info.message as Buffer;
 }

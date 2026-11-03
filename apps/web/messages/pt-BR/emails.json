@@ -33,6 +33,7 @@
     "retry": "Tentar novamente",
     "capBanner": {
       "reached": "Limite diário de {limit} e-mails atingido.",
+      "reachedPooled": "Limite diário de {limit} e-mails atingido. Ele é dividido entre as equipes Free criadas pela mesma pessoa.",
       "queued": "{count} e-mails na fila — serão enviados em {duration}.",
       "upgrade": "Faça upgrade para um limite maior →",
       "reachedMonth": "Cota mensal de {limit} e-mails atingida.",

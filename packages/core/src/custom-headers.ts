@@ -18,6 +18,9 @@ const ALLOWED_HEADERS = new Set([
   "comments",
   "keywords",
   "organization",
+  // A one-time code bound to the origin it may be autofilled into
+  // (draft-goto-otp-token), e.g. `"123456"; origin="https://example.com"`.
+  "otp-token",
   // RFC 2369/8058 one-click unsubscribe pair: a sender running its own opt-out
   // endpoint may point recipients at it. Values are checked below so only
   // https/mailto targets go out; on a topic send they replace the generated pair.
@@ -45,7 +48,7 @@ function unsubscribeHeaderIssue(name: string, value: string): string | null {
   return null;
 }
 
-const ALLOWED_HEADERS_HINT = `X-* (except X-SES-*) or ${[...ALLOWED_HEADERS].join(", ")}`;
+const ALLOWED_HEADERS_HINT = `X-* (except X-SES-* and X-MillionSend-*) or ${[...ALLOWED_HEADERS].join(", ")}`;
 
 function isAllowedHeaderName(name: string): boolean {
   const lower = name.toLowerCase();
@@ -76,7 +79,9 @@ export interface CustomHeaderIssue {
 /** Why `headers` may not ride a send, in request order; empty when they all may. */
 export function customHeaderIssues(headers: Readonly<Record<string, string>>): CustomHeaderIssue[] {
   const issues: CustomHeaderIssue[] = [];
+  const seen = new Set<string>();
   for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
     if (!HEADER_NAME_RE.test(name)) {
       issues.push({ header: name, message: `"${name}" is not a valid header name` });
     } else if (!isAllowedHeaderName(name)) {
@@ -84,7 +89,12 @@ export function customHeaderIssues(headers: Readonly<Record<string, string>>): C
         header: name,
         message: `"${name}" is not an allowed header; use ${ALLOWED_HEADERS_HINT}`,
       });
+    } else if (seen.has(lower) && !lower.startsWith("x-")) {
+      // The same name in another case is a second field. SES refuses a second
+      // instance of every vetted name, and OTP-Token may appear only once.
+      issues.push({ header: name, message: `"${name}" may appear only once` });
     }
+    seen.add(lower);
     if (hasHeaderControlChar(value)) {
       issues.push({ header: name, message: `"${name}" value must not contain control characters` });
     }

@@ -208,28 +208,43 @@ export const en = {
     subject: "80% of today's sending quota used",
     body: [
       "{team} has used {used} of its {limit} emails for today.",
+      "{shared}",
       "Sends keep going out until {tolerance} past the quota; after that they queue until the quota resets at {resetsAt}. A higher plan raises the daily quota immediately.",
     ],
     button: "Review your plan",
     muted: ["You get this once per day when a team you own nears its quota."],
+    extra: {
+      shared:
+        "On the Free plan, every Free team created by the same person shares this daily limit, so the count above includes all of them.",
+    },
   },
   "quota.reached": {
     subject: "Today's sending quota reached",
     body: [
       "{team} has used its {limit} emails for today ({used} accepted).",
+      "{shared}",
       "{headroom} more still go out today (sends pass until {tolerance} past the quota); anything past that is queued and sent after the quota resets at {resetsAt}. A higher plan raises the daily quota immediately and releases queued mail within minutes.",
     ],
     button: "Review your plan",
     muted: ["You get this once per day when a team you own reaches its quota."],
+    extra: {
+      shared:
+        "On the Free plan, every Free team created by the same person shares this daily limit, so the count above includes all of them.",
+    },
   },
   "quota.paused": {
     subject: "Sending paused until the quota resets",
     body: [
       "{team} has used {used} emails today, {tolerance} past its {limit} quota, so new sends are queued instead of sent.",
+      "{shared}",
       "Queued mail goes out after the quota resets at {resetsAt}. A higher plan raises the daily quota immediately and releases the queue within minutes.",
     ],
     button: "Review your plan",
     muted: ["You get this once per day when a team you own passes the ceiling of its quota."],
+    extra: {
+      shared:
+        "On the Free plan, every Free team created by the same person shares this daily limit, so the count above includes all of them.",
+    },
   },
   "quota.monthly_warning": {
     subject: "80% of this period's sending quota used",
@@ -268,7 +283,8 @@ export const en = {
   "deliverability.warning": {
     subject: "Your {metric} is at risk",
     body: [
-      "{team}'s {metric} over the last {days} days is {rate}, above the {limit} risk line. Sending continues, but broadcasts are slowed while it stays there.",
+      "{team}'s {metric} {window} is {rate}, above the {limit} risk line. Sending continues, but broadcasts are slowed while it stays there.",
+      "{shared}",
       "{advice}",
     ],
     button: "Open metrics",
@@ -276,21 +292,33 @@ export const en = {
     extra: {
       bounce: "hard-bounce rate",
       complaint: "complaint rate",
+      bounceWindow: "over the last {days} days",
+      complaintWindow: "on mail sent over the last {days} days",
       bounceAdvice:
         "Hard bounces come from addresses that do not exist. Remove old or unverified addresses from your lists; every bounced address is already on your suppression list.",
       complaintAdvice:
         "Complaints come from recipients who did not expect the email. Send only to people who opted in, keep the unsubscribe link visible, and pause lists that have not heard from you in months.",
+      shared:
+        "On the Free plan, every Free team created by the same person shares one bounce and complaint record, deleted teams included: this rate counts all of them, and each one's broadcasts are slowed.",
     },
   },
   "deliverability.paused": {
     subject: "Sending paused ({metric})",
     body: [
-      "{team}'s {metric} over the last {days} days reached {rate}, at or above the {limit} pause line. New sends are refused until it recovers.",
+      "{team}'s {metric} {window} reached {rate}, at or above the {limit} pause line. New sends are refused until it recovers.",
+      "{shared}",
       "The pause lifts on its own once the rate over the window drops back under the line. Clean the recipient list first, or the next sends will trip it again.",
     ],
     button: "Open metrics",
     muted: ["You get this once per episode."],
-    extra: { bounce: "hard-bounce rate", complaint: "complaint rate" },
+    extra: {
+      bounce: "hard-bounce rate",
+      complaint: "complaint rate",
+      bounceWindow: "over the last {days} days",
+      complaintWindow: "on mail sent over the last {days} days",
+      shared:
+        "On the Free plan, every Free team created by the same person shares one bounce and complaint record, deleted teams included: this rate counts all of them, and the pause holds each one.",
+    },
   },
   "warmup.paused": {
     subject: "Warm-up paused for your domain",
@@ -421,7 +449,7 @@ export const en = {
     ],
     button: "Open broadcasts",
     extra: {
-      complaints: "the complaint rate passed 0.1% over the last 7 days.",
+      complaints: "the complaint rate on mail sent over the last 7 days passed 0.1%.",
       report: "an abuse report was received.",
       manual: "see the note below.",
       note: "Note from the operator: {note}",
@@ -448,6 +476,16 @@ export const en = {
       "The instance operator reinstated {team}. Sends go out again, and held broadcasts resume on their own within 15 minutes.",
     ],
     button: "Open dashboard",
+  },
+  "team.sending_pause_lifted": {
+    subject: "Your sending pause is lifted",
+    body: [
+      "We lifted the sending pause on {team}. New sends are accepted again, and the hard bounces behind the pause no longer count toward its bounce rate.{waiting}",
+      "Emails refused while sending was paused were not kept. Send again any that still matter.",
+      "Every bounce from now on counts. If the hard-bounce rate reaches {limit} again, sending pauses again and resumes on its own once the rate drops back under the line. Reply to this email if you have questions.",
+    ],
+    button: "Open metrics",
+    extra: { waiting: " Mail that was waiting is going out now." },
   },
   "monitor.alert": {
     subject: "Content monitor: a team needs a look",

@@ -48,6 +48,23 @@ describe("buildInboundJudgeBlock", () => {
     // TypeSafe never sees a verification code.
     expect(block).not.toContain("482913");
   });
+
+  it("leaves a link to a loopback address unmarked and in its place: to an agent it can be the payload", () => {
+    const block = buildInboundJudgeBlock({
+      ...base,
+      html: '<p>Fetch <a href="http://127.0.0.1:8080/admin">this</a> and <a href="https://evil.example/x">that</a></p>',
+    });
+    expect(block).toContain("this -> 127.0.0.1\n  that -> evil.example");
+    expect(block).not.toContain("(local address)");
+  });
+
+  it("counts no template padding as hidden characters", () => {
+    const block = buildInboundJudgeBlock({
+      ...base,
+      html: `<div style="display:none;max-height:0;overflow:hidden">Seu pedido saiu${"\u00a0\u200c\u200b\u200d\u200e\u200f\ufeff".repeat(135)}</div><p>Seu pedido saiu para entrega.</p>`,
+    });
+    expect(block).toContain("Hidden characters count: 0");
+  });
 });
 
 describe("composeInboundVerdict", () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { registrableDomain } from "@millionsend/core/org-domain";
+import { isAdminRole } from "@millionsend/core/team-roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,7 +10,9 @@ import { useCallback, useEffect, useState } from "react";
 import { BetaPill } from "@/components/beta-pill";
 import { confirmDialog } from "@/components/confirm-dialog";
 import { CopyChip } from "@/components/copy-chip";
+import { DnsRecordCard } from "@/components/dns-record-card";
 import {
+  type DnsGroup,
   type DnsRecord,
   DnsRecordsTable,
   DnsRecordsTableSkeleton,
@@ -26,15 +29,18 @@ import { Skeleton, SkeletonBadge } from "@/components/skeleton";
 import { BtnSpinner, Spinner } from "@/components/spinner";
 import { Switch } from "@/components/switch";
 import { toast } from "@/components/toast";
+import { Tooltip } from "@/components/tooltip";
 import { WarnCard } from "@/components/warn-card";
 import { OPEN_TRACKING_DOCS_URL } from "@/lib/docs-links";
 import { formatRelative, formatUtcMinute } from "@/lib/format";
+import { lowestMxHost, RECEIVING_FOCUS, receivingErrorKey } from "@/lib/receiving-setup";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useMinSpin } from "@/lib/use-min-spin";
 import { useTeamRole } from "@/lib/use-team-role";
-import { zoneRelativeName } from "@/lib/zone";
+import { receivingSubdomain } from "@/lib/zone";
 import { type DomainStatus, DomainStatusBadge, displayDomainStatus } from "../domain-status";
 import { RegionLabel } from "../region-label";
 import { useTrackingToggle } from "../use-tracking-toggle";
@@ -92,56 +98,14 @@ function TrackingCnameCard({
   onShowRecords: () => void;
 }) {
   const t = useTranslations("domains");
-  const verified = record.live === "found";
-  const cell = { color: "var(--ms-muted)" } as const;
   return (
-    <div
-      style={{
-        marginTop: 14,
-        maxWidth: 640,
-        border: "1px solid var(--ms-line)",
-        borderRadius: "var(--ms-r-card)",
-        background: "var(--ms-inset)",
-        padding: 14,
-      }}
+    <DnsRecordCard
+      label={t("detail.configuration.cnameToAdd")}
+      status={record.live === "found" ? "verified" : "pending"}
+      record={record}
+      domain={domain}
+      style={{ marginTop: 14, maxWidth: 640 }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        <p className="ms-microlabel" style={{ margin: 0 }}>
-          {t("detail.configuration.cnameToAdd")}
-        </p>
-        <span className={`ms-badge ${verified ? "ms-badge-success" : "ms-badge-warn"}`}>
-          {t(`detail.recordStatus.${verified ? "verified" : "pending"}`)}
-        </span>
-      </div>
-      <div
-        className="ms-mono"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "auto 1fr",
-          gap: "8px 14px",
-          alignItems: "center",
-          fontSize: 13,
-        }}
-      >
-        <span style={cell}>{t("detail.columns.type")}</span>
-        <span>{record.type}</span>
-        <span style={cell}>{t("detail.columns.name")}</span>
-        <span style={{ minWidth: 0, overflow: "hidden" }}>
-          <CopyChip value={zoneRelativeName(record.name, domain)} title={record.name} />
-        </span>
-        <span style={cell}>{t("detail.columns.value")}</span>
-        <span style={{ minWidth: 0, overflow: "hidden" }}>
-          <CopyChip value={record.value} />
-        </span>
-      </div>
       <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
         <button
           type="button"
@@ -156,7 +120,7 @@ function TrackingCnameCard({
           {t("detail.configuration.viewDnsRecord")}
         </button>
       </div>
-    </div>
+    </DnsRecordCard>
   );
 }
 
@@ -364,7 +328,7 @@ export function DomainDetail({ id }: { id: string }) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const role = useTeamRole();
+  const admin = isAdminRole(useTeamRole());
 
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
   const records = useQuery(
@@ -396,9 +360,10 @@ export function DomainDetail({ id }: { id: string }) {
       inherited?: { name: string; policy: string } | undefined;
     }[]
   >([]);
-  // Set when the Configuration tab sends the user to the tracking CNAME:
-  // switches to Records, pulses that group once, then clears itself.
-  const [highlightTracking, setHighlightTracking] = useState(false);
+  // A group the user was sent to (the Configuration tab's tracking CNAME, a
+  // ?focus=receiving link): Records opens on it and pulses it, then clears.
+  const [highlight, setHighlight] = useState<DnsGroup | null>(null);
+  const [focus, setFocus] = useUrlState("focus");
   const features = useQuery(trpc.system.features.queryOptions());
   const trackingSubdomainsSupported = features.data?.trackingSubdomainsSupported ?? true;
   const trackingRequiresSubdomain = features.data?.trackingRequiresSubdomain ?? false;
@@ -442,18 +407,11 @@ export function DomainDetail({ id }: { id: string }) {
         void queryClient.invalidateQueries({ queryKey: trpc.domains.get.queryKey({ id }) });
         void queryClient.invalidateQueries({ queryKey: trpc.domains.records.queryKey({ id }) });
       },
-      onError: (error) => {
-        const code = trpcErrorCode(error);
-        const name = domain.data?.name ?? "";
+      onError: (error) =>
         toast(
-          code === "PRECONDITION_FAILED"
-            ? t("detail.receiving.errorNotVerified")
-            : code === "CONFLICT"
-              ? t("detail.receiving.errorTaken", { domain: name })
-              : t("detail.receiving.error"),
+          t(receivingErrorKey(trpcErrorCode(error)), { domain: domain.data?.name ?? "" }),
           "danger",
-        );
-      },
+        ),
     }),
   );
 
@@ -472,10 +430,7 @@ export function DomainDetail({ id }: { id: string }) {
     }),
   );
 
-  // A verify round-trip can return in well under a human blink; holding the
-  // pending state for a floor keeps the Check DNS button's spinner visible so
-  // the click registers as an action that ran.
-  const [minSpin, setMinSpin] = useState(false);
+  const [minSpin, startMinSpin] = useMinSpin();
   // Bumped on every manual check so the 30s auto-check timer restarts from the
   // click — otherwise an interval tick landing a second later reads as a phantom
   // second spinner the user never triggered.
@@ -509,11 +464,31 @@ export function DomainDetail({ id }: { id: string }) {
   }, [checking, id, verifyMutate, checkTick]);
 
   const runCheck = useCallback(() => {
-    setMinSpin(true);
-    setTimeout(() => setMinSpin(false), 600);
+    startMinSpin();
     setCheckTick((n) => n + 1);
     verifyMutate({ id });
-  }, [id, verifyMutate]);
+  }, [id, verifyMutate, startMinSpin]);
+
+  // Records mount only once loaded, so the scroll waits for them.
+  const showGroup = useCallback(
+    (group: DnsGroup) => {
+      setTab("records");
+      setHighlight(group);
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`dns-group-${group}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+      setTimeout(() => setHighlight(null), 2400);
+    },
+    [setTab],
+  );
+  const recordsLoaded = records.isSuccess;
+  useEffect(() => {
+    if (focus !== RECEIVING_FOCUS || !recordsLoaded || !receivingOn) return;
+    setFocus("");
+    showGroup("receiving");
+  }, [focus, recordsLoaded, receivingOn, setFocus, showGroup]);
 
   // Shared by the delete button and the modal's ⌘↵ shortcut; guards mirror
   // the button's disabled state.
@@ -632,6 +607,19 @@ export function DomainDetail({ id }: { id: string }) {
   // hides and the action moves into the ⋯ menu for the rare manual re-check.
   const trackingRow = rows.find((r) => r.group === "tracking");
   const receivingRow = rows.find((r) => r.group === "receiving");
+  // Receiving is on, but another server still gets the mail first: the red
+  // Mismatch badge alone reads as "fix the MX", which takes that mail over.
+  const elsewhereHost = receivingRow?.live === "mismatch" ? lowestMxHost(receivingRow.found) : null;
+  // The switches the server keeps to owners and admins say so, rather than
+  // failing after their confirm.
+  const adminOnly = (control: React.ReactNode) =>
+    admin ? (
+      control
+    ) : (
+      <Tooltip inline text={t("detail.receiving.adminOnly")}>
+        {control}
+      </Tooltip>
+    );
   const needsDnsCheck =
     status !== "verified" ||
     (!!trackingRow && trackingRow.live !== "found") ||
@@ -862,7 +850,7 @@ export function DomainDetail({ id }: { id: string }) {
           domain={data.name}
           limit={limit}
           request={data.limitRequest}
-          canManage={role === "owner" || role === "admin"}
+          canManage={admin}
         />
       ) : null}
 
@@ -914,16 +902,7 @@ export function DomainDetail({ id }: { id: string }) {
             trackingRequiresSubdomain={trackingRequiresSubdomain}
             onRecheck={runCheck}
             recheckPending={verify.isPending || minSpin}
-            onShowTrackingRecords={() => {
-              setTab("records");
-              setHighlightTracking(true);
-              requestAnimationFrame(() => {
-                document
-                  .getElementById("dns-group-tracking")
-                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
-              });
-              setTimeout(() => setHighlightTracking(false), 2400);
-            }}
+            onShowTrackingRecords={() => showGroup("tracking")}
           />
         </div>
       ) : (
@@ -956,7 +935,7 @@ export function DomainDetail({ id }: { id: string }) {
                   records={recordsTrackingOff ? rows.filter((r) => r.group !== "tracking") : rows}
                   domain={data.name}
                   showStatus
-                  highlightGroup={highlightTracking ? "tracking" : null}
+                  highlightGroup={highlight}
                   forceGroups={receivingOn ? ["tracking", "receiving"] : ["tracking"]}
                   groupExtras={{
                     // Same enable gesture as the Configuration tab, right on the
@@ -972,52 +951,69 @@ export function DomainDetail({ id }: { id: string }) {
                     receiving: (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
                         <BetaPill />
-                        <Switch
-                          checked={data.receivingEnabled}
-                          // Turning it off stays possible whatever the status.
-                          disabled={
-                            setReceiving.isPending ||
-                            (!data.receivingEnabled && status !== "verified")
-                          }
-                          onChange={(enabled) => void toggleReceiving(enabled)}
-                          ariaLabel={t("detail.receiving.enable")}
-                        />
+                        {adminOnly(
+                          <Switch
+                            checked={data.receivingEnabled}
+                            // Turning it off stays possible whatever the status.
+                            disabled={
+                              !admin ||
+                              setReceiving.isPending ||
+                              (!data.receivingEnabled && status !== "verified")
+                            }
+                            onChange={(enabled) => void toggleReceiving(enabled)}
+                            ariaLabel={t("detail.receiving.enable")}
+                          />,
+                        )}
                       </span>
                     ),
                   }}
                   groupFooters={{
                     receiving:
                       receivingOn && data.receivingEnabled ? (
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "flex-start",
-                            gap: 16,
-                            marginTop: 12,
-                          }}
-                        >
-                          <div style={{ minWidth: 0 }}>
-                            <span style={{ display: "block", fontSize: "var(--ms-fs-label)" }}>
-                              {t("detail.receiving.catchAll")}
-                            </span>
-                            <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
-                              {data.catchAllAllowed || data.receivingCatchAll
-                                ? t("detail.receiving.catchAllHint")
-                                : t("detail.receiving.catchAllPaid")}
-                            </span>
+                        <>
+                          {elsewhereHost ? (
+                            <WarnCard>
+                              {t("detail.receiving.elsewhereOn", {
+                                domain: data.name,
+                                host: elsewhereHost,
+                                sub: receivingSubdomain(data.name),
+                              })}
+                            </WarnCard>
+                          ) : null}
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "flex-start",
+                              gap: 16,
+                              marginTop: 12,
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <span style={{ display: "block", fontSize: "var(--ms-fs-label)" }}>
+                                {t("detail.receiving.catchAll")}
+                              </span>
+                              <span style={{ fontSize: 12, color: "var(--ms-muted)" }}>
+                                {data.catchAllAllowed || data.receivingCatchAll
+                                  ? t("detail.receiving.catchAllHint")
+                                  : t("detail.receiving.catchAllPaid")}
+                              </span>
+                            </div>
+                            {adminOnly(
+                              <Switch
+                                checked={data.receivingCatchAll}
+                                // A stored on survives a downgrade and can always be turned off.
+                                disabled={
+                                  !admin ||
+                                  setCatchAll.isPending ||
+                                  (!data.receivingCatchAll && !data.catchAllAllowed)
+                                }
+                                onChange={(enabled) => void toggleCatchAll(enabled)}
+                                ariaLabel={t("detail.receiving.catchAll")}
+                              />,
+                            )}
                           </div>
-                          <Switch
-                            checked={data.receivingCatchAll}
-                            // A stored on survives a downgrade and can always be turned off.
-                            disabled={
-                              setCatchAll.isPending ||
-                              (!data.receivingCatchAll && !data.catchAllAllowed)
-                            }
-                            onChange={(enabled) => void toggleCatchAll(enabled)}
-                            ariaLabel={t("detail.receiving.catchAll")}
-                          />
-                        </div>
+                        </>
                       ) : null,
                   }}
                   emptyNotes={{
@@ -1038,7 +1034,7 @@ export function DomainDetail({ id }: { id: string }) {
                         ? t("detail.receiving.notVerified")
                         : t(receivingApex ? "detail.receiving.noteApex" : "detail.receiving.note", {
                             domain: data.name,
-                            example: `inbound.${data.name}`,
+                            example: receivingSubdomain(data.name),
                           }),
                   }}
                 />

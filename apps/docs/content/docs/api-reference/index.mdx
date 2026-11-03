@@ -132,8 +132,10 @@ remaining deltas are deliberate and loud:
   enforcement thresholds, and broadcast sends also while the team's sending
   is paused pending review. Broadcast sends alone can also return
   `403 broadcasts_paused` while the platform's aggregate rate in the sender's
-  SES region is recovering; it is per region, leaves transactional email
-  untouched, and clears on its own.
+  SES region is recovering: a bounce rate refuses every team in the region, a
+  complaint rate only the teams whose own complaint rate over the last 30
+  days is at 0.1% or more. It leaves transactional email untouched, and
+  clears on its own.
 - A broadcast send answers with `finishes_at` (the estimated instant the last
   email goes out, or `null`), `estimated: true` and, when the audience exceeds
   the capacity available now, a `warning` (`paced` or `queued_behind`, with
@@ -181,9 +183,9 @@ remaining deltas are deliberate and loud:
 - `DELETE /emails/{id}` exists (Resend has no email deletion).
 - Custom `headers` are allowlisted: any `X-*` name (except `X-SES-*` and
   `X-MillionSend-*`) plus `In-Reply-To`, `References`, `Importance`,
-  `Priority`, `Comments`, `Keywords`, `Organization`, and the one-click
-  unsubscribe pair — `List-Unsubscribe` (one or more `<https://…>` or
-  `<mailto:…>` targets) with `List-Unsubscribe-Post`
+  `Priority`, `Comments`, `Keywords`, `Organization`, `OTP-Token`, and the
+  one-click unsubscribe pair — `List-Unsubscribe` (one or more `<https://…>`
+  or `<mailto:…>` targets) with `List-Unsubscribe-Post`
   (`List-Unsubscribe=One-Click`); anything else is a `422`. The two must come
   together, and `List-Unsubscribe` needs an `https` target. On a send with a
   `topic_id`, a pair you supply replaces the generated one: one-click requests
@@ -194,6 +196,13 @@ remaining deltas are deliberate and loud:
   the link opts out the contact it names, and every `to`, `cc` and `bcc` copy
   carries the same message. A send to more than one address carries no
   generated pair, and its placeholders are removed.
+- Header values and subjects in printable ASCII go out as given, double
+  quotes included, so a structured value such as
+  `OTP-Token: "123456"; origin="https://example.com"` reaches the inbox
+  intact. A value with non-ASCII text, or with a word too long for a
+  998-character header line, is RFC 2047-encoded, and `In-Reply-To` and
+  `References` go out as `<msg-id>`s. A vetted name may appear only once:
+  the same name twice in different cases is a `422`.
 - A send whose every `to` recipient is on the suppression list or opted out of
   the `topic_id` is refused with `422 all_recipients_suppressed` (message
   `All recipients are suppressed`) instead of Resend's `200`; recipients
@@ -307,8 +316,20 @@ Errors use Resend's format:
 A body that isn't valid JSON answers `400 invalid_parameter`, and a body sent
 with a `Content-Type` other than `application/json` answers `415`.
 
-A `429` for a daily limit, such as `daily_quota_exceeded`, carries a
-`Retry-After` header with the seconds until 00:00 UTC, when the limit resets:
+Every `429` carries a `Retry-After` header with the whole seconds until the
+request can pass:
+
+| Refusal | `Retry-After` counts down to |
+| --- | --- |
+| `rate_limit_exceeded`, "Too many requests" or "Too many failed authentication attempts" | The next minute. An API key makes up to 600 requests a minute by default and a team 3,000; the MCP server allows each person 600; one IP gets 20 failed authentications. |
+| `rate_limit_exceeded`, "Too many domains created" | The next full hour (UTC). A team adds up to 10 domains an hour, or 100 on Scale. |
+| `rate_limit_exceeded`, "Too many inboxes created in the last hour" | The moment the oldest inbox created in the last hour turns an hour old. |
+| `rate_limit_exceeded`, "Too many names were reviewed today" or "refused today" (`POST /inboxes`, `PATCH /inboxes/{id}`) | 00:00 UTC, when the day's shared-domain name reviews reset. |
+| `daily_quota_exceeded` | 00:00 UTC, when the daily limit resets. |
+| `monthly_quota_exceeded` | The end of the billing period, when the monthly volume renews. |
+
+The inbox refusals in the table below name their own. For a daily limit it
+looks like this:
 
 ```
 HTTP/1.1 429 Too Many Requests

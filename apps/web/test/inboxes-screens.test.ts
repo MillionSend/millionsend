@@ -3,7 +3,7 @@ import { LABEL_COLORS } from "@millionsend/core/inbox-organize";
 import type { InboxSafety } from "@millionsend/db/schema";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxDetail, ThreadMessage, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
 import { authenticatedSender, dkimSignerDomains, grayExplanation } from "@/lib/auth-result";
 import { typedAllowlistEntry } from "@/lib/email-input";
@@ -11,6 +11,7 @@ import { WEBHOOK_EVENT_META, WEBHOOK_EVENT_TYPES } from "@/lib/webhook-events";
 
 const en = {
   inboxes: (await import("../messages/en/inboxes.json")).default,
+  domains: (await import("../messages/en/domains.json")).default,
   common: (await import("../messages/en/common.json")).default,
   webhooks: (await import("../messages/en/webhooks.json")).default,
   nav: (await import("../messages/en/nav.json")).default,
@@ -74,18 +75,32 @@ vi.mock("@tanstack/react-query", () => ({
     isPending: false,
   }),
 }));
-// A native select lists every option a picker offers, which a closed one never renders.
+// A native select lists every option a picker offers, which a closed one never
+// renders, each with the hint and badge its row would show.
 vi.mock("@/components/select", () => ({
   Select: (p: {
     id?: string;
     value: string;
     disabled?: boolean;
-    options: { value: string; label: string }[];
+    ariaLabel: string;
+    options: { value: string; label: string; hint?: string; badge?: { label: string } }[];
   }) =>
     createElement(
       "select",
-      { id: p.id, value: p.value, disabled: p.disabled, onChange: () => {} },
-      p.options.map((o) => createElement("option", { key: o.value, value: o.value }, o.label)),
+      {
+        id: p.id,
+        value: p.value,
+        disabled: p.disabled,
+        "aria-label": p.ariaLabel,
+        onChange: () => {},
+      },
+      p.options.map((o) =>
+        createElement(
+          "option",
+          { key: o.value, value: o.value },
+          [o.label, o.hint, o.badge?.label].filter(Boolean).join(" · "),
+        ),
+      ),
     ),
 }));
 // Dialogs portal to document.body, which a server render does not have.
@@ -527,8 +542,8 @@ describe("inbox screens", () => {
   });
 
   it("says why no inbox can be created yet, and where to fix it", () => {
-    const page = (sharedDomain: string | null) => {
-      rq.data = { domains: [], sharedDomain, plan: { used: 0, limit: 3 } };
+    const page = (sharedDomain: string | null, otherDomains: unknown[] = []) => {
+      rq.data = { domains: [], otherDomains, sharedDomain, plan: { used: 0, limit: 3 } };
       rq.pages = {
         pages: [
           {
@@ -549,6 +564,13 @@ describe("inbox screens", () => {
     const shared = page("inboxes.example");
     expect(shared).toContain("Create an address at inboxes.example");
     expect(shared).not.toContain("disabled");
+    // A domain that doesn't receive yet gets set up in the dialog, so it opens.
+    const own = page(null, [{ id: "d1", name: "agents.example.com", status: "verified" }]);
+    expect(own).not.toContain("disabled");
+    // Its one domain that only lacks receiving is where "turn on receiving" leads.
+    expect(
+      page("inboxes.example", [{ id: "d1", name: "agents.example.com", status: "verified" }]),
+    ).toContain('href="/domains/d1?focus=receiving"');
   });
 
   it("counts unread as needing attention in people inboxes only", () => {
@@ -565,7 +587,12 @@ describe("inbox screens", () => {
       expires_at: null,
       forward_to: [],
     });
-    rq.data = { domains: [], sharedDomain: "inboxes.example", plan: { used: 2, limit: 3 } };
+    rq.data = {
+      domains: [],
+      otherDomains: [],
+      sharedDomain: "inboxes.example",
+      plan: { used: 2, limit: 3 },
+    };
     rq.pages = {
       pages: [
         {
@@ -597,7 +624,12 @@ describe("inbox screens", () => {
       forward_to: [],
       ...extra,
     });
-    rq.data = { domains: [], sharedDomain: "inboxes.example", plan: { used: 2, limit: 3 } };
+    rq.data = {
+      domains: [],
+      otherDomains: [],
+      sharedDomain: "inboxes.example",
+      plan: { used: 2, limit: 3 },
+    };
     rq.pages = {
       pages: [
         {
@@ -769,6 +801,7 @@ describe("addresses on the shared domain", () => {
           open: true,
           onClose: () => {},
           domains: [],
+          otherDomains: [],
           sharedDomain: "acme.agents.example",
         }),
       ),
@@ -776,7 +809,7 @@ describe("addresses on the shared domain", () => {
   const fieldError = (html: string) => html.match(/class="ms-field-error"[^>]*>([^<]*)</)?.[1];
 
   it("sets up no claim on load: a team's subdomain comes with the team", () => {
-    rq.data = { domains: [], sharedDomain: "agents.example", plan: null };
+    rq.data = { domains: [], otherDomains: [], sharedDomain: "agents.example", plan: null };
     rq.pages = {
       pages: [
         {
@@ -801,8 +834,11 @@ describe("addresses on the shared domain", () => {
       rq.data = rq.pages = undefined;
       vi.unstubAllGlobals();
     }
-    // The empty state offering the shared domain, where the page used to claim.
-    expect(html).toContain(t("empty.sharedOnly", { domain: "agents.example" }));
+    // The empty state offering the shared domain, where the page used to claim,
+    // and a way to the team's own domains (none yet: the Domains list).
+    expect(html).toContain(
+      'Create an address at agents.example, no DNS needed. For addresses on your own domain, <a class="ms-link" href="/domains">turn on receiving</a> for it.',
+    );
     expect(rq.mutate).not.toHaveBeenCalled();
     expect(rq.mutations.map((options) => options.path)).toEqual(["inboxes.create.mutationOptions"]);
   });
@@ -1230,5 +1266,153 @@ describe("where held mail is released", () => {
     );
     expect(banner).toContain(RELEASE);
     expect(html.split(RELEASE)).toHaveLength(2);
+  });
+});
+
+describe("the team's own domains in the create dialog", () => {
+  const MX_QUERY = "domains.receivingMx.queryOptions";
+  const record = {
+    type: "MX",
+    name: "agents.example.com",
+    value: "mx.receiving.test",
+    priority: 10,
+  };
+  /** What the live MX check answers; undefined while it hasn't. */
+  const mx = (answer: unknown) => {
+    rq.byPath[MX_QUERY] = answer;
+  };
+  afterEach(() => {
+    delete rq.byPath[MX_QUERY];
+  });
+  const dialog = (
+    p: {
+      domains?: { id: string; name: string }[];
+      otherDomains?: {
+        id: string;
+        name: string;
+        status: "verified" | "pending" | "temporary_failure" | "failed";
+      }[];
+      sharedDomain?: string;
+    },
+    role: "owner" | "member" = "owner",
+  ) =>
+    renderToStaticMarkup(
+      createElement(
+        ServerTeamRole.Provider,
+        { value: role },
+        createElement(CreateInboxDialog, {
+          open: true,
+          onClose: () => {},
+          domains: p.domains ?? [],
+          otherDomains: p.otherDomains ?? [],
+          sharedDomain: p.sharedDomain ?? null,
+        }),
+      ),
+    ).replaceAll("&#x27;", "'");
+  /** Create held back with a reason: the picked domain can't receive yet. */
+  const createHeld = (html: string) =>
+    /class="ms-tooltip-trigger inline"[^>]*><button type="submit"[^>]*disabled/.test(html);
+  const off = { id: "d-off", name: "agents.example.com", status: "verified" as const };
+
+  it("lists every domain the team has, each with what it still needs", () => {
+    rq.error = null;
+    mx(undefined);
+    const html = dialog({
+      domains: [{ id: "d-in", name: "in.example.com" }],
+      otherDomains: [off, { id: "d-new", name: "news.example.com", status: "pending" }],
+      sharedDomain: "acme.agents.example",
+    });
+    const picker = html.match(/<select[^>]*aria-label="Domain"[^>]*>.*?<\/select>/)?.[0] ?? "";
+    expect([...picker.matchAll(/<option value="[^"]+"[^>]*>([^<]*)</g)].map((m) => m[1])).toEqual([
+      "@in.example.com",
+      "@acme.agents.example · No DNS",
+      "@agents.example.com · Receiving off",
+      "@news.example.com · Pending",
+    ]);
+    // The picked domain receives: no card, and nothing holds Create.
+    expect(html).not.toContain("receive mail here yet");
+    expect(createHeld(html)).toBe(false);
+  });
+
+  it("offers an owner the switch only once DNS shows no other mail server, holding Create", () => {
+    mx(undefined);
+    const checking = dialog({ otherDomains: [off] });
+    expect(checking).toContain("Checking where agents.example.com gets its mail…");
+    expect(checking).not.toContain("Enable receiving");
+    expect(createHeld(checking)).toBe(true);
+
+    mx({ record, status: "missing" });
+    const html = dialog({ otherDomains: [off] });
+    expect(html).toContain("agents.example.com doesn't receive mail here yet");
+    expect(html).toContain(t("create.receiving.enableBody"));
+    expect(html).toMatch(
+      /<button type="button" class="ms-btn ms-btn-secondary">.*?Enable receiving<\/button>/,
+    );
+    expect(html).toContain('href="https://docs.millionsend.com/concepts/receiving#set-up"');
+    expect(createHeld(html)).toBe(true);
+  });
+
+  it("gives a member a link to send an admin, never a switch that fails", () => {
+    mx({ record, status: "missing" });
+    const html = dialog({ otherDomains: [off] }, "member");
+    expect(html).toContain(t("create.receiving.memberBody"));
+    expect(html).toContain("Copy link");
+    expect(html).not.toContain("Enable receiving");
+  });
+
+  it("leads with a subdomain when the domain's mail goes to another server", () => {
+    const apex = { id: "d-apex", name: "example.com", status: "verified" as const };
+    mx({
+      record: { ...record, name: "example.com" },
+      status: "mismatch",
+      found: "1 smtp.mail.example\n5 alt.mail.example",
+    });
+    const html = dialog({ otherDomains: [apex] });
+    expect(html).toContain("Mail for example.com goes to smtp.mail.example.");
+    expect(html).toContain('href="/domains/new?name=inbound.example.com"');
+    expect(html).not.toContain("Enable receiving</button>");
+    // Taking that mail over stays behind the domain page's own confirm.
+    expect(html).toContain('href="/domains/d-apex?focus=receiving"');
+    expect(createHeld(html)).toBe(true);
+
+    // A subdomain the team already has isn't offered again; a member gets no button.
+    const added = { id: "d-sub", name: "inbound.example.com", status: "pending" as const };
+    expect(dialog({ otherDomains: [apex, added] })).not.toContain("/domains/new?name=");
+    const member = dialog({ otherDomains: [apex] }, "member");
+    expect(member).not.toContain("/domains/new?name=");
+    expect(member).toContain(t("create.receiving.memberAddDomain"));
+  });
+
+  it("points a domain that isn't verified back to its page", () => {
+    mx(undefined);
+    const html = dialog({
+      otherDomains: [{ id: "d-new", name: "news.example.com", status: "pending" }],
+    });
+    expect(html).toContain("news.example.com isn't verified yet");
+    expect(html).toContain('href="/domains/d-new"');
+    expect(createHeld(html)).toBe(true);
+  });
+
+  it("shows the record to add while receiving is on and no MX points here", () => {
+    mx({ record, status: "missing" });
+    const html = dialog({ domains: [{ id: "d-on", name: "agents.example.com" }] });
+    expect(html).toContain(t("create.receiving.mxToAdd"));
+    expect(html).toContain("mx.receiving.test");
+    expect(html).toContain(t("create.receiving.addMxBody"));
+    expect(createHeld(html)).toBe(false);
+    // Receiving and live: nothing to say.
+    mx({ record, status: "found" });
+    expect(dialog({ domains: [{ id: "d-on", name: "agents.example.com" }] })).not.toContain(
+      t("create.receiving.mxToAdd"),
+    );
+  });
+
+  it("keeps a line about the team's own domains under the shared address", () => {
+    expect(dialog({ sharedDomain: "acme.agents.example" })).toMatch(
+      /acme\.agents\.example is ready with no DNS\. To use your own domain, add it in <a[^>]*href="\/domains"[^>]*>Domains<\/a>, then turn on receiving\./,
+    );
+    expect(dialog({ otherDomains: [off], sharedDomain: "acme.agents.example" })).toContain(
+      "Your domains, or the shared acme.agents.example, ready with no DNS.",
+    );
   });
 });

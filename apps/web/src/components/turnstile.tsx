@@ -1,8 +1,10 @@
 "use client";
 
+import Script from "next/script";
 import { useCallback, useEffect, useRef } from "react";
 
-const SCRIPT_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+const API_URL = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+const SCRIPT_URL = `${API_URL}?render=explicit`;
 /* Global Turnstile calls once the API is usable: the supported "ready" signal
    for a script added at runtime (turnstile.ready() throws for async tags). */
 const ONLOAD_CALLBACK = "__millionsendTurnstileLoaded";
@@ -122,6 +124,21 @@ export function useTurnstile(siteKey: string | null) {
   }, [siteKey]);
 
   return { slot: <div ref={slotRef} />, getToken };
+}
+
+/**
+ * Turnstile inside a plain HTML form: rendered implicitly, the widget puts
+ * its token in the form as cf-turnstile-response, so the post needs no
+ * script of its own. Renders nothing without a site key.
+ */
+export function TurnstileField({ siteKey }: { siteKey: string | null }) {
+  if (!siteKey) return null;
+  return (
+    <>
+      <div className="cf-turnstile" data-sitekey={siteKey} data-appearance="interaction-only" />
+      <Script src={API_URL} />
+    </>
+  );
 }
 
 /** Better Auth's captcha plugin reads the token from this header. */

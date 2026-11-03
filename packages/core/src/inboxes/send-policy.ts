@@ -1,5 +1,5 @@
 import { parseSingleSender } from "../sender-address.js";
-import { DAY_MS, nextUtcDayStart } from "../utc-day.js";
+import { DAY_MS, nextUtcDayStart, secondsUntil } from "../utc-day.js";
 import type { InboxActor } from "./activity.js";
 import type { InboxSafety } from "./safety.js";
 import type { SharedSending } from "./shared-mode.js";
@@ -122,7 +122,7 @@ function sharedRefusal(
 
 /** retry-after for a daily limit: whole seconds until the next UTC midnight, at least one. */
 export function secondsToNextUtcDay(now: Date): number {
-  return Math.max(1, Math.ceil((nextUtcDayStart(now).getTime() - now.getTime()) / 1000));
+  return secondsUntil(nextUtcDayStart(now), now);
 }
 
 /** New recipients an inbox may write to on day `d` of its sending: 10, 20, 40, 80… */

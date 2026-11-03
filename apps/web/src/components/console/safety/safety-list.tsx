@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useDeferredValue, useState } from "react";
 import { DOMAIN_REGIONS, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { LeadCell, SkeletonLead } from "@/components/lead-cell";
 import { ListFooter } from "@/components/list-footer";
 import { PageHeader } from "@/components/page-header";
 import { PopoverMenu } from "@/components/popover-menu";
@@ -23,6 +24,7 @@ import { useTRPC, useTRPCClient } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useTeamActions } from "../team-actions";
 import { PlanBadge, TeamStatus } from "../teams/cells";
+import { FreeFuse } from "./free-fuse";
 import { LimitRequests } from "./limit-requests";
 import { FlagStatusBadge, LoadErrorCard, Rate7d, ReasonLabel, RegionCell, RiskCell } from "./parts";
 import { useContentReveal } from "./reveal";
@@ -111,7 +113,12 @@ export function SafetyList() {
     setSort(column);
     setDir(next);
   };
-  const th = (column: (typeof SORTS)[number], defaultDir: SortDir = "asc", right = false) => (
+  const th = (
+    column: (typeof SORTS)[number],
+    defaultDir: SortDir = "asc",
+    right = false,
+    style?: React.CSSProperties,
+  ) => (
     <SortableTh
       column={column}
       label={t(`columns.${column === "name" ? "team" : column}`)}
@@ -120,6 +127,7 @@ export function SafetyList() {
       onSort={onSort}
       defaultDir={defaultDir}
       right={right}
+      {...(style ? { style } : {})}
     />
   );
 
@@ -135,6 +143,7 @@ export function SafetyList() {
           </Link>
         }
       />
+      <FreeFuse onChanged={refetch} />
       <LimitRequests />
       <WaitingList onChanged={refetch} />
       <div
@@ -204,7 +213,7 @@ export function SafetyList() {
             <Table className="nowrap baseline">
               <thead>
                 <tr>
-                  {th("name")}
+                  {th("name", "asc", false, { width: "100%" })}
                   {th("type")}
                   <SortableTh
                     column="risk"
@@ -256,12 +265,10 @@ export function SafetyList() {
                           router.push(href);
                         }}
                       >
-                        <td>
-                          <span className="ms-lead" style={{ gap: 8 }}>
-                            <TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />
-                            {row.name}
-                          </span>
-                        </td>
+                        <LeadCell
+                          tile={<TeamLogo name={row.name} logoUrl={row.logoUrl} size={22} />}
+                          value={row.name}
+                        />
                         <td>
                           <PlanBadge plan={row.plan} planQuota={row.planQuota} />
                         </td>
@@ -408,10 +415,7 @@ function SkeletonRows() {
   return widths.map((width) => (
     <tr key={width}>
       <td>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <Skeleton width={22} height={22} radius={7} />
-          <Skeleton width={width} height={13} />
-        </span>
+        <SkeletonLead width={width} tile={22} />
       </td>
       <td>
         <SkeletonBadge width={56} />

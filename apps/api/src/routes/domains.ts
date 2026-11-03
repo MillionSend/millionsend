@@ -5,7 +5,7 @@ import {
   associateDomainTenant,
   clearTrackingClock,
   createFixedWindowLimiter,
-  DOMAIN_CREATE_LIMIT_PER_HOUR,
+  DOMAIN_CREATES_PER_HOUR,
   deleteInboxes,
   failQueuedEmailsForDomain,
   fetchTeamStanding,
@@ -423,8 +423,8 @@ export function registerDomainRoutes(
 
   // Identity creation is the one route that provisions a shared AWS resource;
   // cloud caps it per team so one tenant cannot burn the account's
-  // CreateEmailIdentity throttle for everyone.
-  const createLimited = createFixedWindowLimiter(DOMAIN_CREATE_LIMIT_PER_HOUR, 3_600_000);
+  // CreateEmailIdentity throttle for everyone. Each call passes its plan's cap.
+  const createLimited = createFixedWindowLimiter(DOMAIN_CREATES_PER_HOUR.free, 3_600_000);
 
   const queueDomainAge = async (domainId: string) => {
     try {
@@ -500,7 +500,7 @@ export function registerDomainRoutes(
         403: jsonErr("Plan domain limit reached"),
         409: jsonErr("Domain already added"),
         422: jsonErr("Validation error"),
-        429: jsonErr("Too many domains created recently"),
+        429: jsonErr("Too many domains created this hour; retry-after says when to try again"),
       },
     }),
     async (c) => {
@@ -569,8 +569,18 @@ export function registerDomainRoutes(
             403,
           );
         }
-        if (createLimited(auth.teamId)) {
-          return c.json(errorBody(429, "rate_limit_exceeded", "Too many domains created"), 429);
+        const perHour = DOMAIN_CREATES_PER_HOUR[auth.plan];
+        const retryAfter = createLimited(auth.teamId, perHour);
+        if (retryAfter !== null) {
+          c.header("retry-after", String(retryAfter));
+          return c.json(
+            errorBody(
+              429,
+              "rate_limit_exceeded",
+              `Too many domains created: this plan adds up to ${perHour} an hour; retry-after says when to try again`,
+            ),
+            429,
+          );
         }
       }
 

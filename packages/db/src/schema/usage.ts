@@ -40,6 +40,13 @@ export const usageCounters = pgTable(
     // complained leave out feedback about mail SES never attempted (core's
     // sesAttempted), which SES's own rates leave out too.
     hardBounced: integer("hard_bounced").notNull().default(0),
+    // A pause lift's snapshot of sent and hard_bounced. The deliverability
+    // guardrail and the account score subtract it; every other reader keeps
+    // the raw columns, which match what SES counted.
+    excludedSent: integer("excluded_sent").notNull().default(0),
+    excludedHardBounced: integer("excluded_hard_bounced").notNull().default(0),
+    // Dated by the UTC day the complaint's mail went out, the day SES's own
+    // rate files it under, not the day it arrived.
     complained: integer("complained").notNull().default(0),
     // Unique engagement per day: one recipient opening/clicking many times
     // counts once, so rates against `delivered` stay <= 100%.
@@ -79,9 +86,12 @@ export const usageCounters = pgTable(
  * platform breaker's region counts read, by day, and the shared inbox
  * domain's shared_recipients, shared_name_refusals and shared_name_reviews,
  * which only their own daily limits read; quota, the deliverability
- * guardrail and the account score keep reading the daily table. Rows before
- * the table existed were backfilled at noon UTC of their day, which is the
- * same calendar date in every timezone between UTC-11 and UTC+11.
+ * guardrail and the account score keep reading the daily table. `complained`
+ * sits on the hour the complaint arrived while the daily table dates it by
+ * its mail's send day, so for complaints the hours do not sum into the daily
+ * rows. Rows before the table existed were backfilled at noon UTC of
+ * their day, which is the same calendar date in every timezone between UTC-11
+ * and UTC+11.
  */
 export const usageCountersHourly = pgTable(
   "usage_counters_hourly",
@@ -107,6 +117,39 @@ export const usageCountersHourly = pgTable(
     index("usage_counters_hourly_hour_idx").on(t.hour),
   ],
 );
+
+/**
+ * The Free teams one person created (teams.pool_owner_id), counted as one per
+ * UTC day: `accepted` is their shared daily cap, reserved with the same
+ * guarded upsert as usage_counters after the team's own row, and the rest are
+ * the deliverability guardrail's inputs, written beside the team's. Keyed by
+ * user with no FK, so a deleted team's usage and complaints stay counted.
+ * Columns mean what they mean in usage_counters.
+ */
+export const freePoolUsage = pgTable(
+  "free_pool_usage",
+  {
+    ownerId: text("owner_id").notNull(),
+    day: date("day").notNull(),
+    accepted: integer("accepted").notNull().default(0),
+    sent: integer("sent").notNull().default(0),
+    sentNoFeedback: integer("sent_no_feedback").notNull().default(0),
+    hardBounced: integer("hard_bounced").notNull().default(0),
+    complained: integer("complained").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.ownerId, t.day] })],
+);
+
+/**
+ * A Free pool's burst allowance (core bookFreeBurst), one row per creator:
+ * `tat` is when the allowance is whole again, each booked recipient pushing
+ * it one refill later. Keyed by user with no FK, like free_pool_usage, so
+ * deleting a team refills nothing.
+ */
+export const freePoolBursts = pgTable("free_pool_bursts", {
+  ownerId: text("owner_id").primaryKey(),
+  tat: timestamp("tat", { withTimezone: true }).notNull(),
+});
 
 /**
  * Monthly-plan counters, one row per team and Stripe billing period. The

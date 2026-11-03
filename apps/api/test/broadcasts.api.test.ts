@@ -467,6 +467,22 @@ describe("broadcasts API platform breaker", () => {
     });
     expect(email.status).toBe(200);
   });
+
+  it("a pause the complaints tripped refuses only the teams it holds", async () => {
+    const heldTeam = await makeSendableTeam("bc-region-scoped-held");
+    const other = await makeSendableTeam("bc-region-scoped-other");
+    await db.update(schema.regionBreakers).set({ heldTeams: [heldTeam.teamId] });
+    try {
+      const refused = await call(heldTeam.token, `/broadcasts/${heldTeam.broadcastId}/send`, {});
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ name: "broadcasts_paused" });
+      const sent = await call(other.token, `/broadcasts/${other.broadcastId}/send`, {});
+      expect(sent.status).toBe(200);
+      expect(enqueued).toEqual([other.broadcastId]);
+    } finally {
+      await db.update(schema.regionBreakers).set({ heldTeams: null });
+    }
+  });
 });
 
 describe("broadcasts send-on-create", () => {

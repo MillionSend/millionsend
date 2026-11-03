@@ -77,3 +77,12 @@ describe("Select option groups", () => {
     expect(html).not.toContain(">MCP<");
   });
 });
+
+describe("Select option rows", () => {
+  it("ends a long label in an ellipsis before its hint", () => {
+    const html = render(options);
+    expect(html).toContain(
+      '<span data-label="" style="overflow:hidden;text-overflow:ellipsis">Production</span><span style="color:var(--ms-muted);font-size:12px;flex-shrink:0">ms_live_…ab12</span>',
+    );
+  });
+});

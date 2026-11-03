@@ -253,6 +253,14 @@ export function resolveMonitorSettings(
   return { settings: settings as MonitorSettings, sources };
 }
 
+/**
+ * The content monitor's flag line: the flag risk, or Infinity while the judge
+ * is off, so a stored risk crosses nothing.
+ */
+export function monitorFlagLine(settings: MonitorSettings | null): number {
+  return settings ? settings.flagRisk : Number.POSITIVE_INFINITY;
+}
+
 /** The flag, alert and pause lines must climb in that order or the policy contradicts itself. */
 export function monitorThresholdsOrdered(
   s: Pick<MonitorSettings, "flagRisk" | "alertRisk" | "pauseRisk">,

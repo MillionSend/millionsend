@@ -367,13 +367,15 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
                   lines: COMPLAINT_LINES,
                   basis: t("complaintBasis", { sent: fmt.format(data.complaintSent) }),
                   judged: data.complaintsJudged,
+                  tooFew: t("complaintsTooFew"),
                 },
                 {
                   label: score("hardBounceRate"),
                   rate: data.hardBounceRate,
                   lines: BOUNCE_LINES,
-                  basis: t("bounceBasis", { sent: fmt.format(data.sent) }),
-                  judged: true,
+                  basis: t("bounceBasis", { sent: fmt.format(data.bounceSent) }),
+                  judged: data.bouncesJudged,
+                  tooFew: t("bouncesTooFew"),
                 },
               ].map((row) => (
                 <div key={row.label}>
@@ -406,7 +408,7 @@ export function ScoreDetailsDrawer({ open, onClose }: { open: boolean; onClose: 
                       formatPenalty={(tenths) => signed(tenths)}
                     />
                   ) : (
-                    <Note>{t("complaintsTooFew")}</Note>
+                    <Note>{row.tooFew}</Note>
                   )}
                 </div>
               ))}

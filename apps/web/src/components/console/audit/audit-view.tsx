@@ -9,6 +9,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
 import { Table } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
+import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { auditDetail } from "./detail";
 
@@ -173,8 +174,8 @@ export function AuditView({
                       </span>
                     )}
                   </td>
-                  <td style={{ color: "var(--ms-muted)", fontSize: 13 }}>
-                    {detail || common("none")}
+                  <td className="ms-cell-fill" style={{ color: "var(--ms-muted)", fontSize: 13 }}>
+                    {detail ? <Truncated text={detail} /> : common("none")}
                   </td>
                   <td className="ms-mono" style={{ fontSize: 13, whiteSpace: "nowrap" }}>
                     {row.ip ?? common("none")}

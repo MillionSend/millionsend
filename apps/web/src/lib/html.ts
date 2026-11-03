@@ -1,3 +1,5 @@
+import { PADDING_MARKS } from "@millionsend/core/html";
+
 export { escapeHtml } from "@millionsend/core/html";
 
 const VOID_ELEMENTS = new Set([
@@ -103,8 +105,7 @@ export function htmlToText(html: string): string {
       .replace(/&(zwnj|zwj|shy|lrm|rlm);/gi, "")
       // Ampersand last so `&amp;lt;` decodes to the literal `&lt;`, not `<`.
       .replace(/&amp;/gi, "&")
-      // Soft hyphens, zero-width characters and the like: preheader padding.
-      .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]|\u034f/g, "")
+      .replace(PADDING_MARKS, "")
       // Non-breaking and typographic spaces: button padding, for one.
       .replace(/[\u00a0\u2000-\u200a\u202f\u205f]/g, " ")
       .replace(/ {2,}/g, " ")

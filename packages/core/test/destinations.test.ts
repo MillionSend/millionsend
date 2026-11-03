@@ -5,12 +5,13 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyJudgedSample, recordMonitorSample } from "../src/abuse-monitor.js";
 import type { DomainAge, DomainAgeResolver } from "../src/domain-age.js";
+import { isShortener } from "../src/email-insights.js";
 import { MONITOR_SETTING_DEFAULTS } from "../src/monitor-settings.js";
 import {
   anyYoungLinkDomain,
   clearDestinations,
   destinationVerdictParks,
-  isShortener,
+  linkDomainsAged,
   messageDestinations,
   teamNovelDestinations,
   unclearedDestinations,
@@ -233,6 +234,24 @@ describe("link domain ages", () => {
       }),
     ).toBe(false);
     expect(asked).toEqual(["no-date.de"]);
+  });
+
+  it("knows a link domain is old only by a date some source has", async () => {
+    const { r } = resolver({
+      "dated-shop.example": new Date(NOW.getTime() - 900 * DAY_MS),
+      "fresh-shop.example": new Date(NOW.getTime() - 2 * DAY_MS),
+    });
+    const aged = (domains: string[]) => linkDomainsAged(db, r, domains, NOW, { budgetMs: 1000 });
+    expect(await aged(["dated-shop.example"])).toBe(true);
+    expect(await aged(["dated-shop.example", "fresh-shop.example"])).toBe(false);
+    expect(await aged(["undated-shop.example"])).toBe(false);
+    expect(await aged(["bit.ly"])).toBe(false);
+    expect(await aged([])).toBe(false);
+    const slow = resolver({ "slow-shop.example": new Date(NOW.getTime() - 900 * DAY_MS) }, 200);
+    expect(
+      await linkDomainsAged(db, slow.r, ["slow-shop.example"], NOW, { budgetMs: 20 }),
+    ).toBeNull();
+    await new Promise((done) => setTimeout(done, 300));
   });
 
   it("stops waiting at its budget with the age not known, and the lookup still fills the cache", async () => {

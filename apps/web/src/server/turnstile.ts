@@ -3,11 +3,6 @@ import { env } from "@millionsend/config";
 const SITE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const VERIFY_TIMEOUT_MS = 10_000;
 
-/** Both keys set: the auth forms and the onboarding send expect a token. */
-export function turnstileConfigured(): boolean {
-  return Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY);
-}
-
 /**
  * Cloudflare siteverify. Fails closed: no token, a provider outage, or a
  * timeout all read as not verified — the caller rejects the action, never

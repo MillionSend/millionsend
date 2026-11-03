@@ -2,17 +2,17 @@
   "banner": {
     "warning": {
       "bounce": "Sua taxa de bounce permanente ({rate}) nos últimos {days} dias está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere.",
-      "complaint": "Sua taxa de reclamação ({rate}) nos últimos {days} dias está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere."
+      "complaint": "Sua taxa de reclamação ({rate}) nos e-mails enviados nos últimos {days} dias está se aproximando do limite. Novas transmissões estão sendo enviadas em ritmo reduzido até que ela se recupere."
     },
     "paused": {
-      "bounce": "As transmissões estão pausadas: sua taxa de bounce permanente ({rate}) nos últimos {days} dias está acima do limite de {limit}.",
-      "complaint": "As transmissões estão pausadas: sua taxa de reclamação ({rate}) nos últimos {days} dias está acima do limite de {limit}."
+      "bounce": "Os envios estão pausados: sua taxa de bounce permanente ({rate}) nos últimos {days} dias está acima do limite de {limit}.",
+      "complaint": "Os envios estão pausados: sua taxa de reclamação ({rate}) nos e-mails enviados nos últimos {days} dias está acima do limite de {limit}."
     },
     "action": "Abrir métricas"
   },
   "sendGuard": {
     "bounce": "As transmissões estão pausadas: sua taxa de bounce permanente é {rate} nos últimos {days} dias, acima do limite de {limit}. Resolva antes de enviar.",
-    "complaint": "As transmissões estão pausadas: sua taxa de reclamação é {rate} nos últimos {days} dias, acima do limite de {limit}. Resolva antes de enviar.",
+    "complaint": "As transmissões estão pausadas: sua taxa de reclamação é {rate} nos e-mails enviados nos últimos {days} dias, acima do limite de {limit}. Resolva antes de enviar.",
     "suspended": "Esta equipe está suspensa pelo operador da instância. O envio fica desativado até a reativação.",
     "pendingReview": "O envio está pausado aguardando revisão. Não é possível enviar transmissões até o fim da revisão.",
     "operatorPaused": "As transmissões desta equipe estão pausadas pelo operador da instância. E-mails transacionais não são afetados.",

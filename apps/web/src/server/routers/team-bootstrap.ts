@@ -1,20 +1,23 @@
 import { randomBytes } from "node:crypto";
-import { env } from "@millionsend/config";
+import { isCloudDeployment } from "@millionsend/config";
 import {
   ALL_TEAMS_GRANT,
+  auditRow,
+  DAY_MS,
+  encodeAuditActor,
   fetchBestOwnedPlan,
   fetchTeamStanding,
   flagImitatedBrand,
   linkTeam,
   PLAN_TEAM_LIMIT,
   slugify,
+  TEAM_CREATE_WINDOW_DAYS,
 } from "@millionsend/core";
-import { schema } from "@millionsend/db";
+import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { isUniqueViolation } from "@/lib/db-errors";
-import { recordAudit } from "../audit";
 import { settleTeamSubdomain } from "../inboxes";
 import { listMemberships } from "../membership";
 import { belongsToSilentlySuspendedTeam, suspensionLockError } from "../suspension-lock";
@@ -39,6 +42,38 @@ async function selectTeam(
       .update(schema.session)
       .set({ activeTeamId: teamId })
       .where(eq(schema.session.id, ctx.session.session.id));
+  }
+}
+
+/**
+ * Refuses a new team past the user's cap on Cloud (PLAN_TEAM_LIMIT, by the
+ * best plan among the teams they own). On Free, the teams they created in
+ * the last TEAM_CREATE_WINDOW_DAYS count beside the ones they own, deleted
+ * ones included, so deleting and creating again never mints a fresh team.
+ */
+async function assertTeamRoom(db: Db, userId: string): Promise<void> {
+  const [memberships, bestPlan] = await Promise.all([
+    listMemberships(db, userId),
+    fetchBestOwnedPlan(db, userId),
+  ]);
+  const counted = new Set(memberships.filter((m) => m.role === "owner").map((m) => m.teamId));
+  if (bestPlan === "free") {
+    const a = schema.auditLog;
+    const since = new Date(Date.now() - TEAM_CREATE_WINDOW_DAYS * DAY_MS);
+    const recent = await db
+      .select({ teamId: a.teamId })
+      .from(a)
+      .where(
+        and(
+          eq(a.action, "team.created"),
+          eq(a.actorId, encodeAuditActor({ userId })),
+          gt(a.createdAt, since),
+        ),
+      );
+    for (const row of recent) if (row.teamId) counted.add(row.teamId);
+  }
+  if (counted.size >= PLAN_TEAM_LIMIT[bestPlan]) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Team limit reached." });
   }
 }
 
@@ -110,20 +145,12 @@ export const teamBootstrapRouter = router({
   createTeam: protectedProcedure
     .input(z.object({ name: teamNameSchema }))
     .mutation(async ({ ctx, input }) => {
-      if (await belongsToSilentlySuspendedTeam(ctx.db, ctx.session.user.id)) {
+      const userId = ctx.session.user.id;
+      if (await belongsToSilentlySuspendedTeam(ctx.db, userId)) {
         throw await suspensionLockError("unavailable");
       }
-      if (env.IS_CLOUD) {
-        const userId = ctx.session.user.id;
-        const [memberships, bestPlan] = await Promise.all([
-          listMemberships(ctx.db, userId),
-          fetchBestOwnedPlan(ctx.db, userId),
-        ]);
-        const owned = memberships.filter((m) => m.role === "owner").length;
-        if (owned >= PLAN_TEAM_LIMIT[bestPlan]) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "Team limit reached." });
-        }
-      }
+      const cloud = isCloudDeployment();
+      const name = input.name.trim();
       const base = slugify(input.name) || "team";
       let created: { teamId: string } | undefined;
       // Only the insert retries: a unique violation after it would add a second team.
@@ -131,16 +158,31 @@ export const teamBootstrapRouter = router({
         const slug = attempt === 0 ? base : `${base}-${randomBytes(3).toString("hex")}`;
         try {
           created = await ctx.db.transaction(async (tx) => {
+            const txDb = tx as unknown as Db;
+            if (cloud) {
+              // One user's creations queue here, so two at once cannot both
+              // fit under the cap, and each counts the ones before it.
+              await tx.execute(
+                sql`select pg_advisory_xact_lock(hashtext(${`team.create:${userId}`}))`,
+              );
+              await assertTeamRoom(txDb, userId);
+            }
             const [team] = await tx
               .insert(schema.teams)
-              .values({ name: input.name.trim(), slug })
+              .values({ name, slug, poolOwnerId: cloud ? userId : null })
               .returning({ id: schema.teams.id });
             if (!team) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-            await tx.insert(schema.teamMembers).values({
-              teamId: team.id,
-              userId: ctx.session.user.id,
-              role: "owner",
-            });
+            await tx.insert(schema.teamMembers).values({ teamId: team.id, userId, role: "owner" });
+            // In the transaction, not after it: the Free cap counts these rows.
+            await tx.insert(schema.auditLog).values(
+              auditRow({
+                teamId: team.id,
+                actor: { userId },
+                action: "team.created",
+                target: { type: "team", id: team.id },
+                metadata: { name },
+              }),
+            );
             return { teamId: team.id };
           });
         } catch (error) {
@@ -152,16 +194,8 @@ export const teamBootstrapRouter = router({
       }
       // A freshly created team becomes the active one.
       await selectTeam(ctx, created.teamId);
-      await recordAudit(
-        { ...ctx, teamId: created.teamId },
-        {
-          action: "team.created",
-          target: { type: "team", id: created.teamId },
-          metadata: { name: input.name.trim() },
-        },
-      );
       await linkTeam(ctx.db, { teamId: created.teamId, trigger: "team" });
-      await flagImitatedBrand(ctx.db, created.teamId, input.name.trim());
+      await flagImitatedBrand(ctx.db, created.teamId, name);
       await settleTeamSubdomain(ctx.db, created.teamId);
       return created;
     }),

@@ -77,6 +77,9 @@ export {
 export {
   type ParsedSesEvent,
   parseSesEvent,
+  SES_EMAIL_ID_TAG,
+  SES_POOL_TAG,
+  SES_TAG_VALUE,
   type SesEventType,
 } from "./ses-events.js";
 export {

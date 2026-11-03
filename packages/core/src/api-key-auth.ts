@@ -3,6 +3,8 @@ import { schema } from "@millionsend/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { extractTokenPrefix, verifyApiKey } from "./api-keys.js";
 import { effectivePlan, type Plan, type QuotaTeamRow } from "./plans.js";
+import { QUOTA_COLUMNS } from "./team-plan.js";
+import type { TeamRole } from "./team-roles.js";
 
 /** SECURITY: the only source of teamId for API-key-authenticated requests. */
 export interface ApiKeyAuth {
@@ -37,13 +39,7 @@ export interface ApiKeyAuth {
   role?: TeamRole;
 }
 
-export type TeamRole = (typeof schema.teamMemberRoleEnum.enumValues)[number];
-
-/**
- * The dashboard's adminProcedure line: owners and admins manage, members
- * read. An allow-list, so a role added later is refused until admitted here.
- */
-export const isAdminRole = (role: TeamRole): boolean => role === "owner" || role === "admin";
+export { isAdminRole, type TeamRole } from "./team-roles.js";
 
 const LAST_USED_STAMP_INTERVAL_MS = 60_000;
 
@@ -67,13 +63,7 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
       domainId: schema.apiKeys.domainId,
       inboxId: schema.apiKeys.inboxId,
       inboxExpiresAt: schema.inboxes.expiresAt,
-      plan: schema.teams.plan,
-      planQuota: schema.teams.planQuota,
-      planStatus: schema.teams.planStatus,
-      currentPeriodStart: schema.teams.currentPeriodStart,
-      currentPeriodEnd: schema.teams.currentPeriodEnd,
-      overageEnabled: schema.teams.overageEnabled,
-      dailySendCeiling: schema.teams.dailySendCeiling,
+      ...QUOTA_COLUMNS,
     })
     .from(schema.apiKeys)
     .innerJoin(schema.teams, eq(schema.apiKeys.teamId, schema.teams.id))
@@ -81,33 +71,36 @@ export async function authenticateApiKey(db: Db, token: string): Promise<ApiKeyA
     .where(and(eq(schema.apiKeys.tokenPrefix, prefix), isNull(schema.apiKeys.revokedAt)));
   const match = candidates.find((k) => verifyApiKey(token, k.keyHash));
   if (!match) return null;
+  const {
+    id,
+    keyHash,
+    teamId,
+    lastUsedAt,
+    permission,
+    domainId,
+    inboxId,
+    inboxExpiresAt,
+    ...billing
+  } = match;
   const now = Date.now();
   // An inbox key dies with its inbox's lifetime, before the sweep revokes it.
-  if (match.inboxExpiresAt && match.inboxExpiresAt.getTime() <= now) return null;
-  if (!match.lastUsedAt || now - match.lastUsedAt.getTime() > LAST_USED_STAMP_INTERVAL_MS) {
+  if (inboxExpiresAt && inboxExpiresAt.getTime() <= now) return null;
+  if (!lastUsedAt || now - lastUsedAt.getTime() > LAST_USED_STAMP_INTERVAL_MS) {
     db.update(schema.apiKeys)
       .set({ lastUsedAt: new Date(now) })
-      .where(eq(schema.apiKeys.id, match.id))
+      .where(eq(schema.apiKeys.id, id))
       .then(
         () => undefined,
         () => undefined,
       );
   }
   return {
-    teamId: match.teamId,
-    plan: effectivePlan(match.plan, match.currentPeriodEnd),
-    billing: {
-      plan: match.plan,
-      planQuota: match.planQuota,
-      planStatus: match.planStatus,
-      currentPeriodStart: match.currentPeriodStart,
-      currentPeriodEnd: match.currentPeriodEnd,
-      overageEnabled: match.overageEnabled,
-      dailySendCeiling: match.dailySendCeiling,
-    },
-    apiKeyId: match.id,
-    permission: match.permission,
-    domainId: match.domainId,
-    inboxId: match.inboxId,
+    teamId,
+    plan: effectivePlan(billing.plan, billing.currentPeriodEnd),
+    billing,
+    apiKeyId: id,
+    permission,
+    domainId,
+    inboxId,
   };
 }

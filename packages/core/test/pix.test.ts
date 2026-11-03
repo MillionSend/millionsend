@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findPixCodes, parsePix } from "../src/pix.js";
+import { findPixCodes, mailCarriesPix, parsePix } from "../src/pix.js";
 
 // The static example from BCB's "Manual de Padrões para Iniciação do Pix".
 const MANUAL_STATIC =
@@ -89,5 +89,29 @@ describe("findPixCodes", () => {
     expect(findPixCodes("000201 is a reference, 000201xx too")).toEqual([]);
     expect(findPixCodes(`${CNPJ} ${CNPJ}`)).toHaveLength(1);
     expect(findPixCodes(`${CNPJ} ${MANUAL_STATIC} ${DYNAMIC}`, 2)).toHaveLength(2);
+  });
+});
+
+describe("mailCarriesPix", () => {
+  it("reads a code the way a reader copies it out of the mail", () => {
+    const split = (gap: string) => `${MANUAL_STATIC.slice(0, 40)}${gap}${MANUAL_STATIC.slice(40)}`;
+    for (const html of [
+      `<p>Pague com Pix: ${MANUAL_STATIC}</p>`,
+      `<p>${MANUAL_STATIC.replaceAll(" ", "&nbsp;")}</p>`,
+      `<p>${MANUAL_STATIC.replaceAll(" ", "&#160;")}</p>`,
+      `<p>&#48;${MANUAL_STATIC.slice(1)}</p>`,
+      `<p>${split("<wbr>")}</p>`,
+      `<p>${split("&shy;")}</p>`,
+      `<p><span>${split("</span><span>")}</span></p>`,
+    ]) {
+      expect(mailCarriesPix({ html, text: null }), html).toBe(true);
+    }
+    expect(mailCarriesPix({ html: null, text: MANUAL_STATIC.replaceAll(" ", "\u00a0") })).toBe(
+      true,
+    );
+    expect(mailCarriesPix({ subject: `Pix: ${CNPJ}`, html: null, text: null })).toBe(true);
+    expect(
+      mailCarriesPix({ subject: "Sua fatura", html: "<p>Pague pelo Pix no app</p>", text: null }),
+    ).toBe(false);
   });
 });

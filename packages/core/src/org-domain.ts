@@ -1,4 +1,4 @@
-import { getDomain } from "tldts";
+import { getDomain, getDomainWithoutSuffix } from "tldts";
 
 /** A hostname as DNS compares it: lowercase, without the root's trailing dot. */
 export function normalizeHostname(hostname: string): string {
@@ -13,6 +13,25 @@ export function isDomainOrSubdomain(name: string, domain: string): boolean {
 /** The last label of a hostname: its top-level domain. */
 export function topLevelLabel(hostname: string): string {
   return hostname.slice(hostname.lastIndexOf(".") + 1);
+}
+
+const DOTTED_IPV4 = /^(\d{1,3})\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+
+/**
+ * Whether a link's host (as the URL parser hands it over, so 2130706433 and
+ * 0x7f.1 arrive as 127.0.0.1) is the reader's own machine, where a
+ * developer's build left pointing at itself sends them: localhost and its
+ * subdomains, 127.0.0.0/8, ::1 and 0.0.0.0. No sender can serve a page
+ * there. A private network is left out, since a router or another device on
+ * it answers a link, and so are an IPv6 address carrying a v4 part and the
+ * testing and documentation names (.test, .example, .invalid): they get the
+ * screening every other name gets.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  const name = normalizeHostname(hostname);
+  const v4 = DOTTED_IPV4.exec(name);
+  if (v4) return name === "0.0.0.0" || Number(v4[1]) === 127;
+  return name === "[::1]" || topLevelLabel(name) === "localhost";
 }
 
 /**
@@ -65,6 +84,15 @@ export function linkDomain(href: string): string | null {
 export function ownerDomain(hostname: string): string {
   const name = normalizeHostname(hostname);
   return getDomain(name, { allowPrivateDomains: true }) ?? name;
+}
+
+/**
+ * The name a domain was registered under, without its suffix, the private
+ * section of the list included: "acme" for mail.acme.com.br. Null for an IP
+ * or a bare suffix.
+ */
+export function registeredName(hostname: string): string | null {
+  return getDomainWithoutSuffix(normalizeHostname(hostname), { allowPrivateDomains: true });
 }
 
 /**

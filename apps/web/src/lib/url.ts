@@ -14,3 +14,8 @@ export function isLoopbackUrl(url: string | null | undefined): boolean {
     return false;
   }
 }
+
+/** An in-app path as a link to send someone; the bare path where no window exists (a server render). */
+export function absoluteUrl(path: string): string {
+  return typeof window === "undefined" ? path : new URL(path, window.location.origin).href;
+}

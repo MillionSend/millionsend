@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { captchaHeaders, useTurnstile } from "@/components/turnstile";
 import { authClient } from "@/lib/auth-client";
+import { isCaptchaRefusal } from "@/lib/auth-errors";
 import { typedEmail } from "@/lib/email-input";
 import styles from "./auth.module.css";
 import { StrengthMeter } from "./auth-form";
@@ -52,7 +53,7 @@ export function ForgotPasswordForm({
       redirectTo: "/reset-password",
       fetchOptions: { headers: captchaHeaders(token) },
     });
-    if (error?.code === "VERIFICATION_FAILED" || error?.code === "MISSING_RESPONSE") {
+    if (isCaptchaRefusal(error?.code)) {
       setCaptchaFailed(true);
       setPending(false);
       return;

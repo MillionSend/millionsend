@@ -227,6 +227,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
     planStatus,
     currentPeriodEnd,
     quota,
+    pooled,
     overageEnabled,
     usage,
     hasCustomer,
@@ -456,7 +457,7 @@ export function BillingView({ checkout }: { checkout: "success" | "cancel" | nul
         ) : (
           <QuotaRow
             label={usageT("sentToday")}
-            hint={usageT("resetsMidnightUtc")}
+            hint={usageT(pooled ? "pooledToday" : "resetsMidnightUtc")}
             used={usage.accepted}
             limit={quota.kind === "day" ? quota.limit : null}
           />

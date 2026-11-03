@@ -241,7 +241,9 @@ export function AddDomainForm({
   const router = useRouter();
   const trpc = useTRPC();
   const team = useQuery(trpc.settings.team.get.queryOptions());
-  const [name, setName] = useState("");
+  const searchParams = useSearchParams();
+  // ?name= fills the field for a domain suggested elsewhere (a receiving subdomain).
+  const [name, setName] = useState(searchParams.get("name") ?? "");
   const features = useQuery(trpc.system.features.queryOptions());
   const served = features.data?.regions;
   // A sandbox region is held back only next to a production one: a fresh
@@ -261,7 +263,7 @@ export function AddDomainForm({
 
   // Step 02 lives at ?created=<id> so a refresh (or shared link) lands back on
   // the new domain's records instead of an empty form.
-  const createdId = useSearchParams().get("created");
+  const createdId = searchParams.get("created");
   const create = useMutation(
     trpc.domains.create.mutationOptions({
       onSuccess: ({ id }) => router.replace(`/domains/new?created=${id}`),
@@ -416,7 +418,9 @@ export function AddDomainForm({
           {create.isError ? (
             <p style={{ margin: "14px 0 0", color: "var(--ms-danger)", fontSize: 13 }}>
               {errorKey
-                ? t(errorKey)
+                ? t(errorKey, {
+                    minutes: Math.ceil((create.error.data?.retryAfterSec ?? 3600) / 60),
+                  })
                 : isAwsCredentialError(create.error.message)
                   ? t.rich("new.credentialsError", codeRichTags)
                   : create.error.message || t("new.error")}

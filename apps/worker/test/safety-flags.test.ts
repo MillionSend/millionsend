@@ -106,8 +106,22 @@ it("opens the monitor flag off the team's risk and carries it on the standing", 
     riskUpdatedAt: NOW,
   });
   await db.insert(schema.monitorSamples).values([
-    { teamId: risky, kind: "first_sends", status: "judged", score: 80, createdAt: NOW },
-    { teamId: risky, kind: "first_sends", status: "judged", score: 90, createdAt: NOW },
+    {
+      teamId: risky,
+      kind: "first_sends",
+      status: "judged",
+      score: 80,
+      verdict: "abuse",
+      createdAt: NOW,
+    },
+    {
+      teamId: risky,
+      kind: "first_sends",
+      status: "judged",
+      score: 90,
+      verdict: "abuse",
+      createdAt: NOW,
+    },
     { teamId: risky, kind: "first_sends", status: "unjudged", createdAt: NOW },
   ]);
   expect(await runSafetyFlags(db, { now: later })).toMatchObject({ opened: 1 });

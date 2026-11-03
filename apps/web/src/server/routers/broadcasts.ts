@@ -20,6 +20,7 @@ import {
   parseSingleSender,
   regionPause,
   reservedSenderRefusal,
+  secondsUntil,
   sendRefusal,
   splitPersonName,
   substituteUnsubscribeUrl,
@@ -28,7 +29,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, min, sql } from "drizzle-orm";
 import { createTranslator } from "next-intl";
 import { z } from "zod";
 import { mailyDocumentSchema } from "@/lib/email-doc";
@@ -48,6 +49,7 @@ import { resolveEditorSave } from "../email-content";
 import { inboxSendDeps, userActor } from "../inboxes";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { activeLocale } from "../locale";
+import { tooManyRequests } from "../retry-after";
 import { router, teamProcedure } from "../trpc";
 import { assertSegment, savedSegmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
@@ -61,6 +63,7 @@ const MAX_SCHEDULE_AHEAD_DAYS = 30;
  */
 const TEST_SEND_TAG = "millionsend_test";
 const TEST_SENDS_PER_HOUR = 10;
+const TEST_SENDS_WINDOW_MS = 60 * 60 * 1000;
 
 const DELIVERABILITY_MESSAGES: Record<AppLocale, typeof enDeliverability> = {
   en: enDeliverability,
@@ -106,13 +109,13 @@ async function sendGuard(ctx: { db: Db; teamId: string }): Promise<TRPCError | n
 }
 
 /**
- * PRECONDITION_FAILED while broadcasts are held in the sender domain's SES
- * region (the platform breaker, or the operator's hold); transactional mail
- * is not affected, so only broadcasts check this. The message never says
- * why: the platform's rates are not the customer's to see.
+ * PRECONDITION_FAILED while the team's broadcasts are held in the sender
+ * domain's SES region (the platform breaker, or the operator's hold);
+ * transactional mail is not affected, so only broadcasts check this. The
+ * message never says why: the platform's rates are not the customer's to see.
  */
-async function regionGuard(db: Db, region: string): Promise<TRPCError | null> {
-  if (!(await regionPause(db, region))) return null;
+async function regionGuard(db: Db, region: string, teamId: string): Promise<TRPCError | null> {
+  if (!(await regionPause(db, region, teamId))) return null;
   const { t } = await sendGuardTranslator();
   return new TRPCError({ code: "PRECONDITION_FAILED", message: t("sendGuard.regionHeld") });
 }
@@ -590,7 +593,8 @@ export const broadcastsRouter = router({
       // Deliverability pause is enforced here, before anything is committed or
       // enqueued: a paused account must not schedule a new fan-out. "warning"
       // does not block.
-      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
+      const guardError =
+        (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region, ctx.teamId));
       if (guardError) throw guardError;
       const scheduledAt = input.scheduledAt ?? new Date();
       // Same horizon as the API: a body must not sit out the retention purge.
@@ -682,21 +686,24 @@ export const broadcastsRouter = router({
               : `The ${sender.fromDomain} domain is not verified for this team.`,
         });
       }
-      const guardError = (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region));
+      const guardError =
+        (await sendGuard(ctx)) ?? (await regionGuard(ctx.db, sender.region, ctx.teamId));
       if (guardError) throw guardError;
       const e = schema.emails;
       const [recent] = await ctx.db
-        .select({ n: count() })
+        .select({ n: count(), oldest: min(e.createdAt) })
         .from(e)
         .where(
           and(
             eq(e.teamId, ctx.teamId),
-            gt(e.createdAt, new Date(Date.now() - 60 * 60 * 1000)),
+            gt(e.createdAt, new Date(Date.now() - TEST_SENDS_WINDOW_MS)),
             sql`${e.tags} ? ${TEST_SEND_TAG}`,
           ),
         );
       if ((recent?.n ?? 0) >= TEST_SENDS_PER_HOUR) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS" });
+        // The oldest test in the window is the first to leave it and free a place.
+        const freesAt = (recent?.oldest?.getTime() ?? Date.now()) + TEST_SENDS_WINDOW_MS;
+        throw tooManyRequests(secondsUntil(freesAt));
       }
       // The reader is the sender's own account, so merge fields resolve to
       // it; there is no contact to unsubscribe, so the link points home.

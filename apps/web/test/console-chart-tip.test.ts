@@ -121,6 +121,28 @@ describe("a line chart's hover tip", () => {
     await act(async () => root.render(chart()));
     expect((await hover(2, 3))?.textContent).toBe("10-03Sent30");
   });
+
+  it("puts a series' note after its label", async () => {
+    await act(async () =>
+      root.render(
+        createElement(LineChart, {
+          days: ["2026-10-01", "2026-10-02"],
+          series: [
+            {
+              key: "c",
+              label: "Complained",
+              note: "by arrival date",
+              color: "var(--ms-warn)",
+              values: [1, 2],
+            },
+          ],
+          formatDay: (day: string) => day.slice(5),
+          formatValue: (v: number) => String(v),
+        }),
+      ),
+    );
+    expect((await hover(1, 2))?.textContent).toBe("10-02Complainedby arrival date2");
+  });
 });
 
 describe("a feedback chart's tip", () => {

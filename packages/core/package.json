@@ -44,6 +44,10 @@
       "types": "./src/domain-status.ts",
       "default": "./src/domain-status.ts"
     },
+    "./team-roles": {
+      "types": "./src/team-roles.ts",
+      "default": "./src/team-roles.ts"
+    },
     "./docs-links": {
       "types": "./src/docs-links.ts",
       "default": "./src/docs-links.ts"
@@ -120,8 +124,8 @@
   "dependencies": {
     "@millionsend/config": "workspace:*",
     "@millionsend/db": "workspace:*",
-    "@sentry/core": "^11.8.0",
-    "@sentry/node": "^11.8.0",
+    "@sentry/core": "^11.9.0",
+    "@sentry/node": "^11.9.0",
     "drizzle-orm": "^0.45.4",
     "mailparser": "^3.9.47",
     "mmdb-lib": "3.0.3",
@@ -134,7 +138,7 @@
     "@types/mailparser": "^3.9.0",
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.2",
-    "nodemailer": "^10.2.0",
+    "nodemailer": "^10.2.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

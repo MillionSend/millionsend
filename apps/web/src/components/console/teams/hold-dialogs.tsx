@@ -1,11 +1,20 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import {
+  PAUSE_LIFT_COOLDOWN_DAYS,
+  PAUSE_WINDOW_DAYS,
+  type PauseLiftRefusal,
+} from "@millionsend/core/deliverability";
+import { useLocale, useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { KV_SENTENCE, KvRow } from "@/components/kv-row";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
 import { Select } from "@/components/select";
 import { BtnSpinner } from "@/components/spinner";
+import { Tooltip } from "@/components/tooltip";
+import { formatDayUtc } from "@/lib/format";
+import { usePercent } from "../safety/parts";
 
 export const PAUSE_REASONS = ["complaints", "report", "manual"] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
@@ -267,6 +276,149 @@ export function SuspendDialog({
           <CancelButton onClose={onClose} />
           <button type="submit" className="ms-btn ms-btn-destructive" disabled={busy}>
             <BtnSpinner on={busy} />
+            {t("confirm")} <ConfirmKeycap />
+          </button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
+/** What a lift would take out, as the review page reads it. */
+interface PauseLiftPreview {
+  rate: number;
+  sent: number;
+  hardBounced: number;
+  /** The pause window's first UTC day. */
+  since: string;
+  parked: number;
+  lastLiftAt: Date | null;
+}
+
+/** A refusal's one sentence: the disabled lift button's tooltip and a refused confirm's toast. */
+export function useLiftRefusal(): (
+  refusal: PauseLiftRefusal,
+  lift: { lastLiftAt: Date | null; nextLiftAt: Date | null },
+) => string {
+  const t = useTranslations("console.teams.liftRefusal");
+  const locale = useLocale();
+  const day = (at: Date | null) => (at ? formatDayUtc(at, locale) : "");
+  return (refusal, lift) =>
+    t(refusal, {
+      window: PAUSE_WINDOW_DAYS,
+      last: day(lift.lastLiftAt),
+      next: day(lift.nextLiftAt),
+    });
+}
+
+/**
+ * Takes the pause window's sends and hard bounces out of the team's rates.
+ * The reference and the note go on the record, so the confirm waits for both.
+ */
+export function LiftPauseDialog({
+  name,
+  lift,
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  name: string;
+  lift: PauseLiftPreview;
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (input: { reference: string; note: string; notify: boolean }) => void;
+}) {
+  const t = useTranslations("console.teams.liftDialog");
+  const common = useTranslations("console.common");
+  const locale = useLocale();
+  const percent = usePercent();
+  const id = useId();
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [notify, setNotify] = useState(true);
+  const valid = reference.trim() !== "" && note.trim() !== "";
+
+  function submit() {
+    if (pending || !valid) return;
+    onSubmit({ reference: reference.trim(), note: note.trim(), notify });
+  }
+
+  return (
+    <Modal open onClose={onClose} onConfirm={submit} title={t("title", { team: name })}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <p style={{ margin: "6px 0 16px", color: "var(--ms-muted)", fontSize: 13.5 }}>
+          {t("lead", { window: PAUSE_WINDOW_DAYS, days: PAUSE_LIFT_COOLDOWN_DAYS })}
+        </p>
+        <dl className="ms-kv ms-kv-cols" style={{ marginBottom: 16 }}>
+          <KvRow label={t("pausedOn")} valueStyle={KV_SENTENCE}>
+            {t("pausedOnValue", { rate: percent(lift.rate), window: PAUSE_WINDOW_DAYS })}
+          </KvRow>
+          <KvRow label={t("leavesOut")} valueStyle={KV_SENTENCE}>
+            {t("leavesOutValue", {
+              bounces: lift.hardBounced,
+              sent: lift.sent,
+              since: formatDayUtc(lift.since, locale),
+            })}
+          </KvRow>
+          <KvRow label={t("waiting")} valueStyle={KV_SENTENCE}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {t("waitingValue", { count: lift.parked })}
+              {lift.parked > 0 ? (
+                <Tooltip text={t("waitingTip", { days: PAUSE_LIFT_COOLDOWN_DAYS })} />
+              ) : null}
+            </span>
+          </KvRow>
+          <KvRow label={t("lastLift")} valueStyle={KV_SENTENCE}>
+            {lift.lastLiftAt ? formatDayUtc(lift.lastLiftAt, locale) : t("lastLiftNever")}
+          </KvRow>
+        </dl>
+        <div className="ms-field" style={{ marginBottom: 14 }}>
+          <label htmlFor={`${id}-reference`}>{t("reference")}</label>
+          <input
+            id={`${id}-reference`}
+            type="text"
+            className="ms-input"
+            style={{ width: "100%" }}
+            maxLength={200}
+            required
+            disabled={pending}
+            placeholder={t("referencePlaceholder")}
+            value={reference}
+            onChange={(event) => setReference(event.target.value)}
+          />
+        </div>
+        <div className="ms-field" style={{ marginBottom: 14 }}>
+          <label htmlFor={`${id}-note`}>{t("note")}</label>
+          <textarea
+            id={`${id}-note`}
+            className="ms-input"
+            style={{ width: "100%", minHeight: 72, resize: "vertical" }}
+            maxLength={1000}
+            required
+            disabled={pending}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+          />
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
+            {t("noteHint")}
+          </p>
+        </div>
+        <NotifyRow
+          id={`${id}-notify`}
+          label={common("notifyOwner")}
+          checked={notify}
+          disabled={pending}
+          onChange={setNotify}
+        />
+        <ModalFooter>
+          <CancelButton onClose={onClose} />
+          <button type="submit" className="ms-btn ms-btn-primary" disabled={pending || !valid}>
+            <BtnSpinner on={pending} />
             {t("confirm")} <ConfirmKeycap />
           </button>
         </ModalFooter>

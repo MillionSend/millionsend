@@ -1,6 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   broadcastSendSpacingMs,
@@ -11,6 +12,8 @@ import {
   MIN_PAUSE_COMPLAINTS,
   MIN_PAUSE_HARD_BOUNCES,
   PAUSE_WINDOW_DAYS,
+  pauseLiftCooldownEnd,
+  pauseLiftRefusal,
   THROTTLED_BROADCAST_RATE_PER_SECOND,
   type WindowCounts,
 } from "../src/deliverability.js";
@@ -157,6 +160,18 @@ describe("evaluateDeliverability", () => {
     expect(evaluateDeliverability(today(10_000, 0, 5, MIN_GUARDRAIL_VOLUME - 1)).status).toBe("ok");
   });
 
+  it("judges complaints from the first send when their floor is lifted, bounces keeping theirs", () => {
+    expect(evaluateDeliverability(today(50, 0, 3)).status).toBe("ok");
+    expect(evaluateDeliverability(today(50, 0, 1), MIN_GUARDRAIL_VOLUME, 0).status).toBe("ok");
+    expect(evaluateDeliverability(today(50, 0, 2), MIN_GUARDRAIL_VOLUME, 0).reasons).toEqual([
+      { metric: "complaint", rate: 0.04, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS },
+    ]);
+    expect(evaluateDeliverability(today(50, 0, 3), MIN_GUARDRAIL_VOLUME, 0).reasons).toEqual([
+      { metric: "complaint", rate: 0.06, tier: "paused", windowDays: PAUSE_WINDOW_DAYS },
+    ]);
+    expect(evaluateDeliverability(today(50, 50), MIN_GUARDRAIL_VOLUME, 0).status).toBe("ok");
+  });
+
   it("is zero-send safe (no divide-by-zero)", () => {
     const r = evaluateDeliverability(today(0));
     expect(r.bounceRate).toBe(0);
@@ -176,6 +191,52 @@ describe("broadcastSendSpacingMs", () => {
   it("drips at the throttled rate for warning and paused", () => {
     expect(broadcastSendSpacingMs("warning")).toBe(spacing);
     expect(broadcastSendSpacingMs("paused")).toBe(spacing);
+  });
+});
+
+describe("pauseLiftRefusal", () => {
+  const now = new Date("2026-08-14T12:00:00.000Z");
+  const pause = (metric: "bounce" | "complaint") =>
+    ({ metric, rate: 0.08, tier: "paused", windowDays: PAUSE_WINDOW_DAYS }) as const;
+  const refusal = (over: Partial<Parameters<typeof pauseLiftRefusal>[0]> = {}) =>
+    pauseLiftRefusal({
+      suspended: false,
+      freePool: false,
+      reasons: [pause("bounce")],
+      openFlag: { reason: "guardrail", openedBy: null },
+      monitorRisk: null,
+      monitorFlagRisk: 0.5,
+      lastLiftAt: null,
+      now,
+      ...over,
+    });
+  const daysAgo = (n: number) => new Date(now.getTime() - n * DAY_MS);
+
+  it("lifts a bounce pause whose only flag is the cron's own guardrail flag", () => {
+    expect(refusal()).toBeNull();
+    expect(refusal({ openFlag: null })).toBeNull();
+  });
+
+  it("names each refusal", () => {
+    expect(refusal({ suspended: true })).toBe("suspended");
+    expect(refusal({ freePool: true })).toBe("free");
+    const warning = {
+      ...pause("bounce"),
+      tier: "warning" as const,
+      windowDays: GUARDRAIL_WINDOW_DAYS,
+    };
+    expect(refusal({ reasons: [warning] })).toBe("not_paused");
+    expect(refusal({ reasons: [pause("complaint")] })).toBe("complaints");
+    expect(refusal({ reasons: [pause("bounce"), pause("complaint")] })).toBe("complaints");
+    expect(refusal({ openFlag: { reason: "guardrail", openedBy: "op-1" } })).toBe("flagged");
+    expect(refusal({ openFlag: { reason: "brand", openedBy: null } })).toBe("flagged");
+    expect(refusal({ monitorRisk: 0.5 })).toBe("monitor");
+    expect(refusal({ monitorRisk: 0.9, monitorFlagRisk: Number.POSITIVE_INFINITY })).toBeNull();
+    expect(refusal({ lastLiftAt: daysAgo(29) })).toBe("cooldown");
+    // The cooldown runs to the UTC midnight after 30 days, the day its refusal names.
+    expect(refusal({ lastLiftAt: daysAgo(30) })).toBe("cooldown");
+    expect(pauseLiftCooldownEnd(daysAgo(30))).toEqual(new Date("2026-08-15T00:00:00.000Z"));
+    expect(refusal({ lastLiftAt: new Date("2026-07-15T00:00:00.000Z") })).toBeNull();
   });
 });
 
@@ -288,6 +349,78 @@ describe("fetchDeliverabilityHealth", () => {
     ]);
   });
 
+  it("judges a Free pool on its one record, whichever of its teams sent, and from the first complaint", async () => {
+    const owner = "u-guardrail";
+    const a = await createTeam(db, "pool-guardrail-a", { poolOwnerId: owner });
+    const b = await createTeam(db, "pool-guardrail-b", { poolOwnerId: owner });
+    const paid = await createTeam(db, "pool-guardrail-paid", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    // b's own week is clean and large; the pool's record is what counts.
+    await db
+      .insert(schema.usageCounters)
+      .values({ teamId: b, day: utcDay(nowMs), sent: 10_000, complained: 0 });
+    await db.insert(schema.freePoolUsage).values({
+      ownerId: owner,
+      day: utcDay(nowMs),
+      sent: 60,
+      sentNoFeedback: 10,
+      complained: 3,
+    });
+    for (const teamId of [a, b]) {
+      const health = await fetchDeliverabilityHealth(db, teamId, { now });
+      expect(health.complaintSent).toBe(50);
+      expect(health.reasons).toEqual([
+        { metric: "complaint", rate: 0.06, tier: "paused", windowDays: PAUSE_WINDOW_DAYS },
+      ]);
+    }
+    // A paid team of the same creator stands alone.
+    expect((await fetchDeliverabilityHealth(db, paid, { now })).status).toBe("ok");
+  });
+
+  it("keeps the volume floor for a Free pool's bounces, and for a team outside any pool", async () => {
+    const owner = "u-guardrail-bounces";
+    const pooled = await createTeam(db, "pool-guardrail-bounces", { poolOwnerId: owner });
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: owner, day: utcDay(nowMs), sent: 60, hardBounced: 30 });
+    expect((await fetchDeliverabilityHealth(db, pooled, { now })).status).toBe("ok");
+    // Self-host never records a creator, and a paid plan never pools: both keep the floor.
+    const unrecorded = await createTeam(db, "guardrail-unrecorded");
+    const paid = await createTeam(db, "guardrail-paid", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, paid));
+    for (const teamId of [unrecorded, paid]) {
+      await db
+        .insert(schema.usageCounters)
+        .values({ teamId, day: utcDay(nowMs), sent: 60, complained: 3 });
+      expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("ok");
+    }
+  });
+
+  it("judges hard bounces net of a pause lift and reports every send", async () => {
+    const teamId = await createTeam(db, "deliverability-lifted");
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(nowMs),
+      sent: 350,
+      hardBounced: 32,
+      excludedSent: 200,
+      excludedHardBounced: 20,
+    });
+    // 12 hard bounces over 150 sends once the lift's are left out: 8%.
+    const health = await fetchDeliverabilityHealth(db, teamId, { now });
+    expect(health.status).toBe("paused");
+    expect(health.bounceRate).toBeCloseTo(0.08);
+    expect(health.sent).toBe(350);
+    expect(health.pause).toMatchObject({ sent: 150, hardBounced: 12 });
+    expect(health.lifted).toEqual({ sent: 200, hardBounced: 20 });
+    // Nine hard bounces after the lift miss the pause's minimum count; the rate still warns.
+    await db
+      .update(schema.usageCounters)
+      .set({ hardBounced: 29 })
+      .where(eq(schema.usageCounters.teamId, teamId));
+    expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("warning");
+  });
+
   it("returns ok with zero rates for a team that has never sent", async () => {
     const teamId = await createTeam(db, "deliverability-empty");
     expect(await fetchDeliverabilityHealth(db, teamId, { now })).toEqual({
@@ -305,6 +438,7 @@ describe("fetchDeliverabilityHealth", () => {
         complained: 0,
         windowDays: PAUSE_WINDOW_DAYS,
       },
+      lifted: { sent: 0, hardBounced: 0 },
     });
   });
 });

@@ -143,11 +143,11 @@ identical.
   even while your AWS account is in the SES sandbox, and AWS still bills each
   message.
 - The simulator's `bounce@`, `complaint@` and `suppressionlist@` addresses
-  produce bounces and complaints that MillionSend treats as real: the address
-  goes on your team's [suppression list](/concepts/suppressions) and counts
-  toward your bounce or complaint rate, which can pause sending. Use them by
-  hand, not in automated test runs. Each address is suppressed after its first
-  use, so add a label for a fresh one: `bounce+2@simulator.amazonses.com`.
+  produce bounces and complaints that put the address on your team's
+  [suppression list](/concepts/suppressions) and fire your webhooks as real
+  ones do, but never count toward your bounce or complaint rate or pause
+  sending. Each address is suppressed after its first use, so add a label for
+  a fresh one: `bounce+2@simulator.amazonses.com`.
 - Addresses at `example.com`, or under `.test` or `.invalid`, can't receive
   mail, so a send to one is refused with a `422` (see
   [Errors](/api-reference#errors)).

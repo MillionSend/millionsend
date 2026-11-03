@@ -8,6 +8,7 @@ import {
   type PlanRungKey,
   rungByKey,
   type SystemMailMessage,
+  utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
@@ -328,6 +329,7 @@ describe("billing router", () => {
       planStatus: "none",
       currentPeriodEnd: null,
       quota: { kind: "day", plan: "free", limit: 100 },
+      pooled: false,
       overageEnabled: true,
       usage: { accepted: 0, reportedOverage: 0 },
       hasCustomer: false,
@@ -336,6 +338,20 @@ describe("billing router", () => {
       // No mail is received here, so no plan line counts inboxes.
       inboxes: null,
     });
+  });
+
+  it("status counts a Free pool's day and says the cap is shared, never naming its creator", async () => {
+    const teamId = await createTeam(db, "billing-pooled", { poolOwnerId: "u-billing-pool" });
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: "u-billing-pool", day: utcDay(), accepted: 64 });
+    const status = await callerFor(teamId, "member").billing.status();
+    expect(status).toMatchObject({
+      quota: { kind: "day", plan: "free", limit: 100 },
+      pooled: true,
+      usage: { accepted: 64, reportedOverage: 0 },
+    });
+    expect(JSON.stringify(status)).not.toContain("u-billing-pool");
   });
 
   it("status reports each plan's inbox cap and the team's count where mail is received", async () => {

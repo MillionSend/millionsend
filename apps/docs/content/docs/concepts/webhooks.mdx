@@ -35,6 +35,10 @@ Team-level events carry no email; `data` describes the team's standing instead:
 | `quota.reached` | The cap is used. Daily plans pass up to 50% more, then park until midnight UTC; monthly plans bill overage when it is on, otherwise refuse API sends and park broadcasts until the period renews. | same as above |
 | `quota.paused` | Daily plans only: 50% past the cap, new sends are parked until midnight UTC, or until a plan upgrade releases them (once per UTC day, cloud only). | same as above, always `period: "day"` |
 
+On the Free plan, the Free teams you created share one daily cap and one
+bounce and complaint record: each of these events fires once for all of
+them, on one of the teams that sent, with the shared figures.
+
 Audience events fire when a contact or the suppression list changes, whoever
 changed it. `data` carries the contact in Resend's shape — `id`, `email`,
 `first_name`, `last_name`, `unsubscribed`, `created_at`, `updated_at` — plus

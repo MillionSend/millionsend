@@ -1,6 +1,7 @@
 import { createPublicKey } from "node:crypto";
 import {
   DAY_MS,
+  DOMAIN_CREATES_PER_HOUR,
   declineLimitRequest,
   PLAN_DOMAIN_LIMIT,
   SUSPENSION_REASONS,
@@ -10,8 +11,10 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { DkimVerificationStatus, DnsResolver, SesIdentityClient } from "@millionsend/ses";
 import { createTeam, createTestDb, createWebhookEndpoint } from "@millionsend/test-utils";
+import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { retryAfterSecOf } from "@/server/retry-after";
 import { createDomainsRouter, type DomainsSesDeps } from "@/server/routers/domains";
 import { type Context, createCallerFactory, router } from "@/server/trpc";
 
@@ -415,6 +418,28 @@ describe("domains.create", () => {
     await expect(
       caller.domains.create({ name: "over.example.com", region: "us-east-1" }),
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
+
+  it("in cloud, rate-limits creates per plan and says when to try again", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    const teamId = await createTeam(db);
+    await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
+    const caller = callerFor(teamId, fakeSes().deps);
+    for (let i = 0; i < DOMAIN_CREATES_PER_HOUR.pro; i++) {
+      await caller.domains.create({ name: `r${i}.example.com`, region: "us-east-1" });
+    }
+    const refused = await caller.domains
+      .create({ name: "over.example.com", region: "us-east-1" })
+      .catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(TRPCError);
+    expect(refused).toMatchObject({ code: "TOO_MANY_REQUESTS" });
+    const wait = retryAfterSecOf(refused as TRPCError);
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(3600);
+
+    // Scale's own cap is higher, so the same team goes on within the same hour.
+    await db.update(schema.teams).set({ plan: "scale" }).where(eq(schema.teams.id, teamId));
+    await caller.domains.create({ name: "scale.example.com", region: "us-east-1" });
   });
 
   it("adopts an SES identity orphaned by a partial earlier create", async () => {
@@ -1422,6 +1447,43 @@ describe("domains receiving", () => {
     // An instance that stops taking mail stops listing the record.
     vi.stubEnv("RECEIVING_MX_HOST", "");
     expect(await receivingRows(withApexMx([{ priority: 10, exchange: MX }]))).toEqual([]);
+  });
+
+  it("reads where a domain's mail goes, receiving on or off, for any member of its team", async () => {
+    const teamId = await createTeam(db);
+    const { id, dkimPublicKey } = await verifiedDomain(teamId);
+    const published = publishedDns(dkimPublicKey);
+    const withApexMx = (rows: { priority: number; exchange: string }[]) =>
+      fakeSes({
+        dns: {
+          ...published,
+          resolveMx: async (name: string) =>
+            name === "example.com" ? rows : published.resolveMx(name),
+        },
+      }).deps;
+    const read = (deps: DomainsSesDeps) =>
+      callerFor(teamId, deps, "member").domains.receivingMx({ id });
+    const record = { type: "MX", name: "example.com", value: MX, priority: 10 };
+
+    // Off: the dialog reads it before offering to turn receiving on.
+    expect(await read(withApexMx([]))).toEqual({ record, status: "missing" });
+    expect(await read(withApexMx([{ priority: 1, exchange: "smtp.google.example" }]))).toEqual({
+      record,
+      status: "mismatch",
+      found: "1 smtp.google.example",
+    });
+    await callerFor(teamId, fakeSes().deps).domains.setReceiving({ id, enabled: true });
+    expect(await read(withApexMx([{ priority: 10, exchange: MX }]))).toEqual({
+      record,
+      status: "found",
+    });
+
+    const other = await createTeam(db, "team-other");
+    await expect(
+      callerFor(other, withApexMx([])).domains.receivingMx({ id }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    vi.stubEnv("RECEIVING_MX_HOST", "");
+    await expect(read(withApexMx([]))).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 

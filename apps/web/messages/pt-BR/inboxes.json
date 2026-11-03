@@ -111,7 +111,7 @@
   "empty": {
     "title": "Nenhuma caixa de entrada ainda",
     "body": "Crie um endereço que recebe e-mails. Agentes leem pela API, por webhooks ou pelo MCP; pessoas leem aqui.",
-    "sharedOnly": "Crie um endereço em {domain}, sem mexer no DNS. Para endereços no seu domínio, ative o recebimento nele."
+    "sharedOnly": "Crie um endereço em {domain}, sem mexer no DNS. Para endereços no seu domínio, <link>ative o recebimento</link> nele."
   },
   "limit": {
     "reached": "Você já usa as {limit} caixas do seu plano. <link>Faça upgrade</link> para criar mais.",
@@ -126,8 +126,11 @@
     "title": "Criar caixa de entrada",
     "needsReceiving": "Ative o recebimento em um domínio para criar caixas.",
     "address": "Endereço",
-    "addressHint": "Seus domínios com recebimento ativo, ou o domínio compartilhado {domain}, pronto sem DNS.",
-    "addressHintOwn": "Seus domínios com recebimento ativo.",
+    "addressHint": "Seus domínios, ou o domínio compartilhado {domain}, pronto sem DNS.",
+    "addressHintNone": "{domain} já funciona sem mexer no DNS. Para usar um domínio seu, adicione o domínio em <link>Domínios</link> e ative o recebimento.",
+    "domain": "Domínio",
+    "noDns": "Sem DNS",
+    "receivingOff": "Sem recebimento",
     "addressFromName": "Vem do nome. Edite, ou deixe vazio para um endereço aleatório.",
     "addressFromNameOwn": "Vem do nome. Edite se quiser.",
     "random": "Endereço aleatório",
@@ -145,6 +148,7 @@
     "errors": {
       "taken": "Esse endereço já está em uso.",
       "notReceiving": "Ative o recebimento em {domain} primeiro.",
+      "notVerified": "Verifique {domain} primeiro.",
       "rate": "Muitas caixas criadas na última hora. Tente de novo mais tarde.",
       "localPart": "Use letras minúsculas, números e . _ % + - (até 64), sem ponto no começo nem no fim.",
       "username": "Use letras minúsculas, números e . _ - (até 64), começando e terminando com letra ou número, sem dois pontos seguidos.",
@@ -153,6 +157,26 @@
       "sharedPending": "O domínio compartilhado ainda não está pronto para a sua equipe. Tente de novo em alguns minutos.",
       "tooManyNames": "Muitos nomes foram conferidos hoje. Tente de novo amanhã.",
       "orRandom": "Ou deixe o endereço vazio para ganhar um aleatório."
+    },
+    "receiving": {
+      "offTitle": "{domain} ainda não recebe e-mails aqui",
+      "checking": "Conferindo para onde vão os e-mails de {domain}…",
+      "enableBody": "Ative o recebimento e depois adicione um registro MX no seu provedor de DNS. Os e-mails chegam assim que o registro estiver no ar.",
+      "enableFound": "O registro MX dele já aponta para cá, então os e-mails chegam assim que o recebimento for ativado.",
+      "memberBody": "Só donos e admins podem ativar o recebimento. Mande este link para um deles.",
+      "untilShared": "Enquanto isso, {domain} funciona sem mexer no DNS.",
+      "copyLink": "Copiar link",
+      "docs": "Como funciona o recebimento",
+      "unknown": "Não deu para conferir para onde vão os e-mails de {domain}. Tente de novo daqui a pouco.",
+      "unverifiedTitle": "{domain} ainda não foi verificado",
+      "unverifiedBody": "Caixas de entrada precisam de um domínio verificado e com o recebimento ativo. Os registros DNS dele estão na página do domínio.",
+      "openDomain": "Abrir domínio",
+      "addDomain": "Adicionar {domain}",
+      "onPurpose": "Quer mesmo trazer todos os e-mails de {domain} para cá? <link>Ative o recebimento na página dele</link>.",
+      "memberAddDomain": "Só donos e admins podem adicionar um domínio. Mande este link para um deles.",
+      "mxToAdd": "MX a adicionar",
+      "addMxBody": "O recebimento está ativo. Adicione este registro no seu provedor de DNS: você já pode criar a caixa de entrada, e os e-mails chegam assim que o registro estiver no ar.",
+      "liveBody": "O recebimento está ativo e o registro MX dele aponta para cá: os e-mails chegam na hora."
     }
   },
   "acceptFrom": {

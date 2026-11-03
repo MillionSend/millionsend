@@ -14,18 +14,18 @@ import {
   type Plan,
   QUOTA_COLUMNS,
   raisesQuota,
+  readDailyUsage,
   readPeriodUsage,
   rungByKey,
   type TeamQuota,
   teamQuota,
   teamRung,
   upgradesHeld,
-  utcDay,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { OVERAGE_IN_FLIGHT, UPGRADES_HELD } from "@/lib/trpc-error";
 import { recordAudit } from "../audit";
@@ -82,12 +82,7 @@ async function assertNotHeld(db: Db, teamId: string): Promise<void> {
 /** Sends counted against the quota so far: the UTC day on a daily cap, the billing period on a monthly one. */
 async function readUsage(db: Db, teamId: string, quota: TeamQuota) {
   if (quota.kind === "month") return readPeriodUsage(db, teamId, quota.periodStart);
-  const c = schema.usageCounters;
-  const [row] = await db
-    .select({ accepted: c.accepted })
-    .from(c)
-    .where(and(eq(c.teamId, teamId), eq(c.day, utcDay())));
-  return { accepted: row?.accepted ?? 0, reportedOverage: 0 };
+  return { accepted: await readDailyUsage(db, teamId, quota), reportedOverage: 0 };
 }
 
 /** Rungs for sale; Free is reached by cancelling in the portal. */
@@ -118,6 +113,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
       const team = await loadTeam(ctx.db, ctx.teamId);
       const quota = teamQuota(team, true);
       const live = hasLiveSubscription(team.planStatus);
+      const pooled = quota.kind === "day" && quota.pool !== undefined;
       return {
         plan: team.plan,
         planQuota: team.planQuota,
@@ -125,7 +121,10 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
         pendingRung: team.pendingRung,
         planStatus: team.planStatus,
         currentPeriodEnd: team.currentPeriodEnd,
-        quota,
+        // A Free pool is keyed by its creator's user id, which the browser
+        // never gets: it learns only that the cap is shared.
+        quota: pooled ? { ...quota, pool: undefined } : quota,
+        pooled,
         // The switch shows the customer's choice; quota.overage is what applies (off while past due).
         overageEnabled: team.overageEnabled,
         usage: await readUsage(ctx.db, ctx.teamId, quota),

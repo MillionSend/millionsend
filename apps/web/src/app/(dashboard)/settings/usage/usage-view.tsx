@@ -177,7 +177,7 @@ export function UsageView() {
   const { data } = useQuery(trpc.settings.usage.recent.queryOptions({}));
   if (!data) return <UsageSkeleton />;
 
-  const { accepted, limit } = data.today;
+  const { accepted, limit, pooled } = data.today;
   const { receiving } = data;
   // On Free, received mail spends the same daily counter sends do.
   const shared = receiving?.kind === "shared_day";
@@ -199,7 +199,7 @@ export function UsageView() {
         ) : (
           <QuotaRow
             label={t(shared ? "sentAndReceivedToday" : "sentToday")}
-            hint={t("resetsMidnightUtc")}
+            hint={t(pooled ? "pooledToday" : "resetsMidnightUtc")}
             used={accepted}
             limit={limit}
           />

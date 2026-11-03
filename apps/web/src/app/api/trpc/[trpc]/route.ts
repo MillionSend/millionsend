@@ -2,6 +2,7 @@ import { captureError } from "@millionsend/core/error-tracking-node";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { appOrigin } from "@/lib/api-base-url";
 import { isCrossOriginMutation } from "@/lib/http-url";
+import { retryAfterSecOf } from "@/server/retry-after";
 import { appRouter } from "@/server/routers";
 import { createContext } from "@/server/trpc";
 
@@ -15,7 +16,16 @@ const handler = (req: Request) => {
     req,
     router: appRouter,
     createContext: () => createContext({ headers: req.headers }),
-    responseMeta: () => ({ headers: RESPONSE_HEADERS }),
+    // A batch answers once, so the longest wait any of its refusals names goes out.
+    responseMeta: ({ errors }) => {
+      const waits = errors.map(retryAfterSecOf).filter((s) => s !== undefined);
+      return {
+        headers:
+          waits.length > 0
+            ? { ...RESPONSE_HEADERS, "retry-after": String(Math.max(...waits)) }
+            : RESPONSE_HEADERS,
+      };
+    },
     // Faults only: a thrown TRPCError with any other code is an answer the
     // procedure chose. The input never goes along.
     onError: ({ error, path, ctx }) => {

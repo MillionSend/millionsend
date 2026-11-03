@@ -18,6 +18,8 @@ export interface LineChartSeries {
   values: number[];
   /** Subtle area fill under this series (the chart's one filled band). */
   area?: boolean;
+  /** A muted aside after the label in the tip, such as how the series is dated. */
+  note?: string | undefined;
 }
 
 /* Plot frame: the left edge is full-bleed so the plot starts on the card's
@@ -321,7 +323,17 @@ export function LineChart({
               }}
             >
               <span className="ms-dot sm" style={{ background: s.color }} />
-              <span style={{ color: "var(--ms-muted)" }}>{s.label}</span>
+              <span style={{ color: "var(--ms-muted)" }}>
+                {s.label}
+                {s.note ? (
+                  <span
+                    className="ms-mono"
+                    style={{ fontSize: 10, color: "var(--ms-faint)", marginLeft: 6 }}
+                  >
+                    {s.note}
+                  </span>
+                ) : null}
+              </span>
               <span className="ms-mono" style={{ marginLeft: "auto", color: "var(--ms-bone)" }}>
                 {formatValue(s.values[hover.index] ?? 0)}
               </span>

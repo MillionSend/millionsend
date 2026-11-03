@@ -1,10 +1,9 @@
 import type { CampaignFingerprintKind } from "@millionsend/db/schema";
-import { getDomainWithoutSuffix } from "tldts";
 import { decodeEntities, stripHiddenElements } from "./abuse-judge/body.js";
 import { stripInvisible } from "./customer-text.js";
 import { extractAnchors, visibleText } from "./email-insights.js";
 import { sha256Hex } from "./hash.js";
-import { ownerDomain } from "./org-domain.js";
+import { ownerDomain, registeredName } from "./org-domain.js";
 import { parseMailbox } from "./sender-address.js";
 
 /**
@@ -259,11 +258,6 @@ export function subjectsMatch(a: string, b: string): boolean {
   return shared / (x.size + y.size - shared) >= SUBJECT_MIN_SIMILARITY;
 }
 
-/** The name a domain was registered under: "vexto-cadeaux" for mail.vexto-cadeaux.example. */
-function registeredName(domain: string): string {
-  return getDomainWithoutSuffix(domain, { allowPrivateDomains: true }) ?? domain;
-}
-
 function nameWords(name: string): string[] {
   return [
     ...new Set(
@@ -293,8 +287,8 @@ function covers(words: string[], letters: string): boolean {
  * suffixes do.
  */
 export function domainsMatch(a: Fingerprint, b: Fingerprint): boolean {
-  const nameA = registeredName(a.value);
-  const nameB = registeredName(b.value);
+  const nameA = registeredName(a.value) ?? a.value;
+  const nameB = registeredName(b.value) ?? b.value;
   const lettersA = fold(nameA).replace(/[^\p{L}\p{N}]+/gu, "");
   const lettersB = fold(nameB).replace(/[^\p{L}\p{N}]+/gu, "");
   if (covers(nameWords(nameA), lettersB) || covers(nameWords(nameB), lettersA)) return true;

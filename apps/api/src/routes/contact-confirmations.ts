@@ -15,11 +15,12 @@ import {
   webhookBatch,
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, sql } from "drizzle-orm";
 import { type ApiDeps, type Env, errorBody } from "../app.js";
 import { errorSchema } from "../schemas.js";
 
 type Confirmation = NonNullable<typeof schema.contacts.$inferSelect.confirmation>;
+const requestIdSchema = z.uuid().transform((id) => id.toLowerCase());
 const confirmationSchema = z.object({
   id: z.uuid(),
   request_id: z.uuid(),
@@ -150,7 +151,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
                     .pipe(z.email())
                     .pipe(z.string().max(320))
                     .transform((x) => x.toLowerCase()),
-                  request_id: z.uuid(),
+                  request_id: requestIdSchema,
                   allow_resubscribe: z.boolean().optional(),
                   expires_at: z.iso.datetime({ offset: true }),
                 })
@@ -197,10 +198,11 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
             ))
         )
           return { kind: "conflict" } as const;
-        if (contact?.confirmation?.requestId === input.request_id) {
+        if (contact?.confirmation?.requestId.toLowerCase() === input.request_id) {
           if (
             contact.unsubscribed &&
             contact.confirmation.state === "pending" &&
+            new Date(contact.confirmation.expiresAt) > new Date() &&
             contact.confirmation.email === input.email &&
             JSON.stringify(contact.confirmation.unsubscribeSuppressionIds ?? []) ===
               JSON.stringify(blocks.map((x) => x.id))
@@ -210,10 +212,11 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
         }
         if (
           contact &&
-          ((!contact.unsubscribed && !(input.allow_resubscribe && blocks.length)) ||
+          (contact.retiredConfirmationRequestIds?.includes(input.request_id) ||
+            (!contact.unsubscribed && !(input.allow_resubscribe && blocks.length)) ||
             (!input.allow_resubscribe &&
               (contact.confirmation?.state !== "pending" ||
-                contact.confirmation.email !== contact.email)))
+                contact.confirmation.email !== input.email)))
         )
           return { kind: "conflict" } as const;
         let created = false;
@@ -261,7 +264,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
           (!created &&
             !input.allow_resubscribe &&
             (contact.confirmation?.state !== "pending" ||
-              contact.confirmation.email !== contact.email))
+              contact.confirmation.email !== input.email))
         )
           return { kind: "conflict" } as const;
         if (!created) {
@@ -269,6 +272,14 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
             .update(t)
             .set({
               confirmation: candidate,
+              ...(contact.confirmation
+                ? {
+                    retiredConfirmationRequestIds: [
+                      ...(contact.retiredConfirmationRequestIds ?? []),
+                      contact.confirmation.requestId.toLowerCase(),
+                    ],
+                  }
+                : {}),
               updatedAt: now,
               ...(blocks.length ? { unsubscribed: true } : {}),
             })
@@ -323,7 +334,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
       request: {
         params: z.object({ id: z.uuid() }),
         query: z.object({
-          request_id: z.uuid(),
+          request_id: requestIdSchema,
           erase_contact: z.enum(["true", "false"]).optional(),
         }),
       },
@@ -354,7 +365,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
         if (!proof) return eraseContact ? "conflict" : "deleted";
         if (
           !contact.unsubscribed ||
-          proof.requestId !== requestId ||
+          proof.requestId.toLowerCase() !== requestId ||
           !(
             proof.state === "revoked" ||
             (proof.state === "pending" && new Date(proof.expiresAt) <= new Date())
@@ -371,6 +382,20 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
             (await suppressed(tx, auth.teamId, contact.email))
           )
             return "conflict";
+          const topics = schema.contactTopicSubscriptions;
+          const members = schema.segmentMembers;
+          const [references] = await tx
+            .select({
+              hasTopics: exists(
+                tx.select({ id: topics.topicId }).from(topics).where(eq(topics.contactId, id)),
+              ),
+              hasSegments: exists(
+                tx.select({ id: members.segmentId }).from(members).where(eq(members.contactId, id)),
+              ),
+            })
+            .from(t)
+            .where(eq(t.id, id));
+          if (references?.hasTopics || references?.hasSegments) return "conflict";
           await eraseRecipient(tx, auth.teamId, contact.email);
           await tx.delete(t).where(eq(t.id, id));
           await markSegmentsStale(tx, { teamId: auth.teamId });
@@ -383,7 +408,14 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
         }
         const [updated] = await tx
           .update(t)
-          .set({ confirmation: null, updatedAt: new Date() })
+          .set({
+            confirmation: null,
+            retiredConfirmationRequestIds: [
+              ...(contact.retiredConfirmationRequestIds ?? []),
+              proof.requestId.toLowerCase(),
+            ],
+            updatedAt: new Date(),
+          })
           .where(eq(t.id, id))
           .returning(contactSnapshotColumns);
         if (updated) await emit(auth.teamId, updated, ["contact.updated"]);
@@ -412,7 +444,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
             "application/json": {
               schema: z
                 .object({
-                  request_id: z.uuid(),
+                  request_id: requestIdSchema,
                   email: z
                     .string()
                     .trim()
@@ -450,9 +482,9 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
         const pending = contact.confirmation;
         if (
           !pending ||
-          pending.requestId !== input.request_id ||
+          pending.requestId.toLowerCase() !== input.request_id ||
           pending.email !== input.email ||
-          contact.email !== input.email
+          contact.email.toLowerCase() !== input.email
         )
           return { kind: "conflict" } as const;
         const blocks = await tx
@@ -516,7 +548,7 @@ export function registerContactConfirmationRoutes(app: OpenAPIHono<Env>, deps: A
               eq(t.teamId, auth.teamId),
               eq(t.unsubscribed, true),
               sql`${t.confirmation}->>'state' = 'pending'`,
-              sql`${t.confirmation}->>'requestId' = ${input.request_id}`,
+              sql`${t.confirmation}->>'requestId' = ${pending.requestId}`,
               sql`not exists (select 1 from ${s} where ${s.teamId}=${auth.teamId} and ${inArray(s.emailHash, suppressionHashesFor(input.email))})`,
             ),
           )

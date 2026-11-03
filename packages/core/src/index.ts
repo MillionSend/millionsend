@@ -59,12 +59,14 @@ export {
   activeOverride,
   applyJudgedSample,
   clearMonitorOverride,
+  clientIdentitySite,
   deriveSamplingKey,
   drawBroadcastCopy,
   foldRisk,
   type HoldRule,
   inFirstWindow,
   isHoldVerdict,
+  isLocalOnlyMail,
   isPlatformLinkVerdict,
   isPlatformTenantName,
   loadMonitorState,
@@ -96,6 +98,7 @@ export {
   monitorRate,
   monitorRowWithHistory,
   monitorSamplesByTeam,
+  monitorStandingCounts,
   monitorTier,
   noteAcceptedSend,
   planBroadcastSamples,
@@ -175,7 +178,13 @@ export {
   fetchContentFactors,
   MIN_OUTCOME_SENDS,
 } from "./account-score.js";
-export { purgeAccountSignups, recordSignup } from "./account-signups.js";
+export {
+  purgeAccountSignups,
+  recordSignup,
+  SIGNUPS_PER_NETWORK_PER_DAY,
+  signupRoomRetryAfterSec,
+  signupsFromNetwork,
+} from "./account-signups.js";
 export {
   type ApiKeyAuth,
   authenticateApiKey,
@@ -211,6 +220,8 @@ export {
   type AuditActor,
   type AuditEvent,
   apiRequestActor,
+  auditRow,
+  encodeAuditActor,
   type ParsedAuditActor,
   parseAuditActor,
   recordAudit,
@@ -372,7 +383,10 @@ export {
   MIN_WARN_COMPLAINTS,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
+  PAUSE_LIFT_COOLDOWN_DAYS,
   PAUSE_WINDOW_DAYS,
+  type PauseLiftRefusal,
+  pauseLiftRefusal,
   THROTTLED_BROADCAST_RATE_PER_SECOND,
   WARN_BOUNCE_RATE,
   WARN_COMPLAINT_RATE,
@@ -392,7 +406,6 @@ export {
 } from "./domain-age.js";
 export {
   createFixedWindowLimiter,
-  DOMAIN_CREATE_LIMIT_PER_HOUR,
   failQueuedEmailsForDomain,
   isIdentitySharedByOtherDomains,
   isOperatorTeam,
@@ -435,6 +448,7 @@ export {
   type EmailInsightsInput,
   evaluateEmailInsights,
   extractAnchors,
+  isShortener,
   MIN_BODY_TEXT_CHARS,
   SCORE_VERSION,
   type ScoreBand,
@@ -548,12 +562,14 @@ export {
 } from "./mail-preferences.js";
 export { firstRecipientDomain, mailboxProviderSql } from "./mailbox-provider-sql.js";
 export {
+  complaintReportingRecipients,
   INACTIVE_MAILBOX_PATTERN,
   MAILBOX_FULL_PATTERN,
   type MailboxProvider,
   mailboxProvider,
   sentWithoutComplaintFeedback,
   sesAttempted,
+  simulatorFeedback,
 } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
@@ -566,6 +582,7 @@ export {
   type MonitorSettingSource,
   type MonitorSettings,
   type MonitorSettingsRow,
+  monitorFlagLine,
   monitorSettingDefault,
   monitorSettingsReader,
   monitorThresholdsOrdered,
@@ -600,16 +617,33 @@ export { classifyOpen, type OpenVerdict, type PrefetchReason } from "./open-clas
 export {
   asciiHostname,
   isFreeHostName,
+  isLoopbackHost,
   isRootDomainSend,
   linkDomain,
   ownerDomain,
   registrableDomain,
 } from "./org-domain.js";
-export { splitPersonName } from "./person-name.js";
-export { findPixCodes, type PixCode, type PixKeyKind, parsePix } from "./pix.js";
 export {
+  liftDeliverabilityPause,
+  type PauseLiftStanding,
+  pauseLiftStanding,
+} from "./pause-lift.js";
+export { splitPersonName } from "./person-name.js";
+export {
+  findPixCodes,
+  mailCarriesPix,
+  type PixCode,
+  type PixKeyKind,
+  parsePix,
+} from "./pix.js";
+export {
+  DOMAIN_CREATES_PER_HOUR,
   effectivePlan,
+  FREE_BURST,
+  FREE_BURST_REFILL_MS,
+  FREE_BURST_WINDOW_MS,
   formatVolume,
+  freePoolOwner,
   isPlanRungKey,
   type LadderPlan,
   monthlyCapacity,
@@ -634,6 +668,7 @@ export {
   quotaPeriod,
   raisesQuota,
   rungByKey,
+  TEAM_CREATE_WINDOW_DAYS,
   type TeamQuota,
   teamQuota,
   teamRung,
@@ -643,34 +678,53 @@ export {
   BREAKER_BOUNCE_RATE,
   BREAKER_MIN_SENT,
   BREAKER_SES_COMPLAINT_RATE,
+  BREAKER_TEAM_WINDOW_DAYS,
   BREAKER_WINDOWS_HOURS,
+  evaluateFreeFuse,
   evaluateRegionBreakers,
+  FREE_FUSE_COMPLAINTS,
+  FREE_FUSE_WINDOW_DAYS,
+  type FreeFuseTrip,
+  freeFuseHolds,
+  freeFuseState,
+  freeFuseTripped,
   holdRegion,
   type PausedRegion,
   pausedRegions,
+  pauseHolds,
+  purgeUnmatchedSesEvents,
   type RegionContributor,
   type RegionDecision,
+  type RegionTeamStats,
   type RegionWindowCounts,
   recordSesComplaintRates,
+  recordSesEnforcementStatuses,
   regionCounterTotals,
   regionPause,
+  regionTeamStats,
   regionWindowCounts,
+  releaseFreeFuse,
   releaseRegion,
   SES_COMPLAINT_ALERT_RATE,
   SES_COMPLAINT_PAUSE_RATE,
   SES_COMPLAINT_REVIEW_RATE,
   type SesComplaintAlert,
   type SesComplaintReading,
+  type SesEnforcementChange,
   sesComplaintReadings,
+  unmatchedComplaints,
 } from "./platform-breaker.js";
 export { createPromiseCache, type PromiseCache } from "./promise-cache.js";
 export { parsePropertyDate, SEGMENT_FILTER_MAX_DAYS } from "./property-date.js";
 export { broadcastProviderBreakdown, type ProviderBreakdownRow } from "./provider-breakdown.js";
 export {
+  bookFreeBurst,
+  bumpFreePoolUsage,
   dailyCeiling,
   type QuotaResult,
   quotaChargeAt,
   quotaRoom,
+  readDailyUsage,
   readPeriodUsage,
   releaseDailyQuota,
   releasePeriodCount,
@@ -705,13 +759,14 @@ export {
   DESTINATIONS_CLEARED_MAX,
   destinationStanding,
   destinationVerdictParks,
-  isShortener,
   judgeAfterSend,
   LINK_AGE_LOOKUPS_PER_VERDICT,
+  linkDomainsAged,
   mediaParks,
   messageDestinations,
   NOVEL_DESTINATIONS_MAX,
   OPERATOR_PARK_REASONS,
+  reachesOnlyTeam,
   releaseWaitingEmails,
   revokeDestinations,
   SCREEN_HOLD_WAIT_MS,
@@ -888,6 +943,7 @@ export {
   verifyInviteToken,
 } from "./team-invitations.js";
 export {
+  backfillPoolOwners,
   committedDailyVolume,
   contactRoom,
   fetchBestOwnedPlan,
@@ -898,6 +954,7 @@ export {
 export {
   deliverabilityHold,
   fetchTeamStanding,
+  holdComplaintTeams,
   isSilentlySuspended,
   isTeamSuspended,
   type SendRefusal,
@@ -944,7 +1001,7 @@ export {
 } from "./updates-token.js";
 export { isLoopbackUrl, unwrapRedirect } from "./url.js";
 export { bumpHourlyUsage, USAGE_COUNTERS, type UsageCounter, utcHour } from "./usage-hourly.js";
-export { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
+export { DAY_MS, nextUtcDayStart, secondsUntil, utcDay } from "./utc-day.js";
 export {
   checkWarmups,
   contactActivity,

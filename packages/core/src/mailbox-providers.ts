@@ -72,21 +72,53 @@ export function sesAttempted(subType: string | null | undefined): boolean {
 }
 
 /**
- * Whether no recipient of a send can report it to SES as a complaint. A
- * stored recipient's domain is what follows its last '@', less the '>' that
- * closes a display-name form; the platform breaker's recipientDomains reads
- * it the same way in SQL, so the two must change together.
+ * A stored recipient's domain: what follows its last '@', less the '>' that
+ * closes a display-name form, lowercased. The platform breaker's
+ * recipientDomains reads it the same way in SQL, so the two must change
+ * together.
+ */
+export function recipientDomain(recipient: string): string {
+  return recipient
+    .slice(recipient.lastIndexOf("@") + 1)
+    .replace(/>+$/, "")
+    .toLowerCase();
+}
+
+/**
+ * The distinct recipients of a send that could report it to SES as a
+ * complaint: all but those at a provider that never reports one and those at
+ * SES's mailbox simulator, whose feedback is a test.
+ */
+export function complaintReportingRecipients(recipients: readonly string[]): string[] {
+  return [
+    ...new Set(
+      recipients.filter((r) => {
+        const domain = recipientDomain(r);
+        return (
+          !NO_COMPLAINT_FEEDBACK_DOMAINS.has(domain) && domain !== SES_MAILBOX_SIMULATOR_DOMAIN
+        );
+      }),
+    ),
+  ];
+}
+
+/**
+ * Whether no recipient of a send can report it to SES as a complaint, so it
+ * stays out of the complaint rate's denominator. The platform breaker's
+ * no-feedback SQL reads it the same way, so the two must change together.
  */
 export function sentWithoutComplaintFeedback(recipients: readonly string[]): boolean {
+  return recipients.length > 0 && complaintReportingRecipients(recipients).length === 0;
+}
+
+/**
+ * Whether every recipient an SES bounce or complaint names is at the mailbox
+ * simulator: a test, which still suppresses the address but never counts
+ * toward a bounce or complaint rate, as SES leaves it out of its own.
+ */
+export function simulatorFeedback(recipients: readonly string[]): boolean {
   return (
     recipients.length > 0 &&
-    recipients.every((r) =>
-      NO_COMPLAINT_FEEDBACK_DOMAINS.has(
-        r
-          .slice(r.lastIndexOf("@") + 1)
-          .replace(/>+$/, "")
-          .toLowerCase(),
-      ),
-    )
+    recipients.every((r) => recipientDomain(r) === SES_MAILBOX_SIMULATOR_DOMAIN)
   );
 }

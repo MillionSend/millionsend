@@ -122,7 +122,7 @@ function Row({
           <Tooltip
             inline
             text={
-              r.breaker
+              r.breaker && r.breaker.heldTeams === null
                 ? t("queueHeld", { count: r.waitingBroadcasts })
                 : t("queueClears", {
                     count: r.waitingBroadcasts,

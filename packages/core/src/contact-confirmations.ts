@@ -4,8 +4,14 @@ import { and, eq, inArray, type SQLWrapper, sql } from "drizzle-orm";
 import { extractAddrSpec, normalizeAddress } from "./suppressions.js";
 
 /** Historical contacts have no confirmation state and retain their semantics. */
-export function hasRevocableConfirmation(value: { state: string } | null | undefined): boolean {
-  return value?.state === "pending" || value?.state === "confirmed";
+export function needsConfirmationWithdrawal(
+  value: typeof schema.contacts.$inferSelect.confirmation,
+): boolean {
+  return (
+    value?.state === "pending" ||
+    value?.state === "confirmed" ||
+    (value?.state === "revoked" && (!value.withdrawnAt || value.withdrawnAt < value.requestedAt))
+  );
 }
 
 /** Suppression writers lock contacts first, matching confirmation's lock order. */
@@ -39,8 +45,14 @@ export function revokeContactConfirmation(column: SQLWrapper, at = new Date(), w
     revokedAt: at.toISOString(),
     ...(withdrawal ? { withdrawnAt: at.toISOString() } : {}),
   });
+  const datedWithdrawal = JSON.stringify({ withdrawnAt: at.toISOString() });
+  const recordLaterWithdrawal = withdrawal
+    ? sql`when ${column}->>'state' = 'revoked'
+        and (${column}->>'withdrawnAt' is null or ${column}->>'withdrawnAt' < ${column}->>'requestedAt')
+      then ${column} || ${datedWithdrawal}::jsonb`
+    : sql.empty();
   return sql`case when ${column}->>'state' in ('pending','confirmed')
-    then ${column} || ${marker}::jsonb else ${column} end`;
+    then ${column} || ${marker}::jsonb ${recordLaterWithdrawal} else ${column} end`;
 }
 
 /** A later suppression removal must never revive an older mailbox request. */

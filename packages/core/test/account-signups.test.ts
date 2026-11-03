@@ -4,7 +4,14 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { clearAbuseMarks, purgeAccountSignups, recordSignup } from "../src/account-signups.js";
+import {
+  clearAbuseMarks,
+  purgeAccountSignups,
+  recordSignup,
+  SIGNUPS_PER_NETWORK_PER_DAY,
+  signupRoomRetryAfterSec,
+  signupsFromNetwork,
+} from "../src/account-signups.js";
 import { suspendTeam } from "../src/team-standing.js";
 import { DAY_MS } from "../src/utc-day.js";
 
@@ -49,6 +56,60 @@ describe("recordSignup", () => {
     expect(await record("a")).toMatchObject({ ip: "2001:db8::1", email: "a@example.com" });
     expect((await record("a"))?.userAgent).toHaveLength(512);
     expect(await record("b")).toMatchObject({ ip: null, userAgent: null });
+  });
+});
+
+describe("signupsFromNetwork", () => {
+  const NOW = new Date("2026-09-03T12:00:00Z");
+  const hoursBefore = (hours: number) => new Date(NOW.getTime() - hours * 60 * 60 * 1000);
+  const signedUp = (ip: string | null, at: Date, deletedAt: Date | null = null) =>
+    db
+      .insert(schema.accountSignups)
+      .values({ userId: randomUUID(), email: "x@example.com", ip, createdAt: at, deletedAt });
+
+  it("counts the day's sign-ups from one IPv4 address, or one IPv6 /64, deleted accounts included", async () => {
+    await signedUp("203.0.113.9", hoursBefore(1));
+    await signedUp("203.0.113.9", hoursBefore(23), hoursBefore(2));
+    await signedUp("203.0.113.10", hoursBefore(1));
+    await signedUp("2001:db8::1", hoursBefore(1));
+    await signedUp("2001:db8::abcd:1", hoursBefore(5));
+    await signedUp("2001:db8:0:1::1", hoursBefore(1));
+    // Stored as recordSignup keeps them: a zone id, which inet would refuse, and no IP at all.
+    await signedUp("fe80::1%eth0", hoursBefore(1));
+    await signedUp(null, hoursBefore(1));
+
+    expect(await signupsFromNetwork(db, "203.0.113.9", NOW)).toHaveLength(2);
+    expect(await signupsFromNetwork(db, "::ffff:203.0.113.9", NOW)).toHaveLength(2);
+    expect(await signupsFromNetwork(db, "2001:db8::ffff", NOW)).toHaveLength(2);
+    expect(await signupsFromNetwork(db, "2001:db8:0:1::9", NOW)).toHaveLength(1);
+    expect(await signupsFromNetwork(db, "198.51.100.1", NOW)).toHaveLength(0);
+    expect(await signupsFromNetwork(db, "unknown", NOW)).toHaveLength(0);
+  });
+
+  it("leaves out sign-ups a day old or older", async () => {
+    await signedUp("203.0.113.9", hoursBefore(24));
+    await signedUp("2001:db8::1", hoursBefore(30));
+    expect(await signupsFromNetwork(db, "203.0.113.9", NOW)).toHaveLength(0);
+    expect(await signupsFromNetwork(db, "2001:db8::2", NOW)).toHaveLength(0);
+  });
+});
+
+describe("signupRoomRetryAfterSec", () => {
+  const NOW = new Date("2026-09-03T12:00:00Z");
+  const hoursBefore = (hours: number) => new Date(NOW.getTime() - hours * 60 * 60 * 1000);
+
+  it("waits for the sign-up whose aging out brings the network under its cap", () => {
+    // At the cap the oldest leaving frees a place; past it, more must leave first.
+    expect(SIGNUPS_PER_NETWORK_PER_DAY).toBe(3);
+    expect(signupRoomRetryAfterSec([hoursBefore(1), hoursBefore(20), hoursBefore(5)], NOW)).toBe(
+      4 * 3600,
+    );
+    expect(
+      signupRoomRetryAfterSec(
+        [hoursBefore(1), hoursBefore(20), hoursBefore(5), hoursBefore(10)],
+        NOW,
+      ),
+    ).toBe(14 * 3600);
   });
 });
 

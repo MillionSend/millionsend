@@ -26,7 +26,8 @@ const OPERATOR_ONLY_ACTIONS = [
  * An operator's why, kept from the team where it was never written for it:
  * the note on a silent suspension says what was seen, and the team must not
  * learn from it what got it caught; a broadcast pause's reason and note
- * reach the owner only in the mail that carried them.
+ * reach the owner only in the mail that carried them; a pause lift's
+ * reference and note are the operator's record of the review.
  */
 function teamVisibleData(
   action: string,
@@ -38,6 +39,7 @@ function teamVisibleData(
   if (action === "team.broadcasts_paused" && data?.notified !== true) {
     return { ...data, reason: null, note: null };
   }
+  if (action === "team.sending_pause_lifted") return { ...data, reference: null, note: null };
   return data;
 }
 

@@ -36,6 +36,8 @@ textarea.ms-input {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+  /* A button its layout widens (a grid cell, a phone's full-width row) keeps its label centred. */
+  justify-content: center;
   white-space: nowrap;
   flex-shrink: 0;
   /* Buttons rendered as <Link> would otherwise inherit the global dotted link underline. */
@@ -80,7 +82,6 @@ textarea.ms-input {
   border-color: var(--ms-line-strong);
   width: 30px;
   padding: 0;
-  justify-content: center;
   font-size: 12px;
   font-family: var(--ms-font-mono);
 }
@@ -1724,6 +1725,12 @@ button.ms-notice-strip-action {
   padding-left: 8px;
   padding-right: 8px;
 }
+/* A console list's team column takes what the other columns leave, but never
+   less than a readable name: below that the list scrolls sideways, rather
+   than cutting every name down to its first letter. */
+.ms-table.nowrap td.ms-cell-fill {
+  min-width: 160px;
+}
 .ms-table .num {
   font-family: var(--ms-font-mono);
   font-size: 12.5px;
@@ -2892,7 +2899,6 @@ summary:focus-visible,
      inside must take that width too, or it floats centered in empty space. */
   .ms-page-actions > .ms-split > .ms-btn {
     flex: 1 1 auto;
-    justify-content: center;
   }
 
   /* An email's events read top to bottom: across, the latest event (the one
@@ -3998,9 +4004,6 @@ input[type="number"]::-webkit-inner-spin-button {
   }
 }
 /* The card's compact form (one tile per plan) and the dialog the ladder opens in. */
-.ms-plan-more .ms-btn {
-  justify-content: center;
-}
 .ms-plan-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

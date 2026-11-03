@@ -14,6 +14,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { requireAuthSecret } from "./auth-secret";
 import { accountMailLocale } from "./locale";
+import { tooManyRequests } from "./retry-after";
 import { buildConsoleCodeEmail, defaultSystemMailDeps } from "./system-mail";
 import type { AuthSession } from "./trpc";
 
@@ -73,9 +74,8 @@ export async function sendConsoleCode(
   // While the mark stands no new code goes out: one the queue accepted would
   // fail out of sight again, behind a field waiting for a code that never comes.
   if (await codeUnsent(db, user.id, now)) return { sent: false, reason: "send_failed" };
-  if (sendsLimited(user.id)) {
-    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "code_limit" });
-  }
+  const retryAfter = sendsLimited(user.id);
+  if (retryAfter !== null) throw tooManyRequests(retryAfter, "code_limit");
   const code = String(randomInt(1_000_000)).padStart(6, "0");
   await replaceConsoleCodeRow(
     db,

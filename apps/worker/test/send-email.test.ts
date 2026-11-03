@@ -1,9 +1,14 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   acceptEmail,
+  bookFreeBurst,
+  DAY_MS,
   EnvKeyring,
   encryptEmailBody,
+  FREE_BURST,
+  FREE_BURST_REFILL_MS,
   hashRecipient,
+  releaseFreeFuse,
   SYSTEM_MAIL_TAG,
   sealAttachments,
   sendSystemMail,
@@ -15,8 +20,9 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
-import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { drainQuotaParked } from "../src/handlers/cron.js";
 import {
   createTokenBucket,
   type SendDeps,
@@ -55,9 +61,11 @@ afterAll(() => close());
 interface FakeSend {
   raw: Buffer;
   emailId: string;
+  bcc?: string[] | null | undefined;
   configurationSetName?: string | undefined;
   region?: string | undefined;
   tenantName?: string | undefined;
+  poolOwnerId?: string | undefined;
 }
 
 function fakeSes(messageId = "fake-mid"): { ses: SesSender; sends: FakeSend[] } {
@@ -704,6 +712,58 @@ it("attachments and custom headers ride the raw MIME; tracking still rewrites th
   const mime = unwrapQp(raw);
   expect(mime).toContain("https://track.example.com/t/c/");
   expect(mime).not.toContain("dest.test");
+});
+
+it("Bcc recipients reach SES as Destination only, never inside the message", async () => {
+  const { ses, sends } = fakeSes("mid-bcc");
+  const emailId = await insertEmail({ to: ["r@example.com"], bcc: ["hidden@example.com"] });
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+
+  expect(sends[0]?.bcc).toEqual(["hidden@example.com"]);
+  const raw = sends[0]?.raw.toString("utf8") ?? "";
+  expect(raw).not.toContain("hidden@example.com");
+  expect(raw.toLowerCase()).not.toContain("\r\nbcc:");
+});
+
+it("printable ASCII header values go out as given, double quotes included; non-ASCII is still encoded", async () => {
+  const { ses, sends } = fakeSes("mid-verbatim-headers");
+  const otpToken = '"123456"; origin="https://example.com"';
+  const long = `k="${"a".repeat(60)}"; b="${"c".repeat(60)}"`;
+  const emailId = await insertEmail({
+    subject: 'Your "code" is 123456',
+    headers: {
+      "OTP-Token": otpToken,
+      "X-Long": long,
+      "X-Unbroken": `"${"x".repeat(1000)}"`,
+      "X-Accent": 'olá "mundo"',
+      "In-Reply-To": "parent@acme.dev",
+      References: "<root@acme.dev> parent@acme.dev",
+    },
+  });
+  expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+
+  const raw = sends[0]?.raw.toString("utf8") ?? "";
+  const head = raw.slice(0, raw.indexOf("\r\n\r\n"));
+  // Unfolded the way a receiver reads it; names lowercased (nodemailer
+  // normalizes their casing), values left exact.
+  const fields = head
+    .replace(/\r\n(?=[ \t])/g, "")
+    .split("\r\n")
+    .map((line) => line.replace(/^[^:]+/, (name) => name.toLowerCase()));
+  expect(fields).toContain(`otp-token: ${otpToken}`);
+  expect(fields).toContain('subject: Your "code" is 123456');
+  expect(fields).toContain(`x-long: ${long}`);
+  // Folded at its own whitespace, while a word no fold can fit within 998
+  // characters keeps nodemailer's encoded words.
+  expect(head).toMatch(/X-Long: k="a+";\r\n b="c+"/);
+  expect(fields.find((f) => f.startsWith("x-unbroken:"))).toMatch(
+    /^x-unbroken: =\?UTF-8\?Q\?=22x+\?=/,
+  );
+  expect(head.split("\r\n").every((line) => line.length <= 998)).toBe(true);
+  expect(fields).toContain("x-accent: =?UTF-8?Q?ol=C3=A1_=22mundo=22?=");
+  // Msg-ids keep nodemailer's angle brackets.
+  expect(fields).toContain("in-reply-to: <parent@acme.dev>");
+  expect(fields).toContain("references: <root@acme.dev> <parent@acme.dev>");
 });
 
 it("sends an attachment's bare media type and charset: a declared name never reaches the MIME", async () => {
@@ -1910,10 +1970,20 @@ it("a broadcast row parks on the bulk share or a held region; a transactional ro
     contactId: heldContact,
     to: ["share-held@example.com"],
   });
-  const paused = { ...share, bulkExhausted: () => false, paused: () => true };
+  // The region's pause holds this team's broadcasts.
+  const paused = {
+    ...share,
+    bulkExhausted: () => false,
+    paused: (_region: string | undefined, team: string) => team === teamId,
+  };
   expect(await sendEmail(db, { keyring, ses, sesQuota: paused }, { emailId: held })).toBe("parked");
 
-  const open = { ...share, bulkExhausted: () => false };
+  // A pause that holds only other teams' broadcasts lets this team's go.
+  const open = {
+    ...share,
+    bulkExhausted: () => false,
+    paused: (_region: string | undefined, team: string) => team !== teamId,
+  };
   const flowingContact = await insertContact("share-flow@example.com");
   const flowing = await insertEmail({
     broadcastId: bc?.id,
@@ -1942,6 +2012,50 @@ it("a broadcast row parks on the bulk share or a held region; a transactional ro
     await sendEmail(db, { keyring, ses, sesQuota: full }, { emailId: await insertEmail() }),
   ).toBe("parked");
   expect(parked).toEqual(["us-east-1"]);
+});
+
+it("parks a Free team's mail to a provider that reports complaints while the Free fuse is tripped, on Cloud only", async () => {
+  const fuse = (trippedAt: Date | null) =>
+    db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, freeFuseTrippedAt: trippedAt, freeFuseComplaints: 3 })
+      .onConflictDoUpdate({
+        target: schema.instanceSettings.id,
+        set: { freeFuseTrippedAt: trippedAt },
+      });
+  await fuse(new Date());
+  const sent: string[] = [];
+  const ses: SesSender = {
+    async sendRaw(params) {
+      sent.push(params.emailId);
+      return { messageId: `fuse-${params.emailId}` };
+    },
+  };
+  const cloud: SendDeps = { keyring, ses, isCloud: true };
+  const outlook = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, cloud, { emailId: outlook })).toBe("parked");
+  const [row] = await db.select().from(schema.emails).where(eq(schema.emails.id, outlook));
+  expect(row).toMatchObject({ latestStatus: "queued_quota", parkReason: "fuse" });
+  // A reporting provider in Bcc is enough.
+  const bcc = await insertEmail({ to: ["r@gmail.com"], bcc: ["s@yahoo.com"] });
+  expect(await sendEmail(db, cloud, { emailId: bcc })).toBe("parked");
+  // Gmail and iCloud never report a complaint; account mail is the platform's own.
+  const gmail = await insertEmail({ to: ["r@gmail.com"], cc: ["s@icloud.com"] });
+  expect(await sendEmail(db, cloud, { emailId: gmail })).toBe("sent");
+  const account = await insertEmail({
+    to: ["r@outlook.com"],
+    tags: { [SYSTEM_MAIL_TAG]: "password_reset" },
+  });
+  expect(await sendEmail(db, cloud, { emailId: account })).toBe("sent");
+  // Self-hosted there is no fuse, and on Cloud a paid team's mail never waits on it.
+  const selfHosted = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, { keyring, ses }, { emailId: selfHosted })).toBe("sent");
+  await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
+  const paid = await insertEmail({ to: ["r@outlook.com"] });
+  expect(await sendEmail(db, cloud, { emailId: paid })).toBe("sent");
+  await db.update(schema.teams).set({ plan: "free" }).where(eq(schema.teams.id, teamId));
+  await fuse(null);
+  expect(sent).toEqual([gmail, account, selfHosted, paid]);
 });
 
 it("a row of a canceled broadcast is canceled, not sent", async () => {
@@ -2013,6 +2127,366 @@ it("counts a send no recipient can report as a complaint only when every recipie
   expect(counters).toEqual([{ sent: 4, sentNoFeedback: 2 }]);
 });
 
+it("adds a Free team's sends to its pool beside its own counters; simulator-only mail can draw no complaint", async () => {
+  const owner = "u-send-pool";
+  const team = await createTeam(db, "send-pool-team", { poolOwnerId: owner });
+  const [domain] = await db
+    .insert(schema.domains)
+    .values({
+      teamId: team,
+      name: "pool.example",
+      region: "us-east-1",
+      status: "verified",
+      verifiedAt: new Date(),
+    })
+    .returning({ id: schema.domains.id });
+  const send = async (to: string[]) => {
+    const { ses } = fakeSes(randomUUID());
+    const emailId = await insertEmail({
+      teamId: team,
+      domainId: domain?.id,
+      from: "P <p@pool.example>",
+      to,
+    });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+  };
+  await send(["r@outlook.com"]);
+  await send(["success@simulator.amazonses.com"]);
+  const counted = { sent: 2, sentNoFeedback: 1 };
+  expect(
+    await db
+      .select({
+        sent: schema.usageCounters.sent,
+        sentNoFeedback: schema.usageCounters.sentNoFeedback,
+      })
+      .from(schema.usageCounters)
+      .where(eq(schema.usageCounters.teamId, team)),
+  ).toEqual([counted]);
+  expect(
+    await db
+      .select({
+        sent: schema.freePoolUsage.sent,
+        sentNoFeedback: schema.freePoolUsage.sentNoFeedback,
+      })
+      .from(schema.freePoolUsage)
+      .where(eq(schema.freePoolUsage.ownerId, owner)),
+  ).toEqual([counted]);
+});
+
+it("tags a Free pool's sends with the pool for SES, and a paid or creator-less team's with none", async () => {
+  const owner = "u-send-tag";
+  const tagOf = async (team: string, slug?: string) => {
+    const [domain] = slug
+      ? await db
+          .insert(schema.domains)
+          .values({
+            teamId: team,
+            name: `${slug}.example`,
+            region: "us-east-1",
+            status: "verified",
+            verifiedAt: new Date(),
+          })
+          .returning({ id: schema.domains.id })
+      : [{ id: domainId }];
+    const { ses, sends } = fakeSes(randomUUID());
+    const emailId = await insertEmail({
+      teamId: team,
+      domainId: domain?.id,
+      from: slug ? `T <t@${slug}.example>` : "Acme <a@acme.dev>",
+      to: ["g@gmail.com"],
+    });
+    expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+    return sends[0]?.poolOwnerId;
+  };
+  const pooled = await createTeam(db, "send-tag-free", { poolOwnerId: owner });
+  const paid = await createTeam(db, "send-tag-paid", { poolOwnerId: owner });
+  await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+  expect(await tagOf(pooled, "send-tag-free")).toBe(owner);
+  expect(await tagOf(paid, "send-tag-paid")).toBeUndefined();
+  expect(await tagOf(teamId)).toBeUndefined();
+});
+
+describe("a Free pool's burst allowance", () => {
+  const NOW = new Date("2026-09-03T12:00:00Z");
+  const at = (refills: number, from = NOW) =>
+    new Date(from.getTime() + refills * FREE_BURST_REFILL_MS);
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  type Sender = { teamId: string; domainId: string | null; from: string };
+
+  /** A Free team in `ownerId`'s pool, sending from a verified domain of its own. */
+  const pooledTeam = async (slug: string, ownerId: string): Promise<Sender> => {
+    const team = await createTeam(db, slug, { poolOwnerId: ownerId });
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({
+        teamId: team,
+        name: `${slug}.example`,
+        region: "us-east-1",
+        status: "verified",
+        verifiedAt: new Date(),
+      })
+      .returning({ id: schema.domains.id });
+    return { teamId: team, domainId: domain?.id ?? null, from: `P <p@${slug}.example>` };
+  };
+
+  /** One send attempt on a row, as the email.send job makes it on a Cloud worker. */
+  const attempt = async (emailId: string, over: Partial<SendDeps> = {}) => {
+    const { ses, sends } = fakeSes(randomUUID());
+    const rescheduled: Date[] = [];
+    const outcome = await sendEmail(
+      db,
+      {
+        keyring,
+        ses,
+        freeBurst: bookFreeBurst,
+        reschedule: async (_id, when) => {
+          rescheduled.push(when);
+        },
+        ...over,
+      },
+      { emailId },
+    );
+    return { outcome, rescheduled, sends };
+  };
+
+  const send = async (
+    from: Sender,
+    email: Partial<typeof schema.emails.$inferInsert>,
+    over: Partial<SendDeps> = {},
+  ) => {
+    const emailId = await insertEmail({ ...from, ...email });
+    return { emailId, ...(await attempt(emailId, over)) };
+  };
+
+  const tatOf = async (ownerId: string) => {
+    const [row] = await db
+      .select({ tat: schema.freePoolBursts.tat })
+      .from(schema.freePoolBursts)
+      .where(eq(schema.freePoolBursts.ownerId, ownerId));
+    return row?.tat;
+  };
+
+  it("sends the first FREE_BURST recipients at once and holds the next one queued for a refill", async () => {
+    const team = await pooledTeam("burst-first", "u-burst-first");
+    for (let i = 0; i < FREE_BURST; i++) {
+      expect((await send(team, { to: [`r${i}@outlook.com`] })).outcome).toBe("sent");
+    }
+    const next = await send(team, { to: ["s@yahoo.com"] });
+    expect(next.outcome).toBe("deferred");
+    expect(next.rescheduled).toEqual([at(1)]);
+    expect(next.sends).toHaveLength(0);
+    const [row] = await db
+      .select({ status: schema.emails.latestStatus, freeBurstAt: schema.emails.freeBurstAt })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, next.emailId));
+    expect(row).toEqual({ status: "queued", freeBurstAt: at(1) });
+  });
+
+  it("counts every recipient that can report a complaint, Bcc included, and none that cannot", async () => {
+    const team = await pooledTeam("burst-bcc", "u-burst-bcc");
+    const held = await send(team, {
+      to: ["r@outlook.com"],
+      cc: ["g@gmail.com", "success@simulator.amazonses.com"],
+      bcc: Array.from({ length: 24 }, (_, i) => `b${i}@example.com`),
+    });
+    expect(held.outcome).toBe("deferred");
+    const [row] = await db
+      .select({ freeBurstAt: schema.emails.freeBurstAt })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, held.emailId));
+    expect(row?.freeBurstAt).toEqual(at(25 - FREE_BURST));
+    // Its wake-up is a burst window away at most, short of the slot.
+    expect(held.rescheduled).toEqual([at(FREE_BURST)]);
+  });
+
+  it("holds every Free team of one creator to one allowance", async () => {
+    const first = await pooledTeam("burst-share-a", "u-burst-share");
+    const second = await pooledTeam("burst-share-b", "u-burst-share");
+    const tenAtOnce = Array.from({ length: FREE_BURST }, (_, i) => `r${i}@outlook.com`);
+    expect((await send(first, { to: tenAtOnce })).outcome).toBe("sent");
+    const next = await send(second, { to: ["s@outlook.com"] });
+    expect(next.outcome).toBe("deferred");
+    expect(next.rescheduled).toEqual([at(1)]);
+  });
+
+  it("never holds mail no recipient can report, account mail, the onboarding email, a paid or creator-less team's mail, or mail on a worker without the allowance", async () => {
+    const team = await pooledTeam("burst-exempt", "u-burst-exempt");
+    // Spent far ahead: any mail the allowance gated would wait.
+    await bookFreeBurst(db, "u-burst-exempt", 50, NOW);
+    const tat = await tatOf("u-burst-exempt");
+    const reporting = { to: ["r@outlook.com"] };
+
+    expect((await send(team, { to: ["g@gmail.com"], cc: ["a@icloud.com"] })).outcome).toBe("sent");
+    expect((await send(team, { to: ["success@simulator.amazonses.com"] })).outcome).toBe("sent");
+    expect(
+      (await send(team, { ...reporting, tags: { [SYSTEM_MAIL_TAG]: "password_reset" } })).outcome,
+    ).toBe("sent");
+    const platform = "MillionSend <onboarding@ms.example>";
+    expect(
+      (
+        await send({ ...team, domainId: null, from: platform }, reporting, {
+          onboardingEmailFrom: platform,
+        })
+      ).outcome,
+    ).toBe("sent");
+    const paid = await pooledTeam("burst-paid", "u-burst-exempt");
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid.teamId));
+    expect((await send(paid, reporting)).outcome).toBe("sent");
+    // The suite's team has no recorded creator, as on self-host.
+    expect((await send({ teamId, domainId, from: "Acme <a@acme.dev>" }, reporting)).outcome).toBe(
+      "sent",
+    );
+    expect((await send(team, reporting, { freeBurst: undefined })).outcome).toBe("sent");
+    expect(await tatOf("u-burst-exempt")).toEqual(tat);
+  });
+
+  it("books a held row once: an early wake-up waits for the same slot, and the slot sends it", async () => {
+    const team = await pooledTeam("burst-wake", "u-burst-wake");
+    await bookFreeBurst(db, "u-burst-wake", FREE_BURST, NOW);
+    const held = await send(team, { to: ["r@outlook.com"] });
+    expect(held.rescheduled).toEqual([at(1)]);
+    const tat = await tatOf("u-burst-wake");
+
+    vi.setSystemTime(new Date(NOW.getTime() + FREE_BURST_REFILL_MS / 2));
+    const early = await attempt(held.emailId);
+    expect(early.outcome).toBe("deferred");
+    expect(early.rescheduled).toEqual([at(1)]);
+
+    vi.setSystemTime(at(1));
+    const due = await attempt(held.emailId);
+    expect(due.outcome).toBe("sent");
+    expect(due.sends).toHaveLength(1);
+    expect(await tatOf("u-burst-wake")).toEqual(tat);
+  });
+
+  it("wakes a waiting row within a burst window, so mail of a team that left Free goes then", async () => {
+    const team = await pooledTeam("burst-upgrade", "u-burst-upgrade");
+    // Spent far ahead: the next turn is hours away.
+    await bookFreeBurst(db, "u-burst-upgrade", 5 * FREE_BURST, NOW);
+    const held = await send(team, { to: ["r@outlook.com"] });
+    expect(held.outcome).toBe("deferred");
+    expect(held.rescheduled).toEqual([at(FREE_BURST)]);
+
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, team.teamId));
+    vi.setSystemTime(at(FREE_BURST));
+    const woke = await attempt(held.emailId);
+    expect(woke.outcome).toBe("sent");
+    expect(woke.sends).toHaveLength(1);
+  });
+
+  /** One attempt per row, in order, all at the current instant. */
+  const attemptAll = async (ids: readonly string[], over: Partial<SendDeps> = {}) => {
+    const results = [];
+    for (const id of ids) results.push(await attempt(id, over));
+    return results;
+  };
+  const outcomes = (results: { outcome: string }[]) => results.map((r) => r.outcome);
+  const WAITING = 5;
+  /** The slots of the WAITING rows past a fresh burst at `from`: one refill apart. */
+  const paced = (from: Date) => Array.from({ length: WAITING }, (_, i) => at(i + 1, from));
+
+  it("books anew a row parked past its slot: the drain's release goes out as a fresh burst, not all at once", async () => {
+    const team = await pooledTeam("burst-park", "u-burst-park");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`] }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // Each held row wakes at its slot to find SES out of sends: parked, its slot kept.
+    const held = ids.slice(FREE_BURST);
+    vi.setSystemTime(at(held.length));
+    const sesQuota = { exhausted: () => true, refresh: async () => true };
+    expect(outcomes(await attemptAll(held, { sesQuota }))).toEqual(
+      Array<string>(held.length).fill("parked"),
+    );
+
+    const release = new Date(at(held.length).getTime() + 2 * 3_600_000);
+    vi.setSystemTime(release);
+    const released: string[] = [];
+    await drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        released.push(...batch.map((job) => job.emailId).filter((id) => held.includes(id)));
+      },
+    });
+    expect(released).toHaveLength(held.length);
+    const again = await attemptAll(released);
+    expect(outcomes(again)).toEqual([
+      ...Array<string>(held.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(again.flatMap((a) => a.rescheduled)).toEqual(paced(release));
+  });
+
+  it("books anew a row rescheduled past its slot, when its new time comes", async () => {
+    const team = await pooledTeam("burst-moved", "u-burst-moved");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`], scheduledAt: NOW }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // PATCH /emails/{id} moves the waiting rows to tomorrow; each keeps its slot from today.
+    const tomorrow = new Date(NOW.getTime() + DAY_MS);
+    const moved = ids.slice(FREE_BURST);
+    await db
+      .update(schema.emails)
+      .set({ scheduledAt: tomorrow })
+      .where(inArray(schema.emails.id, moved));
+
+    vi.setSystemTime(tomorrow);
+    const due = await attemptAll(moved);
+    expect(outcomes(due)).toEqual([
+      ...Array<string>(moved.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(due.flatMap((a) => a.rescheduled)).toEqual(paced(tomorrow));
+  });
+
+  it("books anew the rows the Free fuse held at their slots, so its release goes out as a fresh burst", async () => {
+    const team = await pooledTeam("burst-fuse", "u-burst-fuse");
+    const ids: string[] = [];
+    for (let i = 0; i < 2 * FREE_BURST + WAITING; i++) {
+      ids.push(await insertEmail({ ...team, to: [`r${i}@outlook.com`] }));
+    }
+    expect(outcomes(await attemptAll(ids)).filter((o) => o === "sent")).toHaveLength(FREE_BURST);
+    // The fuse trips: each waiting row reaches its slot and parks on it.
+    const tripped = { freeFuseTrippedAt: NOW, freeFuseComplaints: 3 };
+    await db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, ...tripped })
+      .onConflictDoUpdate({ target: schema.instanceSettings.id, set: tripped });
+    const held = ids.slice(FREE_BURST);
+    for (const [i, id] of held.entries()) {
+      vi.setSystemTime(at(i + 1));
+      expect((await attempt(id, { isCloud: true })).outcome).toBe("parked");
+    }
+
+    const release = new Date(at(held.length).getTime() + 2 * 3_600_000);
+    vi.setSystemTime(release);
+    expect(await releaseFreeFuse(db, release)).toEqual({ complaints: 3, emails: held.length });
+    const released: string[] = [];
+    await drainQuotaParked(db, {
+      isCloud: true,
+      enqueueSends: async (batch) => {
+        released.push(...batch.map((job) => job.emailId).filter((id) => held.includes(id)));
+      },
+    });
+    expect(released).toHaveLength(held.length);
+    const again = await attemptAll(released, { isCloud: true });
+    expect(outcomes(again)).toEqual([
+      ...Array<string>(held.length - WAITING).fill("sent"),
+      ...Array<string>(WAITING).fill("deferred"),
+    ]);
+    expect(again.flatMap((a) => a.rescheduled)).toEqual(paced(release));
+  });
+});
+
 it("ships verification links and no pixel when the message disables domain tracking", async () => {
   await db
     .update(schema.domains)
@@ -2036,7 +2510,9 @@ it("ships verification links and no pixel when the message disables domain track
       { emailId },
     ),
   ).toBe("sent");
-  const mime = unwrapQp(sends[0]!.raw.toString("utf8"));
+  const [sent] = sends;
+  if (!sent) throw new Error("Verification mail was not sent");
+  const mime = unwrapQp(sent.raw.toString("utf8"));
   expect(mime).toContain("https://example.com/confirm#secret");
   expect(mime).not.toContain("/t/c/");
   expect(mime).not.toContain("/t/o/");

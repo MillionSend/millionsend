@@ -45,7 +45,10 @@ export interface SerializedSesEvent {
   eventType: string;
   sesMessageId: string;
   emailId?: string;
+  poolOwnerId?: string;
   occurredAt: string;
+  /** Absent on jobs queued before it was carried. */
+  sentAt?: string;
   bounce?: {
     bounceType: "Permanent" | "Transient" | "Undetermined";
     bounceSubType: string;

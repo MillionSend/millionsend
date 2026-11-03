@@ -42,6 +42,9 @@ describe("receiving DNS record", () => {
       ]),
     ).toEqual({ status: "mismatch", found: "10 aspmx.l.google.com\n20 mx.millionsend-dns.com" });
     expect(await at([])).toEqual({ status: "missing" });
+    // A null MX takes no mail anywhere: nothing to move, so it reads as no MX.
+    expect(await at([{ priority: 0, exchange: "" }])).toEqual({ status: "missing" });
+    expect(await at([{ priority: 0, exchange: "." }])).toEqual({ status: "missing" });
   });
 
   it("tells a conclusive absence from a lookup that failed", async () => {

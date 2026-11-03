@@ -595,4 +595,32 @@ describe("forward_to copies from the shared domain", () => {
       }),
     ).toMatchObject({ kind: "sent" });
   });
+
+  it("ends a forward the monthly quota refuses, even with the renewal inside FORWARD_WAIT_MAX", async () => {
+    const w = await seedWorld(db, "forward-monthly");
+    const inbox = await addInbox(w, { local: "relay-monthly", safety: { forward_to: [w.owner] } });
+    const received = await receive(w, { inbox, threadId: await addThread(w, inbox.id) });
+    const end = new Date(Date.now() + DAY_MS);
+    const start = new Date(end.getTime() - 30 * DAY_MS);
+    await db
+      .update(schema.teams)
+      .set({
+        plan: "pro",
+        planQuota: 100_000,
+        planStatus: "active",
+        currentPeriodStart: start,
+        currentPeriodEnd: end,
+        overageEnabled: false,
+      })
+      .where(eq(schema.teams.id, w.teamId));
+    await db
+      .insert(schema.usagePeriods)
+      .values({ teamId: w.teamId, periodStart: start, accepted: 100_000 });
+    expect(
+      await forwardToForwardTargets(db, w.deps, {
+        receivedEmailId: received.id,
+        inboxId: inbox.id,
+      }),
+    ).toMatchObject({ kind: "refused", error: { name: "monthly_quota_exceeded" } });
+  });
 });

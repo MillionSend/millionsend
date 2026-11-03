@@ -1,3 +1,4 @@
+import { SUBJECT_LABEL, VISIBLE_TEXT_LABEL } from "./block.js";
 import { JudgeError, type JudgeVerdict } from "./types.js";
 
 /**
@@ -7,7 +8,7 @@ import { JudgeError, type JudgeVerdict } from "./types.js";
  * shape: changing either changes recall and false-positive rate, so re-measure
  * on the labelled set before shipping.
  */
-export const ABUSE_JUDGE_QUESTIONS_VERSION = "jev-2";
+export const ABUSE_JUDGE_QUESTIONS_VERSION = "jev-3";
 
 export const ABUSE_JUDGE_POLICY =
   "Outbound abuse judge for an email-sending platform. " +
@@ -138,8 +139,30 @@ const LURE_KEYS = [
   "prompt_injection",
 ] as const;
 
+/**
+ * Joins the policy only for mail that names MillionSend in its subject or
+ * visible text: a team's own delivery or setup test names its provider. It
+ * clears that one name and nothing else, so a lure that names MillionSend
+ * too is judged as without it; on every other message the policy is as is.
+ */
+export const ABUSE_JUDGE_PROVIDER_EXCEPTION =
+  " MillionSend is the platform these teams send through. A team naming MillionSend as its own sending provider, as its delivery or setup tests do, is not impersonating MillionSend, and that mention clears nothing else in the mail: any other brand it poses as, and anything it asks the reader to do, is judged exactly as above. Mail posing as MillionSend itself, whatever it asks for, is impersonation.";
+
+/** The name as a word: never inside a hostname or an address, such as a link stub or a shared inbox's. */
+const PROVIDER_NAME = /(?<![\w.@/-])millionsend(?![\w-]|\.[a-z0-9])/i;
+
+export function judgePolicy(block: string): string {
+  const lines = block.split("\n");
+  const subject = lines.find((line) => line.startsWith(SUBJECT_LABEL)) ?? "";
+  const at = lines.indexOf(VISIBLE_TEXT_LABEL);
+  const visible = at === -1 ? "" : (lines[at + 1] ?? "");
+  return PROVIDER_NAME.test(subject) || PROVIDER_NAME.test(visible)
+    ? ABUSE_JUDGE_POLICY + ABUSE_JUDGE_PROVIDER_EXCEPTION
+    : ABUSE_JUDGE_POLICY;
+}
+
 export function judgeState(block: string): { policy: string; email: string } {
-  return { policy: ABUSE_JUDGE_POLICY, email: block };
+  return { policy: judgePolicy(block), email: block };
 }
 
 export function noulOf(answers: Record<string, unknown>, key: string): number | null {

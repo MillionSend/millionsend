@@ -65,6 +65,7 @@ describe("pollSqsOnce", () => {
     expect(enqueued[0]?.snsMessageId).toBe("sns-msg-1");
     expect(enqueued[0]?.event.eventType).toBe("Delivery");
     expect(enqueued[0]?.event.occurredAt).toBe("2026-08-16T12:00:01.000Z");
+    expect(enqueued[0]?.event.sentAt).toBe("2026-08-16T12:00:00.000Z");
     expect(enqueued[0]?.event.emailId).toBe("00000000-0000-4000-8000-000000000001");
     expect(deleted).toEqual(["sqs-1"]);
   });

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { DAY_MS, EnvKeyring, generateApiKey } from "@millionsend/core";
+import { DAY_MS, EnvKeyring, generateApiKey, utcDay } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -157,6 +157,19 @@ describe("GET /usage", () => {
       period: null,
       app_url: null,
     });
+  });
+
+  it("counts the day of every Free team the creator made, as the cap does; self-hosted, the team's own", async () => {
+    await db
+      .update(schema.teams)
+      .set({ poolOwnerId: "u-usage-pool" })
+      .where(eq(schema.teams.id, teamId));
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: "u-usage-pool", day: utcDay(), accepted: 37 });
+    expect(await (await get(cloud)).json()).toMatchObject({ today: { emails_sent: 37 } });
+    expect(await (await get(selfHost)).json()).toMatchObject({ today: { emails_sent: 1 } });
+    await db.update(schema.teams).set({ poolOwnerId: null }).where(eq(schema.teams.id, teamId));
   });
 
   it("403s a sending_access key and 401s without one", async () => {

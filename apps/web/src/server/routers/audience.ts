@@ -13,9 +13,9 @@ import {
   emitSuppressionEvents,
   eraseRecipient,
   fetchEffectivePlan,
-  hasRevocableConfirmation,
   loadContactPropertyTypes,
   markSegmentsStale,
+  needsConfirmationWithdrawal,
   PLAN_CONTACT_LIMIT,
   recordContactActivity,
   resultRows,
@@ -486,10 +486,10 @@ export const audienceRouter = router({
         // omitting it leaves the stored map unchanged.
         const next =
           input.properties && (await typedProperties(ctx, input.properties, before.properties));
-        const revokesConfirmation =
-          input.unsubscribed === true && hasRevocableConfirmation(before.confirmation);
+        const recordsWithdrawal =
+          input.unsubscribed === true && needsConfirmationWithdrawal(before.confirmation);
         const dirty =
-          revokesConfirmation ||
+          recordsWithdrawal ||
           (input.firstName !== undefined && (input.firstName || null) !== before.firstName) ||
           (input.lastName !== undefined && (input.lastName || null) !== before.lastName) ||
           (input.unsubscribed !== undefined && input.unsubscribed !== before.unsubscribed) ||
@@ -535,7 +535,7 @@ export const audienceRouter = router({
             enqueue: ctx.enqueueWebhookDeliveries,
           });
         }
-        if (before.unsubscribed !== row.unsubscribed || revokesConfirmation) {
+        if (before.unsubscribed !== row.unsubscribed || recordsWithdrawal) {
           await recordContactActivity(
             ctx.db,
             {

@@ -1698,8 +1698,8 @@ describe("quota day of a scheduled send", () => {
   const FREE_CEILING = dailyCeiling(teamRung("free", null).included);
 
   /** A fresh free team with a verified domain; returns a request helper on its key. */
-  async function freeTeam(slug: string) {
-    const id = await createTeam(db, slug);
+  async function freeTeam(slug: string, poolOwnerId?: string) {
+    const id = await createTeam(db, slug, { poolOwnerId });
     await db.insert(schema.domains).values({
       teamId: id,
       name: `${slug}.dev`,
@@ -1835,6 +1835,28 @@ describe("quota day of a scheduled send", () => {
     await reschedule(team, id, dayAhead(1));
     expect((await team.counters())[utcDay()]).toBe(FREE_CEILING);
     expect(await sendNow(team)).toBe("queued_quota");
+  });
+
+  it("one creator's Free teams share each day, on accept and on reschedule", async () => {
+    const a = await freeTeam("pool-api-a", "u-api-pool");
+    const b = await freeTeam("pool-api-b", "u-api-pool");
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: "u-api-pool", day: utcDay(), accepted: FREE_CEILING - 1 });
+    expect(await sendNow(a)).toBe("queued");
+    // b has sent nothing today, yet the pool's day is spent.
+    expect(await sendNow(b)).toBe("queued_quota");
+
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: "u-api-pool", day: utcDay(dayAhead(2)), accepted: FREE_CEILING });
+    const res = await b.call("POST", "/emails", { ...b.body, scheduled_at: dayAhead(1) });
+    const { id } = (await res.json()) as { id: string };
+    expect(await b.statusOf(id)).toBe("queued");
+    await reschedule(b, id, dayAhead(2));
+    expect(await b.statusOf(id)).toBe("queued_quota");
+    // The refused move leaves nothing charged to b's own day.
+    expect((await b.counters())[utcDay(dayAhead(2))] ?? 0).toBe(0);
   });
 
   it("a monthly plan's reschedule onto a day at its operator ceiling parks without counting the period twice", async () => {

@@ -73,7 +73,7 @@ describe("a team's status cell", () => {
     ).toMatchObject({
       tone: "warn",
       text: "em alerta",
-      tip: "Reclamações 0,31% · proteção de envio em alerta\nÚltimos 7 dias, contando só os e-mails para provedores que repassam reclamações.",
+      tip: "Reclamações 0,31% · proteção de envio em alerta\nE-mails enviados nos últimos 7 dias para provedores que repassam reclamações.",
     });
     expect(
       status({

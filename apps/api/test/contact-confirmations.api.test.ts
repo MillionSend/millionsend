@@ -170,6 +170,90 @@ describe("guarded mailbox confirmations", () => {
       .where(eq(schema.contacts.id, p.id));
     expect((await confirm({ ...p, request_id })).status).toBe(409);
   });
+  it("rejects retries of replaced and cleared requests while the contact exists", async () => {
+    const original = await prepare();
+    const path = "/contacts/confirmation-requests";
+    const request = {
+      email: original.email,
+      expires_at: original.expires_at,
+      request_id: original.request_id,
+    };
+    const replacement = { ...request, request_id: randomUUID() };
+    expect((await call("POST", path, request)).status).toBe(200);
+    expect((await call("POST", path, replacement)).status).toBe(200);
+    expect(
+      (await call("POST", path, { ...request, request_id: request.request_id.toUpperCase() }))
+        .status,
+    ).toBe(409);
+    expect((await confirm(original)).status).toBe(409);
+    expect((await row(original.id))?.confirmation?.requestId).toBe(replacement.request_id);
+
+    expect((await call("PATCH", `/contacts/${original.id}`, { unsubscribed: true })).status).toBe(
+      200,
+    );
+    expect(
+      (
+        await call(
+          "DELETE",
+          `/contacts/${original.id}/confirmation?request_id=${replacement.request_id}`,
+        )
+      ).status,
+    ).toBe(200);
+    expect((await call("GET", `/contacts/${original.id}/confirmation`)).status).toBe(404);
+    for (const retired of [request, replacement]) {
+      expect((await call("POST", path, { ...retired, allow_resubscribe: true })).status).toBe(409);
+    }
+    expect(
+      (await call("POST", path, { ...request, request_id: randomUUID(), allow_resubscribe: true }))
+        .status,
+    ).toBe(200);
+  });
+
+  it("confirms a contact whose stored email contains capital letters", async () => {
+    const email = `Mixed-${randomUUID()}@example.com`;
+    expect((await call("POST", "/contacts", { email, unsubscribed: true })).status).toBe(200);
+    const staged = await call("POST", "/contacts/confirmation-requests", {
+      email,
+      request_id: randomUUID(),
+      expires_at: new Date(Date.now() + 3600000).toISOString(),
+      allow_resubscribe: true,
+    });
+    expect(staged.status).toBe(200);
+    const proof = (await staged.json()) as Awaited<ReturnType<typeof prepare>>;
+    expect((await confirm(proof, { email })).status).toBe(200);
+    expect(await row(proof.id)).toMatchObject({ email, unsubscribed: false });
+  });
+
+  it.each(["PATCH", "batch", "suppression"])(
+    "records a dated %s withdrawal after a suppression already revoked the request",
+    async (source) => {
+      const p = await prepare();
+      const manual = await call("POST", "/suppressions", { email: p.email, origin: "manual" });
+      expect(manual.status).toBe(200);
+      const revoked = (await row(p.id))?.confirmation;
+      expect(revoked?.state).toBe("revoked");
+      expect(revoked?.withdrawnAt).toBeUndefined();
+      const withdraw = () => {
+        if (source === "PATCH") return call("PATCH", `/contacts/${p.id}`, { unsubscribed: true });
+        if (source === "batch")
+          return call("POST", "/contacts/batch?on_conflict=upsert", [
+            { email: p.email, unsubscribed: true },
+          ]);
+        return call("POST", "/suppressions", { email: p.email, origin: "unsubscribe" });
+      };
+      expect((await withdraw()).status).toBe(200);
+      const proof = await call("GET", `/contacts/${p.id}/confirmation`);
+      const { withdrawn_at } = (await proof.json()) as { withdrawn_at: string };
+      expect(withdrawn_at).toEqual(expect.any(String));
+      expect((await row(p.id))?.confirmation).toMatchObject({
+        revokedAt: revoked?.revokedAt,
+        withdrawnAt: withdrawn_at,
+      });
+      expect((await withdraw()).status).toBe(200);
+      expect((await row(p.id))?.confirmation?.withdrawnAt).toBe(withdrawn_at);
+    },
+  );
+
   it("scopes proof and activation to the authenticated team", async () => {
     const p = await prepare(),
       other = await createTeam(db, "other"),
@@ -329,6 +413,54 @@ it("abandoned-contact erasure is guarded under the same row lock and refuses act
   expect((await call("DELETE", path)).status).toBe(200);
   expect(await row(p.id)).toBeUndefined();
 });
+
+it.each(["topic preference", "segment membership"])(
+  "retention does not erase a staged contact with a %s",
+  async (reference) => {
+    const p = await prepare();
+    if (reference === "topic preference") {
+      const [topic] = await db
+        .insert(schema.topics)
+        .values({ teamId, name: "General", defaultSubscribed: true })
+        .returning();
+      if (!topic) throw new Error("Missing topic fixture");
+      expect(
+        (
+          await call("PATCH", `/contacts/${p.id}/topics`, [
+            { id: topic.id, subscription: "opt_out" },
+          ])
+        ).status,
+      ).toBe(200);
+    } else {
+      const [segment] = await db
+        .insert(schema.segments)
+        .values({ teamId, name: "Manual" })
+        .returning();
+      if (!segment) throw new Error("Missing segment fixture");
+      await db.insert(schema.segmentMembers).values({ contactId: p.id, segmentId: segment.id });
+    }
+    const before = await row(p.id);
+    if (!before?.confirmation) throw new Error("Missing proof fixture");
+    await db
+      .update(schema.contacts)
+      .set({
+        confirmation: { ...before.confirmation, expiresAt: new Date(Date.now() - 1).toISOString() },
+      })
+      .where(eq(schema.contacts.id, p.id));
+
+    const path = `/contacts/${p.id}/confirmation?request_id=${p.request_id}`;
+    expect((await call("DELETE", `${path}&erase_contact=true`)).status).toBe(409);
+    expect((await call("DELETE", path)).status).toBe(200);
+    expect(await row(p.id)).toMatchObject({ confirmation: null });
+    if (reference === "topic preference") {
+      const [preference] = await db
+        .select()
+        .from(schema.contactTopicSubscriptions)
+        .where(eq(schema.contactTopicSubscriptions.contactId, p.id));
+      expect(preference?.subscribed).toBe(false);
+    }
+  },
+);
 
 it("only fresh explicit resubscription can lift the captured newsletter unsubscribe after confirmation", async () => {
   const email = `${randomUUID()}@example.com`;

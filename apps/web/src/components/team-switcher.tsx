@@ -1,6 +1,7 @@
 "use client";
 
 import { CUSTOMER_TEXT_MAX } from "@millionsend/core/customer-text";
+import { PLAN_TEAM_LIMIT, TEAM_CREATE_WINDOW_DAYS } from "@millionsend/core/plans";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useRef, useState } from "react";
@@ -254,7 +255,7 @@ export function TeamSwitcher({
           {createTeam.isError ? (
             <p style={{ margin: 0, color: "var(--ms-danger)", fontSize: "var(--ms-fs-label)" }}>
               {createTeam.error.data?.code === "FORBIDDEN"
-                ? t("limit")
+                ? t("limit", { limit: PLAN_TEAM_LIMIT.free, days: TEAM_CREATE_WINDOW_DAYS })
                 : createTeam.error.data?.code === "BAD_REQUEST"
                   ? tCommon("nameRule", { max: CUSTOMER_TEXT_MAX })
                   : guardMessage(createTeam.error, t("error"))}

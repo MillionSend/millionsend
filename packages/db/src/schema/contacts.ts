@@ -45,6 +45,8 @@ export const contacts = pgTable(
     properties: jsonb("properties").$type<Record<string, string>>().notNull().default({}),
     // Integration-managed mailbox confirmation; independent of custom properties.
     confirmation: jsonb("confirmation").$type<ContactConfirmation>(),
+    // Keep retired IDs after proof cleanup so a delayed retry cannot recreate it.
+    retiredConfirmationRequestIds: uuid("retired_confirmation_request_ids").array(),
     unsubscribed: boolean("unsubscribed").notNull().default(false),
     // When the contact unsubscribed (null while subscribed) — feeds the
     // audience growth chart alongside createdAt.

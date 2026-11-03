@@ -46,7 +46,6 @@ import {
   findTopicOptOuts,
   fixedWindowCounter,
   getWarmup,
-  hasRevocableConfirmation,
   heldByNewDomainLimit,
   INBOX_KEY_FROM_MESSAGE,
   INBOX_KEY_SCOPE_MESSAGE,
@@ -65,6 +64,7 @@ import {
   markSegmentsStale,
   monthlyQuotaMessage,
   type NewDomainLimit,
+  needsConfirmationWithdrawal,
   newDomainLimitEtas,
   newDomainLimitFullMessage,
   newDomainLimitPlanCap,
@@ -98,6 +98,7 @@ import {
   SHARED_REFUSALS,
   scoreBand,
   secondsToNextUtcDay,
+  secondsUntil,
   segmentContactsWhere,
   segmentFilterSchema,
   senderDomain,
@@ -449,6 +450,7 @@ function acceptRejection(result: Exclude<AcceptEmailResult, { ok: true }>): {
       return {
         status: 429 as const,
         body: errorBody(429, "monthly_quota_exceeded", monthlyQuotaMessage(result)),
+        retryAfterSec: secondsUntil(result.periodEnd),
       };
     case "attachments_too_large":
       return {
@@ -1376,10 +1378,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
             // A batch never re-subscribes anyone: unsubscribed:false on an
             // opted-out contact is ignored, and the retained one-click
             // suppression stays. Re-subscribing is the explicit PATCH.
-            const revokesConfirmation =
-              row.unsubscribed === true && hasRevocableConfirmation(found.confirmation);
+            const recordsWithdrawal =
+              row.unsubscribed === true && needsConfirmationWithdrawal(found.confirmation);
             const unsubscribe =
-              row.unsubscribed === true && (!found.unsubscribed || revokesConfirmation);
+              row.unsubscribed === true && (!found.unsubscribed || recordsWithdrawal);
             idByKey.set(row.key, found.id);
             // A row restating what is stored is not written: updated_at stays,
             // no contact.updated fires. The item still reports "updated" and
@@ -1486,7 +1488,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
           succeed(row, id, "updated");
           if (
             row.unsubscribed === true &&
-            (!update.found.unsubscribed || hasRevocableConfirmation(update.found.confirmation))
+            (!update.found.unsubscribed || needsConfirmationWithdrawal(update.found.confirmation))
           ) {
             activity.push({ teamId, contactId: id, type: "unsubscribed" });
           }
@@ -1577,10 +1579,10 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
         for (const key of incoming.removed) properties = sql`${properties} - ${key}::text`;
       }
     }
-    const revokesConfirmation =
-      body.unsubscribed === true && hasRevocableConfirmation(before.confirmation);
+    const recordsWithdrawal =
+      body.unsubscribed === true && needsConfirmationWithdrawal(before.confirmation);
     const dirty =
-      revokesConfirmation ||
+      recordsWithdrawal ||
       (body.first_name !== undefined && body.first_name !== before.firstName) ||
       (body.last_name !== undefined && body.last_name !== before.lastName) ||
       (body.unsubscribed !== undefined && body.unsubscribed !== before.unsubscribed) ||
@@ -1624,7 +1626,7 @@ function registerContactRootRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (
       row &&
       body.unsubscribed !== undefined &&
-      (before.unsubscribed !== body.unsubscribed || revokesConfirmation)
+      (before.unsubscribed !== body.unsubscribed || recordsWithdrawal)
     ) {
       await recordContactActivity(
         db,
@@ -2979,10 +2981,11 @@ function registerBroadcastRoutes(app: OpenAPIHono<Env>, deps: ApiDeps): void {
     if (keyForbidsSendingDomain(auth, domain.domainId)) {
       return fail(403, "restricted_api_key", RESTRICTED_DOMAIN_MESSAGE);
     }
-    // Platform breaker or the operator's hold on this SES region: broadcasts
-    // wait; /emails is deliberately not gated by it. The caller is never
-    // told why: the platform's rates are not the customer's to see.
-    if (await regionPause(db, domain.region)) {
+    // Platform breaker or the operator's hold on this SES region, when it
+    // holds this team's broadcasts: they wait; /emails is deliberately not
+    // gated by it. The caller is never told why: the platform's rates are
+    // not the customer's to see.
+    if (await regionPause(db, domain.region, auth.teamId)) {
       return fail(
         403,
         "broadcasts_paused",
@@ -4671,6 +4674,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
         count: units,
         limit: quota.kind === "day" ? quota.limit : null,
         hardLimit: quota.dailyCeiling ?? null,
+        pool: quota.kind === "day" ? quota.pool : undefined,
         day: utcDay(after),
         at: after,
       });

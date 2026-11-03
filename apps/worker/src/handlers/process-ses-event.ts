@@ -1,5 +1,6 @@
 import {
   applyStatusCas,
+  bumpFreePoolUsage,
   bumpHourlyUsage,
   DAY_MS,
   type EmailStatus,
@@ -15,6 +16,7 @@ import {
   revokeSuppressedConfirmations,
   type SuppressionEventRow,
   sesAttempted,
+  simulatorFeedback,
   utcDay,
   type WebhookEnqueue,
   webhookBatch,
@@ -97,6 +99,37 @@ export async function processSesEvent(
   const eventType = EVENT_TYPE_BY_EVENT[event.eventType];
   if (!status || !eventType) return;
 
+  // A complaint counts on the UTC day its mail went out, the day SES's own
+  // complaint rate files it under; the hourly timeline keeps its arrival.
+  const day = utcDay(
+    new Date(
+      event.eventType === "Complaint" ? (event.sentAt ?? event.occurredAt) : event.occurredAt,
+    ),
+  );
+  // delivered and bounced count every event. Engagement counters
+  // (opened/clicked) are owned by the app-layer tracking endpoints, not here.
+  // hard_bounced counts only Permanent bounces — the deliverability score's
+  // bounce-rate input (transient greylisting must not read as a hard-bounce
+  // crisis) — and, like complained, only those about mail SES attempted, as
+  // SES's own rates do, and none from the mailbox simulator, whose feedback
+  // is a test: it still suppresses the address and fires the webhook below.
+  const rated = !simulatorFeedback(event.bounce?.recipients ?? event.complaint?.recipients ?? []);
+  const cols =
+    event.eventType === "Delivery"
+      ? ["delivered"]
+      : event.eventType === "Bounce"
+        ? event.bounce?.bounceType === "Permanent" &&
+          sesAttempted(event.bounce.bounceSubType) &&
+          rated
+          ? ["bounced", "hard_bounced"]
+          : ["bounced"]
+        : event.eventType === "Complaint" &&
+            sesAttempted(event.complaint?.complaintSubType) &&
+            rated
+          ? ["complained"]
+          : [];
+  const counts = Object.fromEntries(cols.map((col) => [col, 1]));
+
   let [email] = await db
     .select({
       id: schema.emails.id,
@@ -135,8 +168,36 @@ export async function processSesEvent(
         ),
       );
   }
-  // Unknown message id: not ours (or purged) — never act on it.
-  if (!email) return;
+  // Unknown message id: not ours, or its row is gone (purged, or deleted with
+  // its team): never acted on. Its complaints and bounces are recorded, once
+  // per SNS message, for the platform's own accounting of the account's
+  // rates, and counted to the Free pool the send was tagged with, whose
+  // record outlives the team. Feedback naming only the mailbox simulator is
+  // a test and is neither.
+  if (!email) {
+    if ((eventType === "complained" || eventType === "bounced") && rated) {
+      await db.transaction(async (tx) => {
+        const txDb = tx as unknown as Db;
+        const [recorded] = await txDb
+          .insert(schema.sesUnmatchedEvents)
+          .values({
+            snsMessageId: opts.snsMessageId ?? null,
+            sesMessageId: event.sesMessageId,
+            type: eventType,
+            bounceType: event.bounce?.bounceType ?? null,
+            subType: event.bounce?.bounceSubType ?? event.complaint?.complaintSubType ?? null,
+            poolOwnerId: event.poolOwnerId ?? null,
+            occurredAt: new Date(event.occurredAt),
+          })
+          .onConflictDoNothing()
+          .returning({ id: schema.sesUnmatchedEvents.id });
+        if (recorded && event.poolOwnerId) {
+          await bumpFreePoolUsage(txDb, { ownerId: event.poolOwnerId, day, counts });
+        }
+      });
+    }
+    return;
+  }
 
   // The event insert doubles as the idempotency gate: SNS delivers
   // at-least-once and queue dedupe cannot cover redelivery after the job
@@ -207,23 +268,6 @@ export async function processSesEvent(
       });
     }
 
-    const day = utcDay(new Date(event.occurredAt));
-    // delivered and bounced count every event. Engagement counters
-    // (opened/clicked) are owned by the app-layer tracking endpoints, not here.
-    // hard_bounced counts only Permanent bounces — the deliverability score's
-    // bounce-rate input (transient greylisting must not read as a hard-bounce
-    // crisis) — and, like complained, only those about mail SES attempted, as
-    // SES's own rates do.
-    const cols =
-      event.eventType === "Delivery"
-        ? ["delivered"]
-        : event.eventType === "Bounce"
-          ? event.bounce?.bounceType === "Permanent" && sesAttempted(event.bounce.bounceSubType)
-            ? ["bounced", "hard_bounced"]
-            : ["bounced"]
-          : event.eventType === "Complaint" && sesAttempted(event.complaint?.complaintSubType)
-            ? ["complained"]
-            : [];
     if (cols.length > 0) {
       await txDb.execute(sql`
         insert into ${schema.usageCounters} (team_id, day, ${sql.raw(cols.join(", "))})
@@ -234,10 +278,13 @@ export async function processSesEvent(
             sql`, `,
           )}
       `);
-      await bumpHourlyUsage(txDb, {
-        teamId: email.teamId,
-        at: new Date(event.occurredAt),
-        counts: Object.fromEntries(cols.map((col) => [col, 1])),
+      await bumpHourlyUsage(txDb, { teamId: email.teamId, at: new Date(event.occurredAt), counts });
+      // The tag names the pool whose `sent` counted the send; untagged mail
+      // goes to the pool the team is in now.
+      await bumpFreePoolUsage(txDb, {
+        ...(event.poolOwnerId ? { ownerId: event.poolOwnerId } : { teamId: email.teamId }),
+        day,
+        counts,
       });
     }
 

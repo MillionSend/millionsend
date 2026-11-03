@@ -18,6 +18,12 @@ export const instanceSettings = pgTable(
     sesTransactionalReserve: smallint("ses_transactional_reserve"),
     emailRetentionDays: integer("email_retention_days"),
     ...monitorSettingColumns,
+    // The Free fuse (Cloud): set when complaints on Free teams' mail reach
+    // its line, with their count, and cleared only by an operator's release;
+    // complaints on mail sent before the last release no longer count.
+    freeFuseTrippedAt: timestamp("free_fuse_tripped_at", { withTimezone: true }),
+    freeFuseComplaints: integer("free_fuse_complaints"),
+    freeFuseReleasedAt: timestamp("free_fuse_released_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [check("instance_settings_single_row", sql`${t.id} = 1`)],

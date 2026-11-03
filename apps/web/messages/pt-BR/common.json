@@ -31,7 +31,7 @@
     "nameLabel": "Nome da equipe",
     "submit": "Criar",
     "error": "Falha ao criar a equipe. Tente de novo.",
-    "limit": "Você já é proprietário do número máximo de equipes para o seu plano."
+    "limit": "Você chegou ao limite de equipes do seu plano. Contas Free podem criar até {limit} equipes a cada {days} dias, contando as excluídas."
   },
   "select": {
     "searchPlaceholder": "Buscar…",

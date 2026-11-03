@@ -27,7 +27,8 @@ export interface SesQuotaGate {
  */
 export interface SendQuotaControls extends SesQuotaGate {
   bulkExhausted?(region?: string): boolean;
-  paused?(region?: string): boolean;
+  /** Whether the region's pause holds this team's broadcasts. */
+  paused?(region: string | undefined, teamId: string): boolean;
   noteBulkSent?(region?: string): void;
   noteTransactionalParked?(region?: string): void;
 }

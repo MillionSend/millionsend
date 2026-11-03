@@ -90,7 +90,7 @@
     "conflict": "This domain is already added.",
     "reserved": "This domain can't be used as a sender.",
     "planLimit": "Your plan's domain limit is reached.",
-    "rateLimited": "Too many domains added recently — try again later.",
+    "rateLimited": "You reached the hourly limit for new domains. Try again in {minutes, plural, one {# minute} other {# minutes}}.",
     "error": "Couldn't add the domain.",
     "credentialsError": "AWS rejected the request credentials — check <code>AWS_ACCESS_KEY_ID</code> and <code>AWS_SECRET_ACCESS_KEY</code> in <code>.env</code>. See <code>SELF_HOSTING.md</code>.",
     "trackingTitle": "Set up tracking (optional)",
@@ -234,7 +234,10 @@
       "catchAllError": "Couldn't change catch-all. Try again.",
       "catchAllOffTitle": "Turn off catch-all?",
       "catchAllOffConfirm": "Mail to addresses at {domain} that have no inbox is refused from now on. Inbox addresses keep receiving.",
-      "catchAllOffCta": "Turn off catch-all"
+      "catchAllOffCta": "Turn off catch-all",
+      "adminOnly": "Only owners and admins can change receiving.",
+      "elsewhereOff": "Mail for {domain} goes to {host}. Receiving it here means pointing its MX record at MillionSend, which moves all of that mail here and away from the mailboxes that get it today. To keep them, receive on a subdomain such as {sub}, added and verified as its own domain.",
+      "elsewhereOn": "Mail for {domain} still goes to {host}, where its MX record points, so inboxes here get nothing yet. Pointing it at MillionSend would move all of {domain}'s mail here. To keep that mail where it is, receive on a subdomain such as {sub}."
     },
     "bannerVerifiedLimited": "Ready to send, up to {cap} emails a day for now.",
     "limit": {

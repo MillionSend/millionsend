@@ -8,6 +8,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import type { CronJobName } from "@millionsend/queue";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { getQueue } from "../../queue";
@@ -67,11 +68,14 @@ export async function mailTeamOwners(
   }
 }
 
-/** Sends parked under a lifted hold would otherwise wait for the scheduled drain. Best-effort. */
-export async function kickQuotaDrain(): Promise<void> {
+/** A cron job run now instead of at its next tick. Best-effort: the schedule still runs it. */
+export async function kickCron(name: CronJobName): Promise<void> {
   try {
-    await (await getQueue()).runCronNow("quota.drain");
+    await (await getQueue()).runCronNow(name);
   } catch (err) {
-    console.error("console: quota.drain kick failed; the scheduled drain releases the mail", err);
+    console.error(`console: ${name} kick failed; its scheduled run catches up`, err);
   }
 }
+
+/** Sends parked under a lifted hold would otherwise wait for the scheduled drain. */
+export const kickQuotaDrain = (): Promise<void> => kickCron("quota.drain");

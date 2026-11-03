@@ -201,7 +201,9 @@ Content-Type: application/json
 
 Choose a future expiry and an unguessable request UUID. Store the returned contact ID,
 request ID and timestamps. Repeating the same request is idempotent. A new request can
-replace a still-pending request, invalidating the previous one. Historical contacts
+replace a still-pending request, invalidating the previous one. A retired request ID
+cannot be used again for the same contact, even after confirmation metadata cleanup.
+Historical contacts
 without a pending confirmation, existing active contacts, revoked requests and
 suppressed addresses are refused with `409`; their profile, creation date and topic
 preferences are preserved.
@@ -262,7 +264,8 @@ marketing topic; do not assume a newsletter opt-in also permits engagement track
 
 For retention, `DELETE /contacts/{id}/confirmation?request_id=<request UUID>`
 removes only matching revoked or expired confirmation metadata on an inactive
-contact. A current active, unexpired or replaced request returns `409`. The contact
+contact. The service keeps only the retired request ID on the contact to reject
+late retries. A current active, unexpired or replaced request returns `409`. The contact
 profile and all suppressions remain. Full recipient erasure is a separate operation.
 
 A confirmation also reports `withdrawn_at` after an explicit global withdrawal;
@@ -270,6 +273,7 @@ suppression-only revocation does not manufacture a withdrawal timestamp. This le
 integrations recover a missed withdrawal webhook without treating a bounce as consent.
 To erase an abandoned contact as well, add `erase_contact=true` to the guarded
 retention DELETE. This succeeds only for a newly created, expired pending contact
-that is still inactive, has no names or properties, and has no suppression. All
+that is still inactive, has no names, properties, topic preferences or segment
+memberships, and has no suppression. All
 checks, history erasure and deletion share the contact row lock. A concurrent
 activation or profile update therefore prevents automatic erasure.

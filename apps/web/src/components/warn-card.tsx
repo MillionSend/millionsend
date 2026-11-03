@@ -33,7 +33,9 @@ export function WarnCard({
         {children}
       </span>
       {/* Under the text when it does not fit beside it, right-aligned like a notice strip's action. */}
-      {action ? <span style={{ flex: "none", marginLeft: "auto" }}>{action}</span> : null}
+      {action ? (
+        <span style={{ flex: "none", maxWidth: "100%", marginLeft: "auto" }}>{action}</span>
+      ) : null}
     </div>
   );
 }

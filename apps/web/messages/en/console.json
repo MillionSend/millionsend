@@ -150,8 +150,11 @@
       "quotaShort": "{quota} · max rate {rate}/s",
       "broadcastsFlowing": "flowing",
       "broadcastsPaused": "paused",
+      "broadcastsPausedTeams": "paused · {count, plural, one {# team} other {# teams}}",
+      "pauseTeams": "Broadcasts held for {teams}.",
+      "pauseNoTeams": "This pause holds no team's broadcasts.",
       "pauseWindow": "Automatic pause: {metric} at {rate} over {hours, select, 168 {7 days} other {{hours}h}}, above the {limit} limit.",
-      "pauseComplaints": "Automatic pause: complaints at {rate} over {hours, select, 168 {7 days} other {{hours}h}} on mail to providers that report them, above the {limit} limit.",
+      "pauseComplaints": "Automatic pause: complaints at {rate} on mail sent over {hours, select, 168 {7 days} other {{hours}h}} to providers that report them, above the {limit} limit.",
       "pauseSes": "Automatic pause: complaints at {rate} as SES measures them, above the {limit} limit.",
       "pauseManual": "Paused by the operator: {reason}",
       "pauseTransactional": "Transactional mail keeps flowing.",
@@ -164,10 +167,10 @@
       "queueHeld": "{count, plural, one {# broadcast} other {# broadcasts}} · held during the pause",
       "sesRate": "The rate SES itself measures",
       "sesLines": "SES reviews from {review} and pauses at {pause}",
-      "ourLines": "Our regional pause: {limit} · our 7-day estimate: {ours}",
+      "ourLines": "Our regional pause: {limit} · our estimate on mail sent over 7 days: {ours}",
       "sesUnreadable": "SES's rate couldn't be read",
       "sesNone": "SES hasn't published a rate for this region",
-      "oursWatched": "The regional pause watches our estimate of it: {ours} over 7 days, {limit} limit",
+      "oursWatched": "The regional pause watches our estimate of it: {ours} on mail sent over 7 days, {limit} limit",
       "costTip": "{sent} sent × {rate}/1k"
     },
     "sent": {
@@ -210,6 +213,7 @@
       "region_sent": "Sent per hour · {region}",
       "noPoints": "Nothing recorded in this window yet.",
       "byArrival": "by arrival date, not send date",
+      "bySend": "by send date; recent days can still rise",
       "point": {
         "max": "Each point: the highest reading in {window}",
         "avg": "Each point: the average over {window}"
@@ -447,7 +451,7 @@
       "review": "in review",
       "suspendedTip": "Suspended on {day}",
       "reviewTip": "Held for review since {day}",
-      "window": "{metric, select, complaint {Last 7 days, counting only mail to providers that report complaints.} other {Last 7 days, over all sends.}}"
+      "window": "{metric, select, complaint {Mail sent in the last 7 days to providers that report complaints.} other {Last 7 days, over all sends.}}"
     },
     "empty": "0 teams match.",
     "menu": {
@@ -467,6 +471,7 @@
       "resumed": "Broadcasts resumed for {team}",
       "paused": "Broadcasts paused for {team}",
       "pausedNotified": "Broadcasts paused for {team} · owner notified",
+      "lifted": "Sending resumed for {team} · {bounces, plural, one {# hard bounce} other {# hard bounces}} left out",
       "suspended": "{team} suspended · {reason}",
       "reinstated": "{team} reinstated",
       "suspendedTenantFailed": "{team} suspended · SES did not disable its tenant in {regions}; retrying in the background",
@@ -630,6 +635,33 @@
       "lead": "Sends go out again at once; held broadcasts resume within 15 minutes. The owner is emailed unless the suspension was for phishing or a review hold.",
       "confirm": "Reinstate team"
     },
+    "liftDialog": {
+      "title": "Lift sending pause · {team}",
+      "lead": "Takes the sends and hard bounces counted over the last {window} UTC days out of this team's rates, so it sends again now. Every send and bounce from here on counts, against the same lines. Complaints never come out, and a team gets one lift every {days} days.",
+      "pausedOn": "Paused on",
+      "pausedOnValue": "Hard-bounce rate {rate} over the last {window} days",
+      "leavesOut": "Leaves out",
+      "leavesOutValue": "{bounces, plural, one {# hard bounce} other {# hard bounces}} in {sent, plural, one {# send} other {# sends}} since {since} UTC",
+      "waiting": "Waiting to go out",
+      "waitingValue": "{count, plural, =0 {Nothing} one {# email} other {# emails}}",
+      "waitingTip": "Mail held during the pause goes out right after the lift, and its bounces count. If it was meant for fake sign-ups, it can pause the team again, and the next lift is {days} days away.",
+      "lastLift": "Last lift",
+      "lastLiftNever": "Never",
+      "reference": "Where the owner explained it",
+      "referencePlaceholder": "Ticket or email thread",
+      "note": "What happened and what the team changed",
+      "noteHint": "Only operators see this note. The team's audit log leaves it out.",
+      "confirm": "Lift pause"
+    },
+    "liftRefusal": {
+      "suspended": "Suspended or held for review. Reinstate or release the team instead.",
+      "free": "Free teams of one person share one bounce record, so the pause lifts on its own within {window} days.",
+      "not_paused": "The team isn't paused anymore.",
+      "complaints": "Paused on complaints, which a lift never covers. The pause lifts on its own once those send days leave the {window}-day window.",
+      "flagged": "Decide on the open flag first: clear it, or suspend the team.",
+      "monitor": "The content monitor's risk is over its flag line. No lift until it drops back under.",
+      "cooldown": "Lifted on {last}. The next lift is possible from {next}."
+    },
     "viewDialog": {
       "title": "View {team} as its owner",
       "lead": "Opens the team dashboard read-only under a banner, for 30 minutes, once a one-time code from your email confirms it is you. A view you still have open ends first. Every procedure read is counted on the session. The team sees nothing of it.",
@@ -669,7 +701,7 @@
   },
   "safety": {
     "title": "Trust & safety",
-    "info": "A team lands here when the deliverability guardrail turns warning or paused, complaints pass 0.1% or hard bounces 5% over 7 days, the content monitor's risk crosses its flag line (sampled content judged by the model), the account score drops under 5, or an operator flags it by hand. Automatic flags clear on their own once the trigger goes away; a flag you clear stays cleared while the same trigger holds.",
+    "info": "A team lands here when the deliverability guardrail turns warning or paused, complaints pass 0.1% on mail sent over 7 days or hard bounces 5% over 7 days, the content monitor's risk crosses its flag line with a message judged abuse in the last 7 days (sampled content judged by the model), the account score drops under 5, or an operator flags it by hand. Automatic flags clear on their own once the trigger goes away, a monitor flag once the risk falls back under its line; a flag you clear stays cleared while the same trigger holds.",
     "proof": "{open} open · {guardrailPaused} paused by guardrail · {suspended} suspended · {revealsThisWeek, plural, one {# content reveal} other {# content reveals}} this week",
     "search": "Search teams, owners, domains",
     "filters": {
@@ -695,8 +727,8 @@
       "linked": "Linked"
     },
     "reasonTip": {
-      "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line.",
-      "complaints": "The complaint rate passed 0.1% or the hard-bounce rate 5% over the last 7 days (SES reviews accounts at those lines).",
+      "monitor": "The content monitor: sampled content judged by the model pushed the internal risk over the flag line, with at least one message judged abuse in the 7 days before the flag opened.",
+      "complaints": "The complaint rate passed 0.1% on mail sent over the last 7 days, or the hard-bounce rate 5% over the last 7 days (SES reviews accounts at those lines).",
       "guardrail": "The deliverability guardrail turned warning or paused the team on its bounce or complaint rates.",
       "score": "The account score dropped under 5 out of 10.",
       "report": "A mailbox provider or a recipient reported abuse.",
@@ -735,6 +767,7 @@
       "review": "Open review",
       "pause": "Pause broadcasts",
       "resume": "Resume broadcasts",
+      "lift": "Lift sending pause",
       "clear": "Clear flag",
       "reopen": "Reopen",
       "suspend": "Suspend team",
@@ -771,6 +804,7 @@
         "scoreTip": "Customer-facing account score over 30 days.",
         "complaints": "Complaints 7d",
         "bounces": "Hard bounces 7d",
+        "bouncesLifted": "The rate leaves out {bounces, plural, one {# hard bounce} other {# hard bounces}} and {sent, plural, one {# send} other {# sends}} lifted after review.",
         "sent7d": "Sent 7d",
         "contacts": "Contacts",
         "scoreOf": "{score} / 10",
@@ -1011,6 +1045,14 @@
         "error": "Could not do it: {message}"
       }
     },
+    "freeFuse": {
+      "text": "Free fuse tripped <since></since>: {complaints, plural, one {# complaint} other {# complaints}} on Free teams' mail in a week. {parked, plural, =0 {No email waits on it yet.} one {{parkedCount} email to providers that report complaints waits.} other {{parkedCount} emails to providers that report complaints wait.}}",
+      "action": "Release",
+      "title": "Release the Free fuse?",
+      "lead": "{parked, plural, =0 {Free teams' mail to providers that report complaints flows again} one {The waiting email goes out through the queue, and Free teams' mail to providers that report complaints flows again} other {The {parkedCount} waiting emails go out through the queue, and Free teams' mail to providers that report complaints flows again}}. The fuse counts afresh from mail sent after the release.",
+      "confirm": "Release",
+      "toast": "{count, plural, =0 {Free fuse released} one {Free fuse released: # email goes out} other {Free fuse released: # emails go out}}"
+    },
     "limitRequests": {
       "title": "Limit requests · {count}",
       "subtitle": "Teams asking to lift the daily limit on a new domain. Grant each one with Trust, or decline it, on the team's page.",
@@ -1129,11 +1171,11 @@
         "anomalyMultiplier": "one failing critical or major check, a message carried by images or files, or an attachment; two or more force the sample",
         "teamDailyCap": "past it, draws after sending stop for the team; mail judged before SES is never capped",
         "instanceDailyCap": "past it, tier sampling after sending stops; first sends and anomalies continue",
-        "flagRisk": "opens the monitor flag and quadruples the team's rate",
+        "flagRisk": "quadruples the team's rate, and opens the monitor flag with an abuse verdict in the last 7 days",
         "alertRisk": "emails the operator, once per team per day",
         "pauseRisk": "new tier only, with a verdict of 90 or more in the last day",
         "autoPause": "whether the pause above is applied",
-        "flagScore": "the judge's own abuse verdict starts at 65",
+        "flagScore": "the judge's own abuse verdict starts at 65; the monitor flag opens only with one from this score in the last 7 days",
         "holdScore": "new tier only, on a phishing, brand impersonation or payment redirect verdict",
         "holdRepeatCount": "the week runs from the team's first send; 0 turns this off",
         "holdRepeatScore": "the same phishing verdicts as above, at a lower score",

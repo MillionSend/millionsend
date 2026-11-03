@@ -39,7 +39,7 @@ import {
   SES_REGIONS,
 } from "@millionsend/ses";
 import { TRPCError } from "@trpc/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { type RegionAccountDeps, servedRegionAccounts } from "../../console/ses-regions";
 import { operatorProcedure, router } from "../../trpc";
@@ -158,6 +158,17 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
       const tenants = sesTenantsEnabled();
       const domainsByRegion = new Map(domains.map((r) => [r.region, r.n]));
       const breakers = new Map(paused.map((p) => [p.region, p]));
+      const heldIds = [...new Set(paused.flatMap((p) => p.heldTeams ?? []))];
+      const heldNames = new Map(
+        heldIds.length === 0
+          ? []
+          : (
+              await ctx.db
+                .select({ id: schema.teams.id, name: schema.teams.name })
+                .from(schema.teams)
+                .where(inArray(schema.teams.id, heldIds))
+            ).map((t) => [t.id, t.name]),
+      );
       // One planner run per region with a broadcast still going out: when
       // the last of them finishes, for the queue row and the notice.
       const lastFinishes = new Map(
@@ -249,6 +260,13 @@ export function createConsoleRegionsRouter(deps: ConsoleRegionDeps = defaultDeps
                   manualReason: breaker.manualReason,
                   reason: breaker.reason,
                   pausedAt: breaker.pausedAt,
+                  // The teams whose broadcasts it holds (a deleted one drops
+                  // out); null holds every team's.
+                  heldTeams:
+                    breaker.heldTeams?.flatMap((id) => {
+                      const name = heldNames.get(id);
+                      return name === undefined ? [] : [{ id, name }];
+                    }) ?? null,
                 }
               : null,
             daily: daily.get(region) ?? emptyDaily(now, 7),

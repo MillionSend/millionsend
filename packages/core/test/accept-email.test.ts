@@ -402,4 +402,82 @@ describe("acceptEmail", () => {
       await acceptEmail(deps(), teamAuth, impossible, { recipientsChecked: true }),
     ).toMatchObject({ ok: true, parked: false });
   });
+
+  it("shares one daily cap between the Free teams of one creator, a deleted team's sends included", async () => {
+    const owner = "u-accept-pool";
+    const a = await createTeam(db, "accept-pool-a", { poolOwnerId: owner });
+    const b = await createTeam(db, "accept-pool-b", { poolOwnerId: owner });
+    const pooled = (team: string) => ({
+      teamId: team,
+      billing: { ...FREE, poolOwnerId: owner },
+      apiKeyId: null,
+    });
+    const ceiling = Math.floor(teamRung("free", null).included * (1 + QUOTA_TOLERANCE));
+    const send = payload({ domainId: null });
+    const ownAccepted = async (team: string) => {
+      const [row] = await db
+        .select({ accepted: schema.usageCounters.accepted })
+        .from(schema.usageCounters)
+        .where(eq(schema.usageCounters.teamId, team));
+      return row?.accepted ?? 0;
+    };
+    expect(await acceptEmail(deps(), pooled(a), send)).toMatchObject({ ok: true, parked: false });
+    // The rest of the pool's day but one, spent elsewhere in it.
+    await db
+      .update(schema.freePoolUsage)
+      .set({ accepted: ceiling - 1 })
+      .where(eq(schema.freePoolUsage.ownerId, owner));
+    expect(await acceptEmail(deps(), pooled(b), send)).toMatchObject({ ok: true, parked: false });
+    // a has sent once of its own, yet the pool is spent: it parks.
+    expect(await acceptEmail(deps(), pooled(a), send)).toMatchObject({ ok: true, parked: true });
+    expect(await ownAccepted(a)).toBe(1);
+    await db.delete(schema.teams).where(eq(schema.teams.id, b));
+    expect(await acceptEmail(deps(), pooled(a), send)).toMatchObject({ ok: true, parked: true });
+  });
+
+  it("refuses every Free team of a creator once their shared complaints pause the pool", async () => {
+    const owner = "u-accept-paused";
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: owner, day: utcDay(), sent: 20, complained: 3 });
+    for (const slug of ["accept-paused-a", "accept-paused-b"]) {
+      const team = await createTeam(db, slug, { poolOwnerId: owner });
+      expect(
+        await acceptEmail(
+          deps(),
+          { teamId: team, billing: { ...FREE, poolOwnerId: owner }, apiKeyId: null },
+          payload({ domainId: null }),
+        ),
+      ).toMatchObject({ ok: false, reason: "sending_paused" });
+    }
+  });
+
+  it("leaves a paid team, an unrecorded Free team and a self-hosted team out of any pool", async () => {
+    const owner = "u-accept-full";
+    await db
+      .insert(schema.freePoolUsage)
+      .values({ ownerId: owner, day: utcDay(), accepted: 1_000 });
+    const send = payload({ domainId: null });
+    const paid = await createTeam(db, "accept-paid", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
+    expect(
+      await acceptEmail(
+        deps(),
+        { teamId: paid, billing: { ...FREE, plan: "starter", poolOwnerId: owner }, apiKeyId: null },
+        send,
+      ),
+    ).toMatchObject({ ok: true, parked: false });
+    const unrecorded = await createTeam(db, "accept-unrecorded");
+    expect(
+      await acceptEmail(deps(), { teamId: unrecorded, billing: FREE, apiKeyId: null }, send),
+    ).toMatchObject({ ok: true, parked: false });
+    const selfHosted = await createTeam(db, "accept-self-host", { poolOwnerId: owner });
+    expect(
+      await acceptEmail(
+        { ...deps(), isCloud: false },
+        { teamId: selfHosted, billing: { ...FREE, poolOwnerId: owner }, apiKeyId: null },
+        send,
+      ),
+    ).toMatchObject({ ok: true, parked: false });
+  });
 });

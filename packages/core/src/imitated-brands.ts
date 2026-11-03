@@ -154,7 +154,7 @@ const LOOK_ALIKE_TO = "ABEKMHOPCTXaeopcyxijsABEZHIKMNOPTYXoiv";
  * forms and accents gone, look-alike letters read as Latin, camelCase split,
  * lowercase.
  */
-function plainWords(text: string): string[] {
+export function plainWords(text: string): string[] {
   const latin = Array.from(text.normalize("NFKD").replace(/\p{M}/gu, ""), (c) => {
     const i = LOOK_ALIKE_FROM.indexOf(c);
     return i === -1 ? c : LOOK_ALIKE_TO.charAt(i);

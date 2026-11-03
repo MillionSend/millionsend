@@ -274,6 +274,31 @@ describe("metrics.window complaints", () => {
   });
 });
 
+describe("metrics.window lifted hard bounces", () => {
+  it("sums what pause lifts left out over every UTC day the viewer's days touch", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.usageCounters).values([
+      { teamId, day: "2026-09-12", hardBounced: 5, excludedHardBounced: 5 },
+      { teamId, day: "2026-09-13", hardBounced: 3, excludedHardBounced: 3 },
+      { teamId, day: "2026-09-15", hardBounced: 6, excludedHardBounced: 4 },
+    ]);
+    const nowSpy = vi.spyOn(Date, "now");
+    try {
+      // 22:00 on the 14th in São Paulo, whose two days start at 03:00 UTC on the 13th.
+      nowSpy.mockReturnValue(Date.parse("2026-09-15T01:00:00Z"));
+      const utc = await callerFor(teamId).metrics.window({ days: 2, tz: "UTC" });
+      const saoPaulo = await callerFor(teamId).metrics.window({
+        days: 2,
+        tz: "America/Sao_Paulo",
+      });
+      expect(utc.liftedHardBounced).toBe(4);
+      expect(saoPaulo.liftedHardBounced).toBe(7);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+});
+
 describe("metrics.health", () => {
   it("pauses when the hard-bounce rate crosses the SES enforcement line", async () => {
     const teamId = await createTeam(db, "acme");
@@ -427,6 +452,28 @@ describe("metrics.accountScoreDetails", () => {
     await db.update(schema.usageCounters).set({ sentNoFeedback: 900 });
     const enough = await callerFor(teamId).metrics.accountScoreDetails();
     expect(enough).toMatchObject({ complaintSent: 100, complaintsJudged: true });
+    expect(enough.outcomeScoreTenths).toBeLessThan(100);
+  });
+
+  it("judges hard bounces only once enough sends count toward them after a lift", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.usageCounters).values({
+      teamId,
+      day: utcDay(0),
+      sent: 1_000,
+      hardBounced: 20,
+      excludedSent: 950,
+      excludedHardBounced: 15,
+    });
+
+    const few = await callerFor(teamId).metrics.accountScoreDetails();
+    expect(few).toMatchObject({ sent: 1_000, bounceSent: 50, bouncesJudged: false });
+    expect(few.hardBounceRate).toBeCloseTo(5 / 50);
+    expect(few.outcomeScoreTenths).toBe(100);
+
+    await db.update(schema.usageCounters).set({ excludedSent: 900 });
+    const enough = await callerFor(teamId).metrics.accountScoreDetails();
+    expect(enough).toMatchObject({ bounceSent: 100, bouncesJudged: true });
     expect(enough.outcomeScoreTenths).toBeLessThan(100);
   });
 });

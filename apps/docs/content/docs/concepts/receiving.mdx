@@ -205,7 +205,8 @@ it costs depends on the plan:
 
 - **Free**: received mail and sends fill the same daily count, with the same
   50% tolerance sends get, so new mail is deferred once the two together
-  reach 150 in a UTC day. Inbound mail can therefore use up the day: sends
+  reach 150 in a UTC day. That count is shared by all the Free teams you
+  created. Inbound mail can therefore use up the day: sends
   past the cap wait until midnight UTC like any others, and received mail
   moves the [quota notices](/concepts/webhooks#event-types) too.
 - **Pro and Scale**: past the free allowance, every tenth received email adds

@@ -10,15 +10,15 @@
   },
   "dependencies": {
     "@millionsend/core": "workspace:*",
-    "mailauth": "^8.0.1",
-    "smtp-server": "^3.21.0",
+    "mailauth": "^8.0.4",
+    "smtp-server": "^3.21.1",
     "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.2",
     "@types/smtp-server": "^3.5.13",
-    "nodemailer": "^10.2.0",
+    "nodemailer": "^10.2.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

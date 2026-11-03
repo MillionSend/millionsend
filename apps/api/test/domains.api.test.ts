@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
-  DOMAIN_CREATE_LIMIT_PER_HOUR,
+  DOMAIN_CREATES_PER_HOUR,
   EnvKeyring,
   forgetPhishingPrints,
   generateApiKey,
@@ -523,7 +523,7 @@ describe("POST /domains in cloud (shared AWS account)", () => {
     ).toBe(200);
   });
 
-  it("caps domains per plan and rate-limits creation", async () => {
+  it("caps domains per plan and rate-limits creation per plan", async () => {
     const t = await cloudTeam("cloud-d");
     const app = makeApp({ ...fakeSes(), isCloud: true });
     const create = (i: number) =>
@@ -535,12 +535,23 @@ describe("POST /domains in cloud (shared AWS account)", () => {
     expect(await capped.json()).toMatchObject({ name: "plan_limit_reached" });
 
     await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, t.id));
-    for (let i = freeLimit; i < DOMAIN_CREATE_LIMIT_PER_HOUR; i++) {
+    const proPerHour = DOMAIN_CREATES_PER_HOUR.pro;
+    for (let i = freeLimit; i < proPerHour; i++) {
       expect((await create(i)).status).toBe(200);
     }
-    const limited = await create(DOMAIN_CREATE_LIMIT_PER_HOUR);
+    const limited = await create(proPerHour);
     expect(limited.status).toBe(429);
-    expect(await limited.json()).toMatchObject({ name: "rate_limit_exceeded" });
+    expect(await limited.json()).toMatchObject({
+      name: "rate_limit_exceeded",
+      message: expect.stringContaining(`up to ${proPerHour} an hour`),
+    });
+    const wait = Number(limited.headers.get("retry-after"));
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(3600);
+
+    // Scale's own cap is higher, so the same team goes on within the same hour.
+    await db.update(schema.teams).set({ plan: "scale" }).where(eq(schema.teams.id, t.id));
+    expect((await create(proPerHour + 1)).status).toBe(200);
     // Each successful create runs a real RSA keygen; 11 of them overrun the
     // default 5s on loaded CI runners.
   }, 30_000);

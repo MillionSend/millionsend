@@ -5,7 +5,8 @@ import type { Db } from "@millionsend/db";
 import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { DAY_MS, utcDay } from "./utc-day.js";
+import { freePoolOwner } from "./plans.js";
+import { DAY_MS, nextUtcDayStart, windowStartDay } from "./utc-day.js";
 
 /**
  * Single source of truth for deliverability thresholds and standing. The
@@ -21,7 +22,8 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * and full mailboxes are not a reputation signal. Complaint rates count only
  * the sends a recipient's provider could report, as SES does too: Gmail,
  * Apple and Deutsche Telekom never report one, so mail to them would dilute
- * the rate.
+ * the rate. They date a complaint by the UTC day its mail was sent, as SES
+ * dates its own rate.
  */
 export const WARN_BOUNCE_RATE = 0.04;
 export const WARN_COMPLAINT_RATE = 0.0005;
@@ -31,7 +33,8 @@ export const PAUSE_COMPLAINT_RATE = 0.001;
 /**
  * Below this many sends in a window no tier fires regardless of rate: a
  * handful of bounces in a tiny sample must never pause an account. The
- * complaint tiers count only the sends that could draw a complaint.
+ * complaint tiers count only the sends that could draw a complaint, and a
+ * Free pool's complaint tiers have no floor at all (fetchDeliverabilityHealth).
  */
 export const MIN_GUARDRAIL_VOLUME = 100;
 
@@ -57,6 +60,11 @@ export const GUARDRAIL_WINDOW_DAYS = 7;
  * keyed by UTC day, so this is the honest "last 24 hours" — a one-day window
  * would hold five minutes of data just after midnight. A team that fixes its
  * list recovers in a day instead of waiting out the warning window.
+ * Complaints are dated by their mail's send day, so the pause weighs those
+ * about the last two days' mail. They keep arriving for days, so the pause
+ * acts on acute blasts and the warning window carries the slower tail. A
+ * pause lifts once the bad send days leave the window, and late complaints
+ * about older mail cannot extend it.
  */
 export const PAUSE_WINDOW_DAYS = 2;
 
@@ -92,6 +100,9 @@ export interface WindowCounts {
 
 /** complaintSent from a usage_counters row, for summing over a window. */
 export const counterComplaintSent: SQL = sql`${schema.usageCounters.sent} - ${schema.usageCounters.sentNoFeedback}`;
+/** A usage_counters row's sends and hard bounces net of a pause lift: the bounce rate's inputs. */
+export const counterSent: SQL = sql`greatest(${schema.usageCounters.sent} - ${schema.usageCounters.excludedSent}, 0)`;
+export const counterHardBounced: SQL = sql`greatest(${schema.usageCounters.hardBounced} - ${schema.usageCounters.excludedHardBounced}, 0)`;
 
 export interface DeliverabilityEvaluation {
   /** Hard-bounce rate over the warning window. */
@@ -102,12 +113,17 @@ export interface DeliverabilityEvaluation {
 }
 
 export interface DeliverabilityHealth extends DeliverabilityEvaluation {
-  /** Sends in the warning window (the denominator of the displayed bounce rate). */
+  /**
+   * Sends in the warning window as SES counted them. The bounce rate divides
+   * by these minus `lifted.sent`.
+   */
   sent: number;
   /** The warning window's sends that could draw a complaint (the complaint rate's denominator). */
   complaintSent: number;
   windowDays: number;
   pause: WindowCounts & { windowDays: number };
+  /** What pause lifts took out of the warning window's bounce rate; zeros for a Free pool. */
+  lifted: { sent: number; hardBounced: number };
 }
 
 /**
@@ -126,13 +142,15 @@ const rateOf = (events: number, sent: number): number => (sent > 0 ? events / se
  * Pure guardrail decision. The pause tier reads the short window: rate at or
  * over the pause line AND at least MIN_PAUSE_* events. The warning tier reads
  * the long window: rate at or over the warning line. Neither fires under
- * `minVolume` sends in its own window, counted over the metric's own
- * denominator (complaints over complaintSent). The rates returned for display
- * are the long window's; zero sends yields zero rates, never NaN.
+ * the metric's floor of sends in its own window, counted over the metric's
+ * own denominator (complaints over complaintSent): `minVolume` for bounces,
+ * `complaintMinVolume` for complaints. The rates returned for display are the
+ * long window's; zero sends yields zero rates, never NaN.
  */
 export function evaluateDeliverability(
   windows: { warn: WindowCounts; pause: WindowCounts },
   minVolume: number = MIN_GUARDRAIL_VOLUME,
+  complaintMinVolume: number = minVolume,
 ): DeliverabilityEvaluation {
   const { warn, pause } = windows;
   const reasons: DeliverabilityReason[] = [];
@@ -144,9 +162,10 @@ export function evaluateDeliverability(
       metric === "bounce"
         ? (["hardBounced", "sent"] as const)
         : (["complained", "complaintSent"] as const);
+    const floor = metric === "bounce" ? minVolume : complaintMinVolume;
     const pauseRate = rateOf(pause[events], pause[sends]);
     if (
-      pause[sends] >= minVolume &&
+      pause[sends] >= floor &&
       pauseRate >= lines.pause &&
       pause[events] >= lines.minPauseEvents
     ) {
@@ -154,7 +173,7 @@ export function evaluateDeliverability(
       return;
     }
     const warnRate = rateOf(warn[events], warn[sends]);
-    if (warn[sends] >= minVolume && warnRate >= lines.warn && warn[events] >= lines.minWarnEvents) {
+    if (warn[sends] >= floor && warnRate >= lines.warn && warn[events] >= lines.minWarnEvents) {
       reasons.push({ metric, rate: warnRate, tier: "warning", windowDays: GUARDRAIL_WINDOW_DAYS });
     }
   };
@@ -189,42 +208,81 @@ export function evaluateDeliverability(
  * A team's current deliverability standing. Sums usage_counters over both
  * windows in one round-trip (the pause window is the recent slice of the
  * warning window), using the successful SES send count as the denominator
- * (complaints: the sends that could draw one), with the windows' lower bounds
- * derived from utcDay so rows join on the exact same UTC-day key production
- * writes.
+ * (complaints: the sends that could draw one; hard bounces: both counts net
+ * of a pause lift), with the windows' lower bounds derived from utcDay so
+ * rows join on the exact same UTC-day key production writes. A team in a
+ * Free pool (freePoolOwner) is judged on the pool's one record instead,
+ * free_pool_usage summed the same way, so a pause holds every Free team of
+ * its creator; its complaints count from the first send, since a pool's
+ * volume is small and every complaint reaches the shared reputation.
  */
 export async function fetchDeliverabilityHealth(
   db: Db,
   teamId: string,
   opts?: { now?: Date },
 ): Promise<DeliverabilityHealth> {
-  const now = (opts?.now ?? new Date()).getTime();
-  const sinceWarn = utcDay(now - (GUARDRAIL_WINDOW_DAYS - 1) * DAY_MS);
-  const sincePause = utcDay(now - (PAUSE_WINDOW_DAYS - 1) * DAY_MS);
+  const at = opts?.now ?? new Date();
+  const sinceWarn = windowStartDay(GUARDRAIL_WINDOW_DAYS, at);
+  const sincePause = windowStartDay(PAUSE_WINDOW_DAYS, at);
 
+  const t = schema.teams;
+  const [team] = await db
+    .select({ plan: t.plan, currentPeriodEnd: t.currentPeriodEnd, poolOwnerId: t.poolOwnerId })
+    .from(t)
+    .where(eq(t.id, teamId));
+  const ownerId = team ? freePoolOwner(team, at) : null;
   const c = schema.usageCounters;
+  const p = schema.freePoolUsage;
+  const src = ownerId
+    ? {
+        table: p,
+        scope: eq(p.ownerId, ownerId),
+        day: p.day,
+        sent: p.sent,
+        bounceSent: p.sent,
+        complaintSent: sql`${p.sent} - ${p.sentNoFeedback}`,
+        hardBounced: p.hardBounced,
+        complained: p.complained,
+        liftedSent: sql`0`,
+        liftedHardBounced: sql`0`,
+      }
+    : {
+        table: c,
+        scope: eq(c.teamId, teamId),
+        day: c.day,
+        sent: c.sent,
+        bounceSent: counterSent,
+        complaintSent: counterComplaintSent,
+        hardBounced: counterHardBounced,
+        complained: c.complained,
+        liftedSent: c.excludedSent,
+        liftedHardBounced: c.excludedHardBounced,
+      };
   // ::bigint — a busy sender's window sum can overflow int4. The driver
   // returns bigint as a string; Number() is exact up to 2^53.
   const total = (col: AnyPgColumn | SQL) => sql<string>`coalesce(sum(${col}), 0)::bigint`;
   const recent = (col: AnyPgColumn | SQL) =>
-    sql<string>`coalesce(sum(case when ${c.day} >= ${sincePause} then ${col} else 0 end), 0)::bigint`;
+    sql<string>`coalesce(sum(case when ${src.day} >= ${sincePause} then ${col} else 0 end), 0)::bigint`;
   const [row] = await db
     .select({
-      sent: total(c.sent),
-      complaintSent: total(counterComplaintSent),
-      hardBounced: total(c.hardBounced),
-      complained: total(c.complained),
-      pauseSent: recent(c.sent),
-      pauseComplaintSent: recent(counterComplaintSent),
-      pauseHardBounced: recent(c.hardBounced),
-      pauseComplained: recent(c.complained),
+      sent: total(src.sent),
+      bounceSent: total(src.bounceSent),
+      complaintSent: total(src.complaintSent),
+      hardBounced: total(src.hardBounced),
+      complained: total(src.complained),
+      liftedSent: total(src.liftedSent),
+      liftedHardBounced: total(src.liftedHardBounced),
+      pauseSent: recent(src.bounceSent),
+      pauseComplaintSent: recent(src.complaintSent),
+      pauseHardBounced: recent(src.hardBounced),
+      pauseComplained: recent(src.complained),
     })
-    .from(c)
-    .where(and(eq(c.teamId, teamId), gte(c.day, sinceWarn)));
+    .from(src.table)
+    .where(and(src.scope, gte(src.day, sinceWarn)));
 
   const n = (v: string | undefined) => Number(v ?? 0);
   const warn = {
-    sent: n(row?.sent),
+    sent: n(row?.bounceSent),
     complaintSent: n(row?.complaintSent),
     hardBounced: n(row?.hardBounced),
     complained: n(row?.complained),
@@ -237,10 +295,68 @@ export async function fetchDeliverabilityHealth(
   };
 
   return {
-    ...evaluateDeliverability({ warn, pause }),
-    sent: warn.sent,
+    ...evaluateDeliverability(
+      { warn, pause },
+      MIN_GUARDRAIL_VOLUME,
+      ownerId ? 0 : MIN_GUARDRAIL_VOLUME,
+    ),
+    sent: n(row?.sent),
     complaintSent: warn.complaintSent,
     windowDays: GUARDRAIL_WINDOW_DAYS,
     pause: { ...pause, windowDays: PAUSE_WINDOW_DAYS },
+    lifted: { sent: n(row?.liftedSent), hardBounced: n(row?.liftedHardBounced) },
   };
+}
+
+/** Days between a team's pause lifts, from the latest team.sending_pause_lifted audit row. */
+export const PAUSE_LIFT_COOLDOWN_DAYS = 30;
+
+/**
+ * When the cooldown after a lift at `lastLiftAt` ends: rounded up to a UTC
+ * midnight, so the day a refusal names is a day a lift works from its start.
+ */
+export function pauseLiftCooldownEnd(lastLiftAt: Date): Date {
+  return nextUtcDayStart(lastLiftAt.getTime() + PAUSE_LIFT_COOLDOWN_DAYS * DAY_MS - 1);
+}
+
+export type PauseLiftRefusal =
+  | "suspended"
+  | "free"
+  | "not_paused"
+  | "complaints"
+  | "flagged"
+  | "monitor"
+  | "cooldown";
+
+/**
+ * Why an operator may not lift the team's deliverability pause now, or null
+ * when they may. A Free pool shares one record no lift touches, and a
+ * complaint pause is never lifted.
+ */
+export function pauseLiftRefusal(f: {
+  suspended: boolean;
+  freePool: boolean;
+  reasons: readonly DeliverabilityReason[];
+  openFlag: { reason: string; openedBy: string | null } | null;
+  monitorRisk: number | null;
+  monitorFlagRisk: number;
+  lastLiftAt: Date | null;
+  now: Date;
+}): PauseLiftRefusal | null {
+  if (f.suspended) return "suspended";
+  if (f.freePool) return "free";
+  const paused = f.reasons.filter((r) => r.tier === "paused");
+  if (paused.length === 0) return "not_paused";
+  if (paused.some((r) => r.metric === "complaint")) return "complaints";
+  // The cron's own guardrail flag is the pause itself; any other open flag waits on a decision.
+  if (f.openFlag && (f.openFlag.reason !== "guardrail" || f.openFlag.openedBy !== null)) {
+    return "flagged";
+  }
+  // While paused, syncTeamFlags relabels an automatic monitor flag "guardrail",
+  // so read the risk itself.
+  if (f.monitorRisk !== null && f.monitorRisk >= f.monitorFlagRisk) return "monitor";
+  if (f.lastLiftAt && f.now.getTime() < pauseLiftCooldownEnd(f.lastLiftAt).getTime()) {
+    return "cooldown";
+  }
+  return null;
 }
