@@ -269,6 +269,13 @@ const ZERO_COUNTS: InboxCounts = {
   lastReceived: null,
 };
 
+// A thread is unread while one of its delivered messages is, spam and trash
+// aside: what needs reading.
+const unreadThreadRows = and(
+  sql`${schema.receivedEmailInboxes.readAt} is null and ${schema.receivedEmailInboxes.deliveredAt} is not null`,
+  notInArray(schema.inboxThreads.folder, ["spam", "trash"]),
+);
+
 /** The read and attention counts of several inboxes at once. */
 async function countsFor(db: Db, inboxIds: string[]): Promise<Map<string, InboxCounts>> {
   const out = new Map(inboxIds.map((id) => [id, { ...ZERO_COUNTS }]));
@@ -277,18 +284,11 @@ async function countsFor(db: Db, inboxIds: string[]): Promise<Map<string, InboxC
   const t = schema.inboxThreads;
   const d = schema.inboxDrafts;
   const [unread, drafts, held, last] = await Promise.all([
-    // Unread threads, spam and trash aside: what needs reading.
     db
       .select({ inboxId: m.inboxId, n: sql<number>`count(distinct ${m.threadId})::int` })
       .from(m)
       .innerJoin(t, eq(t.id, m.threadId))
-      .where(
-        and(
-          inArray(m.inboxId, inboxIds),
-          sql`${m.readAt} is null and ${m.deliveredAt} is not null`,
-          notInArray(t.folder, ["spam", "trash"]),
-        ),
-      )
+      .where(and(inArray(m.inboxId, inboxIds), unreadThreadRows))
       .groupBy(m.inboxId),
     db
       .select({
@@ -324,6 +324,30 @@ async function countsFor(db: Db, inboxIds: string[]): Promise<Map<string, InboxC
   for (const r of held) of(r.inboxId).quarantined = r.n;
   for (const r of last) of(r.inboxId).lastReceived = r.at ? new Date(r.at) : null;
   return out;
+}
+
+/**
+ * Unread threads across the team's live People inboxes, by the rule each
+ * inbox's own count follows: the sum of the "N unread" the inbox list shows.
+ * An agent inbox's unread is the agent's queue, which no person clears by
+ * reading, so it never counts. No LIMIT: under one, the planner trades the
+ * team's inboxes for a walk of every membership in thread order.
+ */
+export async function teamUnreadThreads(
+  db: Db,
+  teamId: string,
+  now: Date = new Date(),
+): Promise<number> {
+  const m = schema.receivedEmailInboxes;
+  const t = schema.inboxThreads;
+  const i = schema.inboxes;
+  const [row] = await db
+    .select({ n: sql<number>`count(distinct ${m.threadId})::int` })
+    .from(m)
+    .innerJoin(i, eq(i.id, m.inboxId))
+    .innerJoin(t, eq(t.id, m.threadId))
+    .where(and(eq(i.teamId, teamId), eq(i.kind, "human"), liveInbox(now), unreadThreadRows));
+  return row?.n ?? 0;
 }
 
 async function wireOf(db: Db, row: InboxRow): Promise<InboxWire> {

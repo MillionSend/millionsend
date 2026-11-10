@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encryptEmailBody, sealAttachments } from "../src/crypto/envelope.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
-import type { InboxDeps } from "../src/inboxes/inboxes.js";
+import { type InboxDeps, teamUnreadThreads } from "../src/inboxes/inboxes.js";
 import { createLabel, deleteLabel, listLabels, updateLabel } from "../src/inboxes/labels.js";
 import { LABEL_COLORS } from "../src/inboxes/organize.js";
 import { listQuarantined } from "../src/inboxes/quarantine.js";
@@ -1027,5 +1027,61 @@ describe("listQuarantined", () => {
         virus_signature: "Win.Test.EICAR_HDB-1",
       }),
     ]);
+  });
+});
+
+/** A People inbox beside the setup's agent one, on the same domain. */
+async function peopleInbox(s: Setup, local: string, expiresAt: Date | null = null): Promise<Setup> {
+  const domain = s.address.split("@")[1] as string;
+  const [row] = await db
+    .select({ id: schema.domains.id })
+    .from(schema.domains)
+    .where(eq(schema.domains.teamId, s.teamId));
+  const [inbox] = await db
+    .insert(schema.inboxes)
+    .values({
+      teamId: s.teamId,
+      kind: "human",
+      emailAddress: `${local}@${domain}`,
+      localPart: local,
+      domainId: row?.id as string,
+      name: local,
+      fromName: local,
+      safety: defaultSafety("human", false),
+      expiresAt,
+    })
+    .returning({ id: schema.inboxes.id });
+  return { ...s, inboxId: inbox?.id as string, address: `${local}@${domain}` };
+}
+
+describe("teamUnreadThreads", () => {
+  it("adds up the unread threads of the team's live People inboxes, by each inbox's own rule", async () => {
+    const s = await setup("unread-count");
+    const support = await peopleInbox(s, "support");
+    const legal = await peopleInbox(s, "legal");
+    // Two unread messages in one thread count once; a thread with one unread counts too.
+    const both = await thread(support);
+    await inbound(support, both, { subject: "First" });
+    await inbound(support, both, { subject: "Second" });
+    const mixed = await thread(support);
+    await inbound(support, mixed, { subject: "Seen", read: true });
+    await inbound(support, mixed, { subject: "New" });
+    // An archived thread still waits to be read.
+    const archived = await thread(legal, { folder: "archive" });
+    await inbound(legal, archived, { subject: "Archived" });
+    // None of these: read, spam, trash, held mail, the agent's queue, an expired inbox.
+    await inbound(legal, await thread(legal), { subject: "Read", read: true });
+    await inbound(legal, await thread(legal, { folder: "spam" }), { subject: "Spam" });
+    await inbound(legal, await thread(legal, { folder: "trash" }), { subject: "Trash" });
+    await inbound(legal, await thread(legal), { subject: "Held", held: "quarantined" });
+    await inbound(s, await thread(s), { subject: "Agent" });
+    const gone = await peopleInbox(s, "gone", new Date(Date.now() - 60_000));
+    await inbound(gone, await thread(gone), { subject: "Expired" });
+    // Another team's unread mail is its own.
+    const other = await peopleInbox(await setup("unread-other"), "support");
+    await inbound(other, await thread(other), { subject: "Theirs" });
+
+    expect(await teamUnreadThreads(db, s.teamId)).toBe(3);
+    expect(await teamUnreadThreads(db, other.teamId)).toBe(1);
   });
 });

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { LABEL_COLORS } from "@millionsend/core/inbox-organize";
 import type { InboxSafety } from "@millionsend/db/schema";
-import { createElement } from "react";
+import { type ComponentProps, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxDetail, ThreadMessage, ThreadRow } from "@/app/(dashboard)/inboxes/parts";
@@ -138,11 +138,12 @@ const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
 const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
   await import("@/app/(dashboard)/inboxes/parts");
 const { navItemsFor, Sidebar } = await import("@/components/sidebar");
+const { AppShell } = await import("@/components/app-shell");
 const { SettingsTabsNav } = await import("@/app/(dashboard)/settings/settings-tabs-nav");
 const { ServerTeamRole } = await import("@/lib/use-team-role");
 const { offeredEvents } = await import("@/app/(dashboard)/webhooks/webhook-dialogs");
 // The mocked hook is a plain function here, typed as the components see it.
-const { useTranslations: translatorFor } = await import("next-intl");
+const { createTranslator, useTranslations: translatorFor } = await import("next-intl");
 const t = translatorFor("inboxes");
 
 const safety = {
@@ -237,6 +238,63 @@ describe("navigation", () => {
       createElement(Sidebar, { teamName: "Acme", userEmail: "owner@example.com", receiving: true }),
     );
     expect(html).toContain('href="/inboxes"');
+  });
+
+  it("counts unread threads at the end of Inboxes, 99+ past 99, and shows nothing at 0", () => {
+    const shell = (unread: unknown, receiving = true) => {
+      rq.byPath["inboxes.unread.queryOptions"] = unread;
+      const props: ComponentProps<typeof AppShell> = {
+        teamName: "Acme",
+        userEmail: "owner@example.com",
+        receiving,
+        role: "owner",
+        children: null,
+      };
+      try {
+        return renderToStaticMarkup(createElement(AppShell, props));
+      } finally {
+        delete rq.byPath["inboxes.unread.queryOptions"];
+      }
+    };
+    for (const none of [undefined, 0]) {
+      const html = shell(none);
+      expect(html).not.toContain("ms-nav-count");
+      expect(html).not.toContain("ms-menu-dot");
+      expect(html).toContain('aria-label="Open navigation"');
+    }
+    const three = shell(3);
+    expect(three).toContain('aria-label="Inboxes, 3 unread"');
+    expect(three).toContain('<span class="ms-nav-count" aria-hidden="true">3</span>');
+    // On a phone the drawer hides the count, so the menu button carries a dot.
+    expect(three).toContain('aria-label="Open navigation, 3 unread in Inboxes"');
+    expect(three).toContain('<span class="ms-dot sm ms-menu-dot" aria-hidden="true"></span>');
+    const many = shell(100);
+    expect(many).toContain('aria-label="Inboxes, 99+ unread"');
+    expect(many).toContain('<span class="ms-nav-count" aria-hidden="true">99+</span>');
+    // An instance that takes no mail has no Inboxes, nor anything to count.
+    const off = shell(3, false);
+    expect(off).not.toContain("ms-nav-count");
+    expect(off).not.toContain("ms-menu-dot");
+  });
+
+  it("says the count in both languages", () => {
+    const pt = JSON.parse(
+      readFileSync(new URL("../messages/pt-BR/nav.json", import.meta.url), "utf8"),
+    ) as Record<string, string>;
+    const ptCommon = JSON.parse(
+      readFileSync(new URL("../messages/pt-BR/common.json", import.meta.url), "utf8"),
+    ) as Record<string, string>;
+    const say = (message: string | undefined, count: number) =>
+      createTranslator({ locale: "pt-BR", messages: { m: message ?? "" } })("m", {
+        label: "Caixas de entrada",
+        shown: String(count),
+        count,
+      });
+    expect(say(pt.unread, 1)).toBe("Caixas de entrada, 1 não lida");
+    expect(say(pt.unread, 3)).toBe("Caixas de entrada, 3 não lidas");
+    expect(say(ptCommon.openNavUnread, 3)).toBe(
+      "Abrir navegação, 3 não lidas em Caixas de entrada",
+    );
   });
 
   it("gates on the layout's role in the server HTML, before the team list loads", () => {

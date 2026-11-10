@@ -12,6 +12,7 @@
   "exportCsv": "Export CSV",
   "cancel": "Cancel",
   "openNav": "Open navigation",
+  "openNavUnread": "Open navigation, {shown} unread in Inboxes",
   "signOut": "Log out",
   "nameRule": "Names can't contain links, email addresses, phone numbers, line breaks or hidden characters, and can be up to {max} characters long.",
   "accountMenu": {

@@ -48,6 +48,7 @@ const core = vi.hoisted(() => ({
   listQuarantined: vi.fn(),
   releaseQuarantined: vi.fn(),
   releasePreview: vi.fn(),
+  teamUnreadThreads: vi.fn(),
 }));
 vi.mock("@millionsend/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@millionsend/core")>()),
@@ -202,8 +203,19 @@ describe("where the instance takes no mail", () => {
     await expect(
       caller(acme).inboxes.updateSafety({ id: inboxId, patch: {} }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller(acme).inboxes.unread()).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(core.listInboxes).not.toHaveBeenCalled();
     expect(core.deleteInboxes).not.toHaveBeenCalled();
+    expect(core.teamUnreadThreads).not.toHaveBeenCalled();
+  });
+});
+
+describe("the sidebar's unread count", () => {
+  it("counts the session's team, for any member and under a support view", async () => {
+    core.teamUnreadThreads.mockResolvedValue(7);
+    expect(await caller(acme, "member").inboxes.unread()).toBe(7);
+    expect(await caller(acme, "viewer", view()).inboxes.unread()).toBe(7);
+    expect(core.teamUnreadThreads.mock.calls.map((call) => call[1])).toEqual([acme, acme]);
   });
 });
 

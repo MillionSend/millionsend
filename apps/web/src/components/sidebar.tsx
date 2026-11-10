@@ -8,6 +8,7 @@ import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/na
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { signOutToLogin } from "@/lib/auth-client";
+import { formatBadgeCount } from "@/lib/format";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
@@ -39,16 +40,22 @@ function NavItem({
   item,
   active,
   label,
+  unread = 0,
 }: {
   item: (typeof NAV_ITEMS)[number];
   active: boolean;
   label: string;
+  /** Unread threads behind the link, counted at its end; 0 shows nothing. */
+  unread?: number;
 }) {
+  const t = useTranslations("nav");
   const [hovered, setHovered] = useState(false);
+  const shown = formatBadgeCount(unread);
   return (
     <Link
       href={item.href}
       className={active ? "active" : undefined}
+      aria-label={unread > 0 ? t("unread", { label, shown, count: unread }) : undefined}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onFocus={() => setHovered(true)}
@@ -56,6 +63,11 @@ function NavItem({
     >
       <NavGlyph name={item.icon} hovered={hovered} />
       {label}
+      {unread > 0 ? (
+        <span className="ms-nav-count" aria-hidden="true">
+          {shown}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -159,6 +171,7 @@ export function Sidebar({
   teamLogoUrl,
   userEmail,
   receiving,
+  unread = 0,
   className,
   onNavigate,
 }: {
@@ -166,6 +179,8 @@ export function Sidebar({
   teamLogoUrl?: string | null | undefined;
   userEmail: string;
   receiving: boolean;
+  /** Unread threads across the team's People inboxes, counted on Inboxes. */
+  unread?: number;
   /** Hook for the responsive drawer treatment (see components.css .ms-sidebar). */
   className?: string;
   /** Fired when a nav link is chosen, so the mobile drawer can close. */
@@ -238,6 +253,7 @@ export function Sidebar({
             item={item}
             active={isActive(pathname, item.href)}
             label={t(item.key)}
+            unread={item.key === "inboxes" ? unread : 0}
           />
         ))}
       </nav>

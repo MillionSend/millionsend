@@ -44,6 +44,7 @@ import {
   type ThreadEmailWire,
   teamMemberEmails,
   teamSharedDomain,
+  teamUnreadThreads,
   updateDraft,
   updateInbox,
   updateInboxSafety,
@@ -389,6 +390,9 @@ export const inboxesRouter = router({
         overview: first ? await receivedOverview(ctx.db, ctx.teamId) : null,
       };
     }),
+
+  /** The sidebar's count: unread threads across the team's People inboxes. */
+  unread: receivingProcedure.query(({ ctx }) => teamUnreadThreads(ctx.db, ctx.teamId)),
 
   get: receivingProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {
     // An expired inbox stays here, read-only, until the hourly sweep deletes

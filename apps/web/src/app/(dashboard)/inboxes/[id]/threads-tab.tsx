@@ -36,6 +36,7 @@ import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useEscape } from "@/lib/use-escape";
+import { INBOX_POLL_MS, useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
@@ -65,9 +66,6 @@ const FOLDER_ICONS: Record<(typeof MOVE_TO)[number], React.ReactNode> = {
   spam: <SpamIcon />,
   trash: <TrashIcon />,
 };
-/** How often the folder's list looks for new mail on its own while it is on screen. */
-const LIST_POLL_MS = 60_000;
-
 // Longhands, not the border shorthand: when a card's own borderColor goes away,
 // React clears it to "", which would leave the shorthand's border in currentColor.
 const card: React.CSSProperties = {
@@ -100,7 +98,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
       // Not under a support view, which counts every read on its grant, nor past
       // the first page, since each loaded page refetches in turn; "Atualizar" covers both.
       refetchInterval: (list) =>
-        !isReadOnly() && (list.state.data?.pages.length ?? 1) <= 1 ? LIST_POLL_MS : false,
+        !isReadOnly() && (list.state.data?.pages.length ?? 1) <= 1 ? INBOX_POLL_MS : false,
     }),
   );
   const searched = useInfiniteQuery(
@@ -315,6 +313,7 @@ function ThreadPane({
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const refreshUnread = useRefreshInboxUnread();
   const ref = { inboxId: inbox.id, threadId };
   const thread = useQuery(trpc.inboxes.threads.get.queryOptions(ref, { retry: false }));
   const messages = useInfiniteQuery(
@@ -329,6 +328,7 @@ function ThreadPane({
     void queryClient.invalidateQueries({ queryKey: trpc.inboxes.threads.pathKey() });
     void queryClient.invalidateQueries({ queryKey: trpc.inboxes.drafts.pathKey() });
     void queryClient.invalidateQueries({ queryKey: trpc.inboxes.get.queryKey({ id: inbox.id }) });
+    refreshUnread();
   };
   const update = useMutation(
     trpc.inboxes.threads.update.mutationOptions({
