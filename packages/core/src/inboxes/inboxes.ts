@@ -326,14 +326,12 @@ async function countsFor(db: Db, inboxIds: string[]): Promise<Map<string, InboxC
   return out;
 }
 
-/** Counting stops here, so a team with a deep backlog costs no more than one with 100. */
-export const TEAM_UNREAD_CAP = 100;
-
 /**
  * Unread threads across the team's live People inboxes, by the rule each
- * inbox's own count follows, up to TEAM_UNREAD_CAP: the sum of the "N unread"
- * the inbox list shows. An agent inbox's unread is the agent's queue, which
- * no person clears by reading, so it never counts.
+ * inbox's own count follows: the sum of the "N unread" the inbox list shows.
+ * An agent inbox's unread is the agent's queue, which no person clears by
+ * reading, so it never counts. No LIMIT: under one, the planner trades the
+ * team's inboxes for a walk of every membership in thread order.
  */
 export async function teamUnreadThreads(
   db: Db,
@@ -343,15 +341,12 @@ export async function teamUnreadThreads(
   const m = schema.receivedEmailInboxes;
   const t = schema.inboxThreads;
   const i = schema.inboxes;
-  const threads = db
-    .selectDistinct({ threadId: m.threadId })
+  const [row] = await db
+    .select({ n: sql<number>`count(distinct ${m.threadId})::int` })
     .from(m)
     .innerJoin(i, eq(i.id, m.inboxId))
     .innerJoin(t, eq(t.id, m.threadId))
-    .where(and(eq(i.teamId, teamId), eq(i.kind, "human"), liveInbox(now), unreadThreadRows))
-    .limit(TEAM_UNREAD_CAP)
-    .as("threads");
-  const [row] = await db.select({ n: count() }).from(threads);
+    .where(and(eq(i.teamId, teamId), eq(i.kind, "human"), liveInbox(now), unreadThreadRows));
   return row?.n ?? 0;
 }
 

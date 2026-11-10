@@ -86,7 +86,7 @@ export function AppShell({
               style={{ position: "relative" }}
             >
               <MenuGlyph size={16} />
-              {unread > 0 ? <span className="ms-menu-dot" aria-hidden="true" /> : null}
+              {unread > 0 ? <span className="ms-dot sm ms-menu-dot" aria-hidden="true" /> : null}
             </button>
             <Link href="/" style={{ display: "inline-flex" }}>
               {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}
@@ -108,6 +108,7 @@ export function AppShell({
             teamLogoUrl={teamLogoUrl}
             userEmail={userEmail}
             receiving={receiving}
+            unread={unread}
             className={drawerOpen ? "ms-sidebar open" : "ms-sidebar"}
             onNavigate={() => setDrawerOpen(false)}
           />

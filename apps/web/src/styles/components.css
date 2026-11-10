@@ -234,6 +234,8 @@ textarea.ms-input {
    since unread is bone and never a status color, whatever the label's color. */
 .ms-nav-count {
   margin-left: auto;
+  /* Its box takes the 16px glyph's height, so the row keeps its height as the count comes and goes. */
+  margin-block: -1px;
   min-width: 18px;
   height: 18px;
   padding: 0 6px;
@@ -244,7 +246,6 @@ textarea.ms-input {
   flex: none;
   border-radius: var(--ms-r-chip);
   font: 500 var(--ms-fs-micro) / 1 var(--ms-font-sans);
-  font-feature-settings: "tnum";
   font-variant-numeric: tabular-nums;
   color: var(--ms-bone);
   background: color-mix(in srgb, var(--ms-bone) 12%, transparent);
@@ -252,14 +253,11 @@ textarea.ms-input {
 .ms-nav a.active .ms-nav-count {
   background: color-mix(in srgb, var(--ms-bone) 16%, transparent);
 }
-/* The phone menu button's mark while the closed drawer hides an unread count. */
+/* The phone menu button's .ms-dot while the closed drawer hides an unread count. */
 .ms-menu-dot {
   position: absolute;
   top: 4px;
   right: 4px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
   background: var(--ms-bone);
   box-shadow: 0 0 0 2px var(--ms-panel-raised);
 }

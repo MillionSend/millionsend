@@ -267,7 +267,7 @@ describe("navigation", () => {
     expect(three).toContain('<span class="ms-nav-count" aria-hidden="true">3</span>');
     // On a phone the drawer hides the count, so the menu button carries a dot.
     expect(three).toContain('aria-label="Open navigation, 3 unread in Inboxes"');
-    expect(three).toContain('<span class="ms-menu-dot" aria-hidden="true"></span>');
+    expect(three).toContain('<span class="ms-dot sm ms-menu-dot" aria-hidden="true"></span>');
     const many = shell(100);
     expect(many).toContain('aria-label="Inboxes, 99+ unread"');
     expect(many).toContain('<span class="ms-nav-count" aria-hidden="true">99+</span>');

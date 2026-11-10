@@ -391,7 +391,7 @@ export const inboxesRouter = router({
       };
     }),
 
-  /** The sidebar's count: unread threads across the team's People inboxes, capped. */
+  /** The sidebar's count: unread threads across the team's People inboxes. */
   unread: receivingProcedure.query(({ ctx }) => teamUnreadThreads(ctx.db, ctx.teamId)),
 
   get: receivingProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {

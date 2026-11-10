@@ -28,6 +28,7 @@ import { limitSchedule } from "@/lib/new-domain-limit";
 import { useTRPC } from "@/lib/trpc";
 import { guardMessage } from "@/lib/trpc-error";
 import { useUrlState } from "@/lib/url-state";
+import { useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useTeamRole } from "@/lib/use-team-role";
 import { ListFooter, StateCard } from "../emails/list-parts";
 import {
@@ -105,6 +106,7 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
   const trpc = useTRPC();
   const router = useRouter();
   const domains = useQuery(trpc.domains.list.queryOptions());
+  const refreshUnread = useRefreshInboxUnread();
   const role = useTeamRole();
   const canManage = role === "owner" || role === "admin";
 
@@ -116,6 +118,8 @@ export function DomainsView({ awsBanner }: { awsBanner: React.ReactNode }) {
         setDeleteTarget(null);
         setConfirmText("");
         domains.refetch();
+        // The domain's inboxes went with it.
+        refreshUnread();
       },
     }),
   );

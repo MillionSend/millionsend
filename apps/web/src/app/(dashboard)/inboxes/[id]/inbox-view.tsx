@@ -17,6 +17,7 @@ import { formatTimeLeft } from "@/lib/format";
 import { sharedModeKey } from "@/lib/shared-mode";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useTeamRole } from "@/lib/use-team-role";
 import { confirmUnsavedNavigation } from "@/lib/use-unsaved-warning";
 import { kindWord } from "../parts";
@@ -36,6 +37,7 @@ export function InboxView() {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const refreshUnread = useRefreshInboxUnread();
   const role = useTeamRole();
   const admin = role === "owner" || role === "admin";
   const [tabParam, setTab] = useUrlState("tab", "threads");
@@ -50,7 +52,7 @@ export function InboxView() {
       onSuccess: () => {
         // Dropped, not invalidated: a stale list would paint the deleted inbox until its refetch landed.
         queryClient.removeQueries(trpc.inboxes.list.pathFilter());
-        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.unread.queryKey() });
+        refreshUnread();
         router.push("/inboxes");
       },
       onError: () => toast(t("deleteError"), "danger"),

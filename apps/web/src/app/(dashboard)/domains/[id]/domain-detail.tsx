@@ -38,6 +38,7 @@ import { useTRPC } from "@/lib/trpc";
 import { guardMessage, trpcErrorCode } from "@/lib/trpc-error";
 import { isLoopbackUrl } from "@/lib/url";
 import { oneOf, useUrlState } from "@/lib/url-state";
+import { useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useMinSpin } from "@/lib/use-min-spin";
 import { useTeamRole } from "@/lib/use-team-role";
 import { receivingSubdomain } from "@/lib/zone";
@@ -328,6 +329,7 @@ export function DomainDetail({ id }: { id: string }) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const refreshUnread = useRefreshInboxUnread();
   const admin = isAdminRole(useTeamRole());
 
   const domain = useQuery(trpc.domains.get.queryOptions({ id }));
@@ -396,6 +398,8 @@ export function DomainDetail({ id }: { id: string }) {
     trpc.domains.delete.mutationOptions({
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: trpc.domains.list.queryKey() });
+        // The domain's inboxes went with it.
+        refreshUnread();
         router.push("/domains");
       },
     }),

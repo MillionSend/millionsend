@@ -36,7 +36,7 @@ import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useEscape } from "@/lib/use-escape";
-import { INBOX_POLL_MS } from "@/lib/use-inbox-unread";
+import { INBOX_POLL_MS, useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
@@ -313,6 +313,7 @@ function ThreadPane({
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const refreshUnread = useRefreshInboxUnread();
   const ref = { inboxId: inbox.id, threadId };
   const thread = useQuery(trpc.inboxes.threads.get.queryOptions(ref, { retry: false }));
   const messages = useInfiniteQuery(
@@ -327,8 +328,7 @@ function ThreadPane({
     void queryClient.invalidateQueries({ queryKey: trpc.inboxes.threads.pathKey() });
     void queryClient.invalidateQueries({ queryKey: trpc.inboxes.drafts.pathKey() });
     void queryClient.invalidateQueries({ queryKey: trpc.inboxes.get.queryKey({ id: inbox.id }) });
-    // The sidebar stays mounted, so its count follows a read or a move only when told.
-    void queryClient.invalidateQueries({ queryKey: trpc.inboxes.unread.queryKey() });
+    refreshUnread();
   };
   const update = useMutation(
     trpc.inboxes.threads.update.mutationOptions({

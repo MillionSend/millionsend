@@ -40,6 +40,7 @@ import {
 import { formatBytes, formatRelative, mailDomain } from "@/lib/format";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
+import { useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useTeamRole } from "@/lib/use-team-role";
 import type { AppRouter } from "@/server/routers";
 import { heldWhy, QuarantinedBadge, TrustBadge } from "../../parts";
@@ -324,13 +325,18 @@ export function ReceivedEmailView() {
       { retry: false, staleTime: 10 * 60_000, refetchInterval: 30 * 60_000 },
     ),
   );
-  const refresh = () =>
-    queryClient.invalidateQueries({ queryKey: trpc.receiving.get.queryKey({ id }) });
+  const refreshUnread = useRefreshInboxUnread();
+  // A release lands mail in its inboxes unread.
+  const refresh = () => {
+    refreshUnread();
+    return queryClient.invalidateQueries({ queryKey: trpc.receiving.get.queryKey({ id }) });
+  };
   const remove = useMutation(
     trpc.receiving.delete.mutationOptions({
       onSuccess: () => {
         // Dropped, not invalidated: a stale list would paint the deleted email until its refetch landed.
         queryClient.removeQueries(trpc.receiving.list.pathFilter());
+        refreshUnread();
         router.push(LIST_HREF);
       },
       onError: () => toast(t("detail.deleteError"), "danger"),

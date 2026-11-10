@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encryptEmailBody, sealAttachments } from "../src/crypto/envelope.js";
 import { EnvKeyring } from "../src/crypto/keyring.js";
 import type { InboxActor } from "../src/inboxes/activity.js";
-import { type InboxDeps, TEAM_UNREAD_CAP, teamUnreadThreads } from "../src/inboxes/inboxes.js";
+import { type InboxDeps, teamUnreadThreads } from "../src/inboxes/inboxes.js";
 import { createLabel, deleteLabel, listLabels, updateLabel } from "../src/inboxes/labels.js";
 import { LABEL_COLORS } from "../src/inboxes/organize.js";
 import { listQuarantined } from "../src/inboxes/quarantine.js";
@@ -1083,13 +1083,5 @@ describe("teamUnreadThreads", () => {
 
     expect(await teamUnreadThreads(db, s.teamId)).toBe(3);
     expect(await teamUnreadThreads(db, other.teamId)).toBe(1);
-  });
-
-  it("stops counting at its cap", async () => {
-    const s = await peopleInbox(await setup("unread-cap"), "support");
-    for (let n = 0; n <= TEAM_UNREAD_CAP; n += 1) {
-      await inbound(s, await thread(s), { subject: `Message ${n}` });
-    }
-    expect(await teamUnreadThreads(db, s.teamId)).toBe(TEAM_UNREAD_CAP);
   });
 });

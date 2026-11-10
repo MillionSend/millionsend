@@ -12,7 +12,6 @@ import { formatBadgeCount } from "@/lib/format";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
-import { useInboxUnread } from "@/lib/use-inbox-unread";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 
 // Canvas nav order (Row 1 chrome): Settings lives in the main list.
@@ -172,6 +171,7 @@ export function Sidebar({
   teamLogoUrl,
   userEmail,
   receiving,
+  unread = 0,
   className,
   onNavigate,
 }: {
@@ -179,6 +179,8 @@ export function Sidebar({
   teamLogoUrl?: string | null | undefined;
   userEmail: string;
   receiving: boolean;
+  /** Unread threads across the team's People inboxes, counted on Inboxes. */
+  unread?: number;
   /** Hook for the responsive drawer treatment (see components.css .ms-sidebar). */
   className?: string;
   /** Fired when a nav link is chosen, so the mobile drawer can close. */
@@ -188,7 +190,6 @@ export function Sidebar({
   const tCommon = useTranslations("common");
   const pathname = usePathname();
   const navItems = navItemsFor(receiving);
-  const unread = useInboxUnread(receiving);
   const [menuOpen, setMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
