@@ -9,5 +9,6 @@
   "apiKeys": "API keys",
   "webhooks": "Webhooks",
   "templates": "Templates",
-  "settings": "Settings"
+  "settings": "Settings",
+  "unread": "{label}, {shown} unread"
 }

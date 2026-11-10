@@ -9,5 +9,6 @@
   "apiKeys": "Chaves de API",
   "webhooks": "Webhooks",
   "templates": "Modelos",
-  "settings": "Configurações"
+  "settings": "Configurações",
+  "unread": "{label}, {shown} {count, plural, one {não lida} other {não lidas}}"
 }

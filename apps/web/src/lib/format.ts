@@ -360,6 +360,11 @@ export function sendingDays(
   });
 }
 
+/** A count on a badge: the number up to 99, then "99+". */
+export function formatBadgeCount(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
+
 /** Whether two instants fall on the same UTC day: the day a daily plan cap resets on. */
 export function sameUtcDay(a: Date | string | number, b: Date | string | number): boolean {
   return new Date(a).toISOString().slice(0, 10) === new Date(b).toISOString().slice(0, 10);

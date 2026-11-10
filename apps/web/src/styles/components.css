@@ -230,6 +230,39 @@ textarea.ms-input {
   background: var(--ms-panel-raised);
   color: var(--ms-bone);
 }
+/* Unread count at the item's end: the .ms-count chip with its digits in bone,
+   since unread is bone and never a status color, whatever the label's color. */
+.ms-nav-count {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--ms-r-chip);
+  font: 500 var(--ms-fs-micro) / 1 var(--ms-font-sans);
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+  color: var(--ms-bone);
+  background: color-mix(in srgb, var(--ms-bone) 12%, transparent);
+}
+.ms-nav a.active .ms-nav-count {
+  background: color-mix(in srgb, var(--ms-bone) 16%, transparent);
+}
+/* The phone menu button's mark while the closed drawer hides an unread count. */
+.ms-menu-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ms-bone);
+  box-shadow: 0 0 0 2px var(--ms-panel-raised);
+}
 
 /* Cards — edge-lit lift off the void ground; the border sits a touch above
    --ms-line so the lifted edge reads clean without going full --ms-line-strong. */

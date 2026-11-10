@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import { CommandPalette } from "@/components/command-palette";
 import { MenuGlyph } from "@/components/icons/nav-icons";
 import { Sidebar } from "@/components/sidebar";
+import { formatBadgeCount } from "@/lib/format";
+import { useInboxUnread } from "@/lib/use-inbox-unread";
 import { ServerTeamRole } from "@/lib/use-team-role";
 import type { TeamRole } from "@/server/membership";
 
@@ -42,6 +44,7 @@ export function AppShell({
   const t = useTranslations("common");
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const unread = useInboxUnread(receiving);
 
   // Any navigation closes the drawer (nav links, account menu, breadcrumbs).
   // biome-ignore lint/correctness/useExhaustiveDependencies(pathname): the route change is the trigger; the effect reads nothing from it
@@ -73,11 +76,17 @@ export function AppShell({
             <button
               type="button"
               className="ms-btn ms-btn-icon"
-              aria-label={t("openNav")}
+              aria-label={
+                unread > 0
+                  ? t("openNavUnread", { shown: formatBadgeCount(unread), count: unread })
+                  : t("openNav")
+              }
               aria-expanded={drawerOpen}
               onClick={() => setDrawerOpen((open) => !open)}
+              style={{ position: "relative" }}
             >
               <MenuGlyph size={16} />
+              {unread > 0 ? <span className="ms-menu-dot" aria-hidden="true" /> : null}
             </button>
             <Link href="/" style={{ display: "inline-flex" }}>
               {/* biome-ignore lint/performance/noImgElement: static SVG logo, nothing for next/image to optimize */}

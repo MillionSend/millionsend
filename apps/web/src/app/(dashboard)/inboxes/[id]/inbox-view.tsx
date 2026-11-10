@@ -50,6 +50,7 @@ export function InboxView() {
       onSuccess: () => {
         // Dropped, not invalidated: a stale list would paint the deleted inbox until its refetch landed.
         queryClient.removeQueries(trpc.inboxes.list.pathFilter());
+        void queryClient.invalidateQueries({ queryKey: trpc.inboxes.unread.queryKey() });
         router.push("/inboxes");
       },
       onError: () => toast(t("deleteError"), "danger"),

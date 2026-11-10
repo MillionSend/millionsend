@@ -8,9 +8,11 @@ import { EllipsisGlyph, NavGlyph, type NavIconName } from "@/components/icons/na
 import { useDismiss } from "@/components/popover-menu";
 import { TeamSwitcher } from "@/components/team-switcher";
 import { signOutToLogin } from "@/lib/auth-client";
+import { formatBadgeCount } from "@/lib/format";
 import { isAppLocale, LOCALES } from "@/lib/locale-cookie";
 import { isActive } from "@/lib/nav";
 import { applyTheme, currentTheme, type Theme } from "@/lib/theme";
+import { useInboxUnread } from "@/lib/use-inbox-unread";
 import { useSwitchLocale } from "@/lib/use-switch-locale";
 
 // Canvas nav order (Row 1 chrome): Settings lives in the main list.
@@ -39,16 +41,22 @@ function NavItem({
   item,
   active,
   label,
+  unread = 0,
 }: {
   item: (typeof NAV_ITEMS)[number];
   active: boolean;
   label: string;
+  /** Unread threads behind the link, counted at its end; 0 shows nothing. */
+  unread?: number;
 }) {
+  const t = useTranslations("nav");
   const [hovered, setHovered] = useState(false);
+  const shown = formatBadgeCount(unread);
   return (
     <Link
       href={item.href}
       className={active ? "active" : undefined}
+      aria-label={unread > 0 ? t("unread", { label, shown, count: unread }) : undefined}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onFocus={() => setHovered(true)}
@@ -56,6 +64,11 @@ function NavItem({
     >
       <NavGlyph name={item.icon} hovered={hovered} />
       {label}
+      {unread > 0 ? (
+        <span className="ms-nav-count" aria-hidden="true">
+          {shown}
+        </span>
+      ) : null}
     </Link>
   );
 }
@@ -175,6 +188,7 @@ export function Sidebar({
   const tCommon = useTranslations("common");
   const pathname = usePathname();
   const navItems = navItemsFor(receiving);
+  const unread = useInboxUnread(receiving);
   const [menuOpen, setMenuOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   useDismiss(accountRef, menuOpen, () => setMenuOpen(false));
@@ -238,6 +252,7 @@ export function Sidebar({
             item={item}
             active={isActive(pathname, item.href)}
             label={t(item.key)}
+            unread={item.key === "inboxes" ? unread : 0}
           />
         ))}
       </nav>
