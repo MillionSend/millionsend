@@ -295,11 +295,12 @@ pagou nos últimos 120 dias é reembolsado.
 
 Uma equipe não pode comprar nem subir de plano enquanto estiver suspensa
 (por qualquer motivo) ou tiver uma sinalização aberta em Confiança e
-segurança que a rotina de segurança abriu por abuso (`monitor`, `guardrail`
-ou `complaints`) ou que um operador abriu ou reabriu, de qualquer tipo:
+segurança que um operador abriu ou reabriu, de qualquer tipo:
 `billing.checkout`, uma subida em `billing.changePlan` e ligar o excedente
 respondem `FORBIDDEN` (`upgrades_held`), e a página de cobrança diz que não
-é possível subir de plano, sem dizer por quê. Reativar a equipe encerra a
+é possível subir de plano, sem dizer por quê. Uma sinalização automática
+não bloqueia nada: ela só pede que um operador olhe, e o bloqueio do
+monitor de conteúdo por abuso é uma suspensão. Reativar a equipe encerra a
 sinalização que a suspensão abriu e deixa qualquer outra sinalização aberta
 como está. Descer, manter a faixa atual, desligar o
 excedente e **Gerenciar cobrança** (onde fica o cancelamento) continuam
