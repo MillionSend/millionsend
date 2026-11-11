@@ -8,6 +8,7 @@ import type { DekContext, Keyring } from "./keyring.js";
 export interface EmailBody {
   html: string | null;
   text: string | null;
+  tracking?: { open?: false | undefined; click?: false | undefined } | undefined;
 }
 
 export interface EncryptedBody {

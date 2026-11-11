@@ -225,15 +225,25 @@ describe("audience webhook events", () => {
     });
     // Re-adding an already suppressed address publishes nothing.
     const before = (await deliveries()).length;
-    await call("POST", "/suppressions", { email: "blocked@example.com" });
+    await call("POST", "/suppressions", { email: "blocked@example.com", origin: "unsubscribe" });
     expect((await deliveries()).length).toBe(before);
+
+    // A new hard block must not stay hidden behind an older marketing opt-out.
+    await call("POST", "/suppressions", { email: "blocked@example.com", origin: "manual" });
+    expect((await deliveries()).length).toBe(before + 1);
+    expect(
+      (await deliveries()).find(
+        (r) =>
+          r.eventType === "suppression.added" && r.data.id === id && r.data.origin === "manual",
+      )?.data,
+    ).toMatchObject({ id, origin: "manual" });
 
     expect((await call("DELETE", `/suppressions/${id}`)).status).toBe(200);
     row = (await deliveries()).find((r) => r.eventType === "suppression.removed");
     expect(row?.data).toMatchObject({
       id,
       email: "blocked@example.com",
-      origin: "unsubscribe",
+      origin: "manual",
       source_id: null,
     });
   });

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { deriveUnsubscribeKey, hashRecipient, makeUnsubscribeToken } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -658,4 +659,29 @@ describe("unsubscribe confirm page security headers", () => {
       sources.indexOf("/:path*"),
     );
   });
+});
+
+it("a global unsubscribe invalidates an unconfirmed request without a status flip", async () => {
+  const teamId = await createTeam(db, "pending"),
+    contactId = await seedContact(teamId);
+  await db
+    .update(schema.contacts)
+    .set({
+      unsubscribed: true,
+      confirmation: {
+        requestId: randomUUID(),
+        email: "ada@x.com",
+        requestedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        state: "pending",
+        createdContact: true,
+      },
+    })
+    .where(eq(schema.contacts.id, contactId));
+  const token = makeUnsubscribeToken({ contactId, secretKey });
+  await POST(new Request(`https://app.example.com/unsubscribe/${token}`, { method: "POST" }), {
+    params: Promise.resolve({ token }),
+  });
+  const [after] = await db.select().from(schema.contacts).where(eq(schema.contacts.id, contactId));
+  expect(after?.confirmation?.state).toBe("revoked");
 });

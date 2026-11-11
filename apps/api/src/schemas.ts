@@ -209,6 +209,16 @@ export const sendEmailRequestSchema = z
       .describe("Subject line"),
     html: z.string().optional().describe("HTML body; at least one of html/text is required"),
     text: z.string().optional().describe("Plain-text body; at least one of html/text is required"),
+    tracking: z
+      .object({
+        open: z.literal(false).optional(),
+        click: z.literal(false).optional(),
+      })
+      .strict()
+      .optional()
+      .describe(
+        "Disable engagement tracking for this message. Cannot enable tracking beyond the domain settings.",
+      ),
     cc: recipientList.optional().describe("Cc address or list"),
     bcc: recipientList.optional().describe("Bcc address or list"),
     reply_to: recipientList.optional().describe("Reply-To address or list"),
