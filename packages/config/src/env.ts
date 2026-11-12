@@ -37,6 +37,7 @@ export const SES_TRANSACTIONAL_RESERVE_MAX = 90;
 export const AWS_REGION_DEFAULT = "us-east-1";
 export const EMAIL_RETENTION_DAYS_DEFAULT = 30;
 export const EMAIL_METADATA_RETENTION_DAYS_DEFAULT = 30;
+export const RECEIVED_RETENTION_DAYS_DEFAULT = 180;
 export const OPEN_PREFETCH_WINDOW_SECONDS_DEFAULT = 10;
 export const INVITES_PER_TEAM_PER_DAY_DEFAULT = 50;
 export const API_RATE_LIMIT_PER_MINUTE_DEFAULT = 600;
@@ -257,6 +258,14 @@ export const env = createEnv({
       .int()
       .min(1)
       .default(EMAIL_METADATA_RETENTION_DAYS_DEFAULT),
+    // Received mail (content, attachments, whole rows) and inbox data age out on
+    // this one window instead of the sent-mail clocks above: an inbox is
+    // expected to keep its mail, while sent bodies stay minimised at 30 days.
+    RECEIVED_RETENTION_DAYS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(RECEIVED_RETENTION_DAYS_DEFAULT),
     // A tracking-image fetch within this many seconds of delivery (or before
     // it) is recorded as prefetched, not opened: security gateways scan a
     // message within seconds, while a person reading a push notification

@@ -1,3 +1,4 @@
+import { RECEIVED_RETENTION_DAYS_DEFAULT } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
@@ -52,7 +53,7 @@ const rowOf = async (id: string) =>
 it("empties received content on the content clock and keeps the metadata", async () => {
   const old = await received(31, "a".repeat(64));
   const fresh = await received(29, "b".repeat(64));
-  expect(await purgeExpiredReceivedContent(db, { defaultRetentionDays: 30, now: NOW })).toBe(1);
+  expect(await purgeExpiredReceivedContent(db, { retentionDays: 30, now: NOW })).toBe(1);
   expect(await rowOf(old)).toMatchObject({
     rawCiphertext: null,
     rawIv: null,
@@ -66,10 +67,21 @@ it("empties received content on the content clock and keeps the metadata", async
   });
   expect((await rowOf(fresh))?.rawCiphertext).not.toBeNull();
   // Already purged rows are not visited again.
-  expect(await purgeExpiredReceivedContent(db, { defaultRetentionDays: 30, now: NOW })).toBe(0);
-  // The instance setting wins over the env default.
+  expect(await purgeExpiredReceivedContent(db, { retentionDays: 30, now: NOW })).toBe(0);
+});
+
+it("keeps received mail for 180 days by default, whatever the sent-body setting says", async () => {
+  expect(RECEIVED_RETENTION_DAYS_DEFAULT).toBe(180);
   await db.insert(schema.instanceSettings).values({ id: 1, emailRetentionDays: 7 });
-  expect(await purgeExpiredReceivedContent(db, { defaultRetentionDays: 30, now: NOW })).toBe(1);
+  const kept = await received(179, "e".repeat(64));
+  const old = await received(181, "f".repeat(64));
+  const params = { retentionDays: RECEIVED_RETENTION_DAYS_DEFAULT, now: NOW };
+  expect(await purgeExpiredReceivedContent(db, params)).toBe(1);
+  expect((await rowOf(kept))?.rawCiphertext).not.toBeNull();
+  expect((await rowOf(old))?.rawCiphertext).toBeNull();
+  expect(await purgeExpiredReceivedMetadata(db, params)).toBe(1);
+  expect(await rowOf(kept)).toBeDefined();
+  expect(await rowOf(old)).toBeUndefined();
 });
 
 it("deletes whole received rows on the metadata clock", async () => {

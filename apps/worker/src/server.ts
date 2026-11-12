@@ -453,16 +453,16 @@ await queue.scheduleCrons({
       deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
     });
     const receivedPurged = await purgeExpiredReceivedContent(db, {
-      defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+      retentionDays: env.RECEIVED_RETENTION_DAYS,
     });
     const receivedDeleted = await purgeExpiredReceivedMetadata(db, {
-      retentionDays: metadataRetentionDays,
+      retentionDays: env.RECEIVED_RETENTION_DAYS,
     });
     // After the received metadata purge, whose deletes cascade to memberships.
     const now = new Date();
     const inboxData = await purgeInboxData(db, {
-      contentDays: (await getInstanceSettings(db)).emailRetentionDays ?? env.EMAIL_RETENTION_DAYS,
-      metadataDays: metadataRetentionDays,
+      contentDays: env.RECEIVED_RETENTION_DAYS,
+      metadataDays: env.RECEIVED_RETENTION_DAYS,
       now,
     });
     const inboxesExpired = await expireInboxes(db, inboxDeps, now);

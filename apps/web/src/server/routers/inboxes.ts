@@ -1,8 +1,7 @@
 import {
   abuseJudgeConfig,
-  EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
-  EMAIL_RETENTION_DAYS_DEFAULT,
   isCloudDeployment,
+  RECEIVED_RETENTION_DAYS_DEFAULT,
   sharedInboxDomain,
 } from "@millionsend/config";
 import {
@@ -18,7 +17,6 @@ import {
   getDraft,
   getInbox,
   getInboxSafety,
-  getInstanceSettings,
   getThread,
   INBOX_KINDS,
   type InboxSafety,
@@ -567,24 +565,15 @@ export const inboxesRouter = router({
     const safety = await getInboxSafety(ctx.db, { teamId: ctx.teamId, inboxId: input.id });
     if (!safety) throw new TRPCError({ code: "NOT_FOUND" });
     const members = await teamMemberEmails(ctx.db, ctx.teamId);
-    const stored = await getInstanceSettings(ctx.db);
     return {
       safety,
       // forward_to may name these, besides the owner addresses.
       memberEmails: members.sort(),
-      // Bodies go on the first clock and whole rows on the second, so mail lasts the shorter.
-      retentionDays: Math.min(
-        effectiveSetting(
-          stored.emailRetentionDays,
-          process.env.EMAIL_RETENTION_DAYS,
-          EMAIL_RETENTION_DAYS_DEFAULT,
-        ).value,
-        effectiveSetting(
-          null,
-          process.env.EMAIL_METADATA_RETENTION_DAYS,
-          EMAIL_METADATA_RETENTION_DAYS_DEFAULT,
-        ).value,
-      ),
+      retentionDays: effectiveSetting(
+        null,
+        process.env.RECEIVED_RETENTION_DAYS,
+        RECEIVED_RETENTION_DAYS_DEFAULT,
+      ).value,
     };
   }),
 

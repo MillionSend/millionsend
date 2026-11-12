@@ -82,7 +82,7 @@ const thread = async () =>
 it("empties the sealed extracted read with the rest of the content (S25)", async () => {
   const old = await received(31, "a");
   const fresh = await received(1, "b");
-  expect(await purgeExpiredReceivedContent(db, { defaultRetentionDays: 30, now: NOW })).toBe(1);
+  expect(await purgeExpiredReceivedContent(db, { retentionDays: 30, now: NOW })).toBe(1);
   const [oldRow] = await db
     .select()
     .from(schema.receivedEmails)

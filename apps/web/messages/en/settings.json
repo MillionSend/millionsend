@@ -249,7 +249,7 @@
     "title": "Instance",
     "subtitle": "Applies to this whole deployment, every team.",
     "rateLabel": "SES send rate (messages/second)",
-    "retentionLabel": "Email body retention (days)",
+    "retentionLabel": "Sent email body retention (days)",
     "reserveLabel": "Transactional reserve (% of the sending quota)",
     "reserveNote": "The transactional reserve is set from <link>Console → Regions</link>.",
     "save": "Save",

@@ -212,6 +212,7 @@ connections, so separate containers and worker replicas fit without tuning.
 | `SQS_POLL_CONCURRENCY` | Parallel SQS long-poll loops for SES events (default `4`). |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | How long webhook delivery rows and payloads stay readable in the delivery log (default `30`); older ones are purged. |
 | `EMAIL_METADATA_RETENTION_DAYS` | Days whole email rows (recipients, subject, status, events) are kept (default `30`, the industry norm); bodies leave earlier on the dashboard's retention setting, and daily counters and broadcast results are kept regardless. Releases before v0.6.30 defaulted to `365`: set it explicitly before upgrading if that history must stay. |
+| `RECEIVED_RETENTION_DAYS` | Days received mail is kept, content, attachments and whole rows alike, along with inbox drafts, activity and correspondents (default `180`). Separate from sent mail: the dashboard's retention setting and `EMAIL_METADATA_RETENTION_DAYS` do not apply to it. |
 | `OPEN_PREFETCH_WINDOW_SECONDS` | A tracking-pixel fetch within this many seconds of delivery (or before it) is recorded as prefetched, not opened (default `10`); `0` keeps only the user-agent rules. See [open-rate accuracy](/concepts/domains#open-rate-accuracy). |
 
 ### Object storage (uploads & backups)
@@ -2070,7 +2071,8 @@ docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
 - Send rate and email retention are managed in the dashboard: **Settings →
   Instance** (owner/admin). Defaults are 14/s and 30 days until changed there;
   the worker picks up a rate change within a minute, retention on the next
-  purge run.
+  purge run. That retention covers sent mail; received mail follows
+  `RECEIVED_RETENTION_DAYS` (default 180).
 - Worker sizing: `SEND_CONCURRENCY` lanes (default 16, about 1.2 per message/second of SES rate) and `WORKER_REPLICAS` (default 1). The SES rate limiter lives in each worker process, so every worker divides the account's rate by `WORKER_REPLICAS`; set it to the number of worker containers you run.
 - To run processes in separate containers, set `PROCESS` to `api`, `worker`,
   `web`, `smtp`, `mx`, or `docs` per container (default `all` = api + worker + web).

@@ -907,20 +907,18 @@ export async function purgeExpiredEmailBodies(
 }
 
 /**
- * Received mail on the content clock (the email bodies' window: instance
- * setting > env default): the sealed raw message and attachment list go,
+ * Received mail on the content clock (RECEIVED_RETENTION_DAYS, not the sent
+ * bodies' window): the sealed raw message and attachment list go,
  * contentPurgedAt is stamped, and the metadata row stays for its own window.
  * After this a received email reads `raw: null`, which is what makes Resend's
  * forward() report the raw content as unavailable.
  */
 export async function purgeExpiredReceivedContent(
   db: Db,
-  params: { defaultRetentionDays: number; now?: Date },
+  params: { retentionDays: number; now?: Date },
 ): Promise<number> {
-  const { emailRetentionDays } = await getInstanceSettings(db);
-  const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
   const now = params.now ?? new Date();
-  const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
+  const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
   const r = schema.receivedEmails;
   let purged = 0;
   for (;;) {
@@ -954,7 +952,7 @@ export async function purgeExpiredReceivedContent(
   return purged;
 }
 
-/** Received mail on the metadata clock: whole rows past EMAIL_METADATA_RETENTION_DAYS, in batches. */
+/** Received mail on the metadata clock: whole rows past RECEIVED_RETENTION_DAYS, in batches. */
 export async function purgeExpiredReceivedMetadata(
   db: Db,
   params: { retentionDays: number; now?: Date },
