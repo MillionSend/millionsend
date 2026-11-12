@@ -181,16 +181,16 @@ describe("tiers and rates", () => {
       rate: 1,
       kind: "anomaly",
     });
-    expect(monitorRate(state({ risk: 0.6 }), S, NOW, { anomalies: 0 })).toMatchObject({
+    expect(monitorRate(state({ risk: 0.9 }), S, NOW, { anomalies: 0 })).toMatchObject({
       rate: 0.08,
       kind: "tier",
       elevated: ["flagged"],
     });
-    expect(monitorRate(state({ risk: 0.6 }), S, NOW, { anomalies: 1 })).toMatchObject({
+    expect(monitorRate(state({ risk: 0.9 }), S, NOW, { anomalies: 1 })).toMatchObject({
       rate: 1,
       elevated: ["anomaly", "flagged"],
     });
-    expect(monitorRate(state({ risk: 0.49 }), S, NOW, { anomalies: 0 }).rate).toBe(0.02);
+    expect(monitorRate(state({ risk: 0.84 }), S, NOW, { anomalies: 0 }).rate).toBe(0.02);
   });
 
   it("lets an override replace the tier rate until it lapses, not the first window", () => {
@@ -479,15 +479,15 @@ describe("verdicts and thresholds", () => {
     expect(low).toMatchObject({ tier: "new", alert: false, paused: false });
     expect(low.risk).toBeCloseTo((0.6 + 0.35 * 3) / 4, 10);
     expect(await monitor()).toMatchObject({ risk: low.risk, riskUpdatedAt: NOW, alertedAt: null });
-    for (let i = 0; i < 6; i += 1) await judged(95, NOW);
+    for (let i = 0; i < 30; i += 1) await judged(100, NOW);
     let out = { risk: 0, alert: false, paused: false };
-    for (let i = 0; i < 6; i += 1)
+    for (let i = 0; i < 30; i += 1)
       out = {
         ...out,
         ...(await applyJudgedSample(
           db,
           { ...S, autoPause: false },
-          { teamId, score: 95, now: NOW },
+          { teamId, score: 100, now: NOW },
         )),
       };
     expect(out.risk).toBeGreaterThan(S.alertRisk);
@@ -511,9 +511,9 @@ describe("verdicts and thresholds", () => {
   });
 
   it("pauses broadcasts only for a new team under the policy with a strong verdict inside a day", async () => {
-    // A dozen certain verdicts push the risk past the pause line; the policy is off while they land.
+    // Sixty certain verdicts push the risk past the pause line; the policy is off while they land.
     const t0 = new Date(NOW.getTime() + 2 * DAY_MS);
-    for (let i = 0; i < 12; i += 1) {
+    for (let i = 0; i < 60; i += 1) {
       await judged(100, t0);
       await applyJudgedSample(db, { ...S, autoPause: false }, { teamId, score: 100, now: t0 });
     }
@@ -1001,7 +1001,7 @@ describe("the review hold", () => {
     // The samples taken before the hold are judged after it and carry the
     // risk past the alert and pause lines.
     const backlog = [];
-    for (let i = 1; i <= 20; i++) {
+    for (let i = 1; i <= 60; i++) {
       backlog.push(
         await applyJudgedSample(db, S, {
           teamId,

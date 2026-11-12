@@ -518,8 +518,8 @@ describe("console.monitor", () => {
       judge: { on: false },
       today: { sampled: 0, judged: 0, unjudged: 0, flagged: 0 },
       openFlags: 0,
-      flagRisk: 0.5,
-      alertRisk: 0.7,
+      flagRisk: 0.85,
+      alertRisk: 0.9,
     });
     expect(got.settings.find((s) => s.key === "rampRate")).toMatchObject({ fallback: 0.25 });
   });
@@ -583,14 +583,14 @@ describe("console.monitor", () => {
       operator().console.monitor.settings.update({ teamDailyCap: -1 }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(
-      operator().console.monitor.settings.update({ flagRisk: 0.75 }),
+      operator().console.monitor.settings.update({ flagRisk: 0.95 }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "thresholds_order" });
     await expect(
       operator().console.monitor.settings.update({ alertRisk: 0.9, pauseRisk: 0.8 }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "thresholds_order" });
     expect(
       (await operator().console.monitor.settings.get()).settings.find((s) => s.key === "flagRisk"),
-    ).toMatchObject({ value: 0.5 });
+    ).toMatchObject({ value: 0.85 });
   });
 
   it("refuses a count past its int4 column, storing nothing", async () => {
@@ -707,7 +707,7 @@ describe("console.monitor", () => {
       .insert(schema.teamStandings)
       .values({ teamId: flagged, guardrail: "ok", monitorRisk: 0.62 });
     const list = await operator().console.safety.list({ sort: "risk", dir: "desc" });
-    expect(list.thresholds).toEqual({ flagRisk: 0.5, alertRisk: 0.7 });
+    expect(list.thresholds).toEqual({ flagRisk: 0.85, alertRisk: 0.9 });
     expect(list.items[0]).toMatchObject({
       teamId: flagged,
       reason: "monitor",

@@ -410,13 +410,13 @@ describe("standings", () => {
 
 describe("the monitor trigger", () => {
   it("flags on the risk line after the rate triggers and before the score, honouring the setting", () => {
-    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.5, monitorSamples: 22 }))).toEqual({
+    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.85, monitorSamples: 22 }))).toEqual({
       reason: "monitor",
-      detail: { risk: 0.5, samples: 22 },
+      detail: { risk: 0.85, samples: 22 },
     });
-    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.49 }))).toBeNull();
+    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.84 }))).toBeNull();
     expect(
-      flagTrigger(standing({ teamId: "m", monitorRisk: 0.49 }), { monitorFlagRisk: 0.4 })?.reason,
+      flagTrigger(standing({ teamId: "m", monitorRisk: 0.84 }), { monitorFlagRisk: 0.4 })?.reason,
     ).toBe("monitor");
     expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.9, scoreTenths: 10 }))?.reason).toBe(
       "monitor",
@@ -429,8 +429,8 @@ describe("the monitor trigger", () => {
 
 describe("the monitor flag's evidence", () => {
   it("wants an abuse verdict from the flag score beside the risk", () => {
-    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.6, monitorAbuse: 0 }))).toBeNull();
-    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.6, monitorAbuse: 2 }))?.reason).toBe(
+    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.9, monitorAbuse: 0 }))).toBeNull();
+    expect(flagTrigger(standing({ teamId: "m", monitorRisk: 0.9, monitorAbuse: 2 }))?.reason).toBe(
       "monitor",
     );
   });
@@ -439,9 +439,9 @@ describe("the monitor flag's evidence", () => {
     const teamId = await createTeam(db, "monitor-kept");
     const open = async () =>
       (await flagsOf(teamId)).filter((f) => f.status === "open").map((f) => f.reason);
-    await syncTeamFlags(db, [standing({ teamId, monitorRisk: 0.7 })], new Date(), []);
+    await syncTeamFlags(db, [standing({ teamId, monitorRisk: 0.95 })], new Date(), []);
     expect(await open()).toEqual(["monitor"]);
-    const quiet = standing({ teamId, monitorRisk: 0.6, monitorAbuse: 0 });
+    const quiet = standing({ teamId, monitorRisk: 0.9, monitorAbuse: 0 });
     await syncTeamFlags(db, [quiet], new Date(), []);
     expect(await open()).toEqual(["monitor"]);
     await syncTeamFlags(db, [{ ...quiet, monitorRisk: 0.4 }], new Date(), []);

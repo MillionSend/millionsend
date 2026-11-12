@@ -1856,9 +1856,9 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | Uma anomalia (uma checagem de domínio de link, encurtador ou padrão de phishing falhando, menos de 100 caracteres de texto com imagens ou arquivos levando a mensagem, um anexo) multiplica a taxa; duas forçam a amostra |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Sorteios depois do envio por equipe por dia UTC; além disso param em silêncio. E-mail avaliado antes do SES não conta nem tem limite |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Sorteios depois do envio na instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
-| `MONITOR_FLAG_RISK` | 0.5 | A equipe é amostrada quatro vezes mais e recebe a sinalização `monitor` com uma avaliação de abuso a partir de `MONITOR_FLAG_SCORE` nos últimos 7 dias; a sinalização fica até o risco voltar abaixo deste valor |
-| `MONITOR_ALERT_RISK` | 0.7 | O operador é avisado por e-mail, uma vez por equipe por dia |
-| `MONITOR_PAUSE_RISK` | 0.85 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |
+| `MONITOR_FLAG_RISK` | 0.85 | A equipe é amostrada quatro vezes mais e recebe a sinalização `monitor` com uma avaliação de abuso a partir de `MONITOR_FLAG_SCORE` nos últimos 7 dias; a sinalização fica até o risco voltar abaixo deste valor |
+| `MONITOR_ALERT_RISK` | 0.9 | O operador é avisado por e-mail, uma vez por equipe por dia |
+| `MONITOR_PAUSE_RISK` | 0.95 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
 | `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação, e a sinalização `monitor` pede uma avaliação de abuso a partir dela nos últimos 7 dias |
 | `MONITOR_HOLD_SCORE` | 90 | Só equipes novas: uma avaliação do tipo phishing a partir desta pontuação pausa a equipe para revisão |
