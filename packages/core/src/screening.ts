@@ -10,6 +10,7 @@ import {
   isNotNull,
   isNull,
   lte,
+  notExists,
   or,
   type SQL,
   sql,
@@ -62,7 +63,7 @@ import { releaseQuota } from "./quota.js";
 import { teamMemberEmails } from "./receiving/inbox-routing.js";
 import { parseSingleSender } from "./sender-address.js";
 import { fetchTeamQuota } from "./team-plan.js";
-import { DAY_MS, nextUtcDayStart, utcDay } from "./utc-day.js";
+import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
  * Screening before SES: which mail waits for the judge's verdict before it
@@ -107,7 +108,12 @@ const SCREEN_STALE_MS = 10 * 60_000;
 export const SCREEN_OUTSTANDING_MAX = 20;
 /** More new destinations than this in one message are not judged: an operator decides. */
 export const NOVEL_DESTINATIONS_MAX = 20;
-/** A team's daily screenings of mail for its new destinations; past it such mail waits a day. */
+/**
+ * The sets of new destinations a team's mail has screened today, which
+ * bounds the judge calls its mail to new destinations can force. Past it
+ * such mail is judged after sending under the team's daily sample cap, or,
+ * while the team is new, parks for an operator.
+ */
 export const DESTINATION_SCREENS_PER_DAY = 200;
 /**
  * A verdict clears a message's new destinations only under this score,
@@ -1016,6 +1022,11 @@ export type ScreenDecision =
       action: "send";
       sample: { id: string; unjudged: boolean } | null;
       probation?: boolean | undefined;
+      /**
+       * Its new destinations were not screened for it (startScreening): it
+       * is judged after the send, under the team's daily sample cap.
+       */
+      afterSend?: boolean | undefined;
     }
   /** Wait: run the send again at `until`, or when the judge re-queues it (null). */
   | { action: "wait"; until: Date | null }
@@ -1026,9 +1037,11 @@ export type ScreenDecision =
    * for ("destination"), its images or files were not cleared ("media",
    * see mediaParks; a new team's flagged file parks on the send path's own
    * read, before any verdict), or the judge read cold shared-domain mail as
-   * phishing ("recipient").
+   * phishing ("recipient"). `unjudged`: the new destinations of a new
+   * team's mail parked past DESTINATION_SCREENS_PER_DAY, which no verdict
+   * tells the operator of.
    */
-  | { action: "park"; reason: ScreenParkReason };
+  | { action: "park"; reason: ScreenParkReason; unjudged?: readonly string[] | undefined };
 
 const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
 
@@ -1036,9 +1049,13 @@ const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
  * Starts screening an email that has a reason and no sample: more new
  * destinations than NOVEL_DESTINATIONS_MAX park for an operator unjudged; a
  * team with SCREEN_OUTSTANDING_MAX samples already waiting on the judge
- * waits its turn; one past its DESTINATION_SCREENS_PER_DAY waits for the
- * next UTC day when a new destination is the only reason. None of these
- * ever sends the email unscreened.
+ * waits its turn. When a new destination is the only reason, mail whose new
+ * destinations all sat in one message screened today needs no screening of
+ * its own: it waits on that verdict while it is pending, and once the
+ * verdict held and parked nothing it is sent and judged after sending. Past
+ * the day's DESTINATION_SCREENS_PER_DAY sets, such mail of a team past new
+ * is sent and judged after sending, and a new team's parks for an operator.
+ * None of these waits for the next day.
  */
 async function startScreening(
   db: Db,
@@ -1047,6 +1064,7 @@ async function startScreening(
   input: {
     email: { id: string; teamId: string; broadcastId: string | null };
     read: ScreeningRead;
+    tier: MonitorTier;
     unsafe: boolean;
     now: Date;
   },
@@ -1054,6 +1072,61 @@ async function startScreening(
   const { email, read, now } = input;
   if (read.novel.length > NOVEL_DESTINATIONS_MAX) return { action: "park", reason: "destination" };
   const unsafe = read.reasons.includes("media") && input.unsafe;
+  const today = and(
+    eq(ms.teamId, email.teamId),
+    gte(ms.createdAt, new Date(`${utcDay(now)}T00:00:00Z`)),
+    eq(ms.screening, true),
+    inArray(ms.kind, ["destination", "broadcast_copy"]),
+  );
+  const key = [...read.novel].sort();
+  const destinationOnly = read.reasons.length === 1 && read.reasons[0] === "destination";
+  // What never clears is judged on every message: one verdict says nothing of
+  // where the next shortened or unreadable link leads.
+  const repeatable = key.every(
+    (d) => d !== UNRESOLVED_DESTINATION && !isShortener(d) && !isLoopbackHost(d),
+  );
+  if (destinationOnly && repeatable) {
+    // The judge rewrites a sample's destinations as every new one its message
+    // carried, so containment also matches a broadcast copy, whose own set
+    // leaves out the broadcast's. A verdict from before a destination's
+    // revocation no longer speaks for it.
+    const seen = await db
+      .select()
+      .from(ms)
+      .where(
+        and(
+          today,
+          sql`${ms.destinations} @> ${JSON.stringify(key)}::jsonb`,
+          notExists(
+            db
+              .select({ one: sql`1` })
+              .from(td)
+              .where(
+                and(
+                  eq(td.teamId, ms.teamId),
+                  inArray(td.domain, key),
+                  gte(td.revokedAt, ms.createdAt),
+                ),
+              ),
+          ),
+        ),
+      );
+    const cleared = seen.some(
+      (sample) =>
+        sample.status === "judged" &&
+        sample.sparedHold === null &&
+        !isHoldVerdict(sample, s.holdRepeatScore) &&
+        !mediaParks(sample.mediaIssues, input.tier),
+    );
+    if (cleared) return { action: "send", sample: null, afterSend: true };
+    const pending = seen.some(
+      (sample) =>
+        sample.status === "pending" &&
+        now.getTime() - sample.createdAt.getTime() <= SCREEN_STALE_MS,
+    );
+    // The judge re-queues only the sample's own email: this one looks again.
+    if (pending) return { action: "wait", until: new Date(now.getTime() + SCREEN_RETRY_MS) };
+  }
   const [outstanding] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(ms)
@@ -1062,22 +1135,20 @@ async function startScreening(
   if (full && !unsafe) return { action: "wait", until: new Date(now.getTime() + SCREEN_RETRY_MS) };
   let destination = read.reasons.includes("destination");
   if (destination && !full) {
+    // A sample without destinations counts as a set of its own.
     const [screened] = await db
-      .select({ n: sql<number>`count(*)::int` })
+      .select({
+        n: sql<number>`count(distinct coalesce(${ms.destinations}::text, ${ms.id}::text))::int`,
+      })
       .from(ms)
-      .where(
-        and(
-          eq(ms.teamId, email.teamId),
-          gte(ms.createdAt, new Date(`${utcDay(now)}T00:00:00Z`)),
-          eq(ms.screening, true),
-          inArray(ms.kind, ["destination", "broadcast_copy"]),
-        ),
-      );
+      .where(today);
     if ((screened?.n ?? 0) >= DESTINATION_SCREENS_PER_DAY) {
-      // Another reason screens it anyway, as that reason's sample.
-      if (read.reasons.length === 1 && !unsafe) {
-        return { action: "wait", until: nextUtcDayStart(now) };
+      if (destinationOnly) {
+        return input.tier === "new"
+          ? { action: "park", reason: "destination", unjudged: key }
+          : { action: "send", sample: null, afterSend: true };
       }
+      // Another reason screens it anyway, as that reason's sample.
       destination = false;
     }
   }
@@ -1093,6 +1164,7 @@ async function startScreening(
           : read.reasons.includes("first_window")
             ? "first_sends"
             : "anomaly",
+      destinations: destination ? key : undefined,
       now,
       screening: true,
     });
@@ -1106,7 +1178,7 @@ async function startScreening(
 /**
  * The gate in front of SES for one queued customer email, on when the
  * judge (`deps`) and the auto-hold are. An email with a screening reason
- * and no verdict waits for one (startScreening); a phishing-type verdict
+ * and no verdict waits for one, or goes or parks as startScreening says; a phishing-type verdict
  * that held nothing waits SCREEN_HOLD_WAIT_MS more while its team is new
  * (first-window mail, broadcast copies, and mail whose new link domain's age
  * is not known), in case the burst it belongs to holds the team, unless the
@@ -1165,6 +1237,7 @@ export async function screenBeforeSend(
       return startScreening(db, deps, s, {
         email,
         read,
+        tier: team.tier,
         unsafe: input.media?.unsafe === true,
         now,
       });

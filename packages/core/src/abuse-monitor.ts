@@ -448,6 +448,8 @@ export async function recordMonitorSample(
     screening?: boolean | undefined;
     /** Mail to a destination cleared within its probation: no team cap applies. */
     novelty?: boolean | undefined;
+    /** The new destinations screening keys the sample by until the judge writes its own. */
+    destinations?: string[] | undefined;
   },
 ): Promise<string | null> {
   if (!input.screening) {
@@ -476,6 +478,7 @@ export async function recordMonitorSample(
       broadcastId: input.broadcastId,
       kind: input.kind,
       screening: input.screening ?? false,
+      destinations: input.destinations,
       createdAt: input.now,
     })
     .returning({ id: ms.id });

@@ -7,7 +7,6 @@ import {
   MONITOR_SETTING_DEFAULTS,
   type MonitorSettings,
   NOVEL_DESTINATIONS_MAX,
-  nextUtcDayStart,
   releaseWaitingEmails,
   SCREEN_OUTSTANDING_MAX,
   sealAttachments,
@@ -68,6 +67,7 @@ const sendDeps = (settings: Partial<MonitorSettings> = {}): SendDeps => ({
       void judgeQueue.push({ sampleId, screening: opts?.screening ?? false }),
   },
   reschedule: async (emailId, at) => void rescheduled.push({ emailId, at }),
+  mailer: { send: async (_to, m) => void mails.push(m.kind) },
 });
 
 const verdict = (score: number): AbuseJudge => ({
@@ -304,21 +304,60 @@ it(`parks mail with more than ${NOVEL_DESTINATIONS_MAX} new destinations for the
   expect(await sampleOf(id)).toBeUndefined();
 });
 
-it("holds mail with a new destination past the team's daily budget until the next UTC day", async () => {
-  const t = await team("budget", "established");
-  await db.insert(schema.monitorSamples).values(
-    Array.from({ length: DESTINATION_SCREENS_PER_DAY }, () => ({
-      teamId: t.teamId,
+/** Screening samples of the day's new destinations, each a set of its own. */
+const screenedSets = (teamId: string, n: number) =>
+  db.insert(schema.monitorSamples).values(
+    Array.from({ length: n }, () => ({
+      teamId,
       kind: "destination" as const,
       screening: true,
       status: "judged" as const,
     })),
   );
+
+it("screens a set of new destinations once a day: mail repeating it waits on that verdict, then is judged after sending", async () => {
+  const t = await team("repeat-set", "established");
+  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY - 2);
+  const first = await email(t, link("repeat.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: first })).toBe("deferred");
+  const sample = await sampleOf(first);
+  expect(sample).toMatchObject({ screening: true, destinations: ["repeat.example"] });
+
+  const again = await email(t, link("repeat.example"));
+  const before = Date.now();
+  expect(await sendEmail(db, sendDeps(), { emailId: again })).toBe("deferred");
+  expect(rescheduled.at(-1)?.at.getTime()).toBeGreaterThanOrEqual(before + 2 * 60_000);
+  expect(await sampleOf(again)).toBeUndefined();
+
+  // Phishing-type under the hold line: neither clears the destination nor holds the mail.
+  await judge(sample?.id ?? "", verdict(72));
+  expect(await sendEmail(db, sendDeps(), { emailId: again })).toBe("sent");
+  expect(await sampleOf(again)).toMatchObject({ kind: "destination", screening: false });
+
+  // The repeat took no set: the day's last one still screens.
+  const other = await email(t, link("other.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: other })).toBe("deferred");
+  expect(await sampleOf(other)).toMatchObject({ screening: true, status: "pending" });
+});
+
+it("sends a team past new's mail with a new destination past the day's screenings, judged after sending", async () => {
+  const t = await team("budget", "established");
+  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
   const id = await email(t, link("over-budget.example"));
-  const now = Date.now();
-  expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("deferred");
-  expect(rescheduled).toEqual([{ emailId: id, at: nextUtcDayStart(now) }]);
+  expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("sent");
+  expect(sesCalls).toEqual([id]);
+  expect(rescheduled).toEqual([]);
+  expect(await sampleOf(id)).toMatchObject({ kind: "destination", screening: false });
+});
+
+it("parks a new team's mail with a new destination past the day's screenings, and tells the operator", async () => {
+  const t = await team("budget-new", "ramp");
+  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
+  const id = await email(t, link("over-budget-new.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("parked");
+  expect(await row(id)).toMatchObject({ latestStatus: "queued_quota", parkReason: "destination" });
   expect(await sampleOf(id)).toBeUndefined();
+  expect(mails).toEqual(["monitor.destination_parked"]);
   expect(sesCalls).toEqual([]);
 });
 

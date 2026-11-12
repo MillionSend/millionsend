@@ -1605,9 +1605,16 @@ pausar a equipe, e a mesma mensagem com outro nome ainda pausa a equipe. Um
 aviso que traz um domínio novo ao lado do site já liberado mantém a liberação
 do site enquanto o novo é avaliado; outro domínio liberado no aviso, como a
 página da transportadora, perde a liberação como antes.
-Essas amostras não contam para nenhum limite diário; uma equipe tem 200 delas
-por dia, e depois disso o e-mail dela com um destino novo espera o próximo dia
-UTC.
+Essas amostras não contam para nenhum limite diário. Um e-mail cujos destinos
+novos estavam todos numa mensagem avaliada no mesmo dia UTC não é avaliado de
+novo (a menos que um seja um encurtador, um endereço de loopback ou um link que
+não dá para ler): espera esse veredito e, quando ele não pausou nem deixou nada em espera,
+sai e é avaliado depois do envio, dentro do limite diário de amostras da
+equipe. O e-mail de uma equipe passa pela avaliação de 200 conjuntos de
+destinos novos por dia; depois deles, esse e-mail de uma equipe que já passou
+de New sai e é avaliado depois do envio do mesmo jeito, e o de uma equipe New
+fica em espera na lista de revisão sem avaliação, e o operador recebe um
+e-mail no máximo uma vez por dia por equipe. Nada disso espera o dia seguinte.
 
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma

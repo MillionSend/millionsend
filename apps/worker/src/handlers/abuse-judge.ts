@@ -8,6 +8,7 @@ import {
   clearDestinations,
   clientIdentitySite,
   DESTINATION_REVOKE_SCORE,
+  DESTINATION_SCREENS_PER_DAY,
   decryptEmailBody,
   destinationVerdictParks,
   type EmailAttachment,
@@ -446,14 +447,15 @@ async function resumeScreened(
  * The operator hears once a day per team, per kind, that mail to a new
  * destination was parked, or that a cleared destination drew a
  * phishing-type verdict and is new again; the review list holds every
- * parked email.
+ * parked email. A null verdict: the mail parked unjudged, past the team's
+ * screenings of the day.
  */
-async function notifyDestination(
+export async function notifyDestination(
   db: Db,
-  deps: JudgeDeps,
+  deps: Pick<JudgeDeps, "mailer" | "appBaseUrl">,
   kind: "monitor.destination_parked" | "monitor.destination_revoked",
   teamId: string,
-  verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons">,
+  verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons"> | null,
   destinations: readonly string[],
   now: Date,
 ): Promise<void> {
@@ -465,17 +467,32 @@ async function notifyDestination(
       .select({ name: schema.teams.name })
       .from(schema.teams)
       .where(eq(schema.teams.id, teamId));
+    const judged = verdict
+      ? {
+          score: String(verdict.score),
+          verdict: [...verdict.categories, ...verdict.reasons].join(", "),
+        }
+      : null;
     await mailOperator(
       db,
       deps.mailer,
       kind,
       "/console/safety",
-      {
+      (locale) => ({
         team: team?.name ?? teamId,
-        score: String(verdict.score),
-        verdict: [...verdict.categories, ...verdict.reasons].join(", "),
         domain: destinations.slice(0, 5).join(", "),
-      },
+        ...judged,
+        ...(kind === "monitor.destination_parked"
+          ? {
+              why: accountMailPhrase({
+                locale,
+                kind,
+                key: judged ? "judged" : "unjudged",
+                values: judged ?? { n: String(DESTINATION_SCREENS_PER_DAY) },
+              }),
+            }
+          : {}),
+      }),
       deps.appBaseUrl,
     );
   } catch (err) {

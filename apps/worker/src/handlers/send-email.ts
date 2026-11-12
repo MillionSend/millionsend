@@ -66,6 +66,8 @@ import * as mimeFuncs from "nodemailer/lib/mime-funcs";
 import { MediaPoolError } from "../media/pool.js";
 import { saveMediaReview } from "../media/read.js";
 import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
+import type { SystemMailer } from "../system-mail.js";
+import { notifyDestination } from "./abuse-judge.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
 import { clearSharedTenant, isTenantNotAssociated } from "./tenants.js";
 
@@ -166,6 +168,9 @@ export interface SendDeps {
   monitor?: MonitorDeps | undefined;
   /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
   platformDomains?: ReadonlySet<string> | undefined;
+  /** Tells the operator of mail screening parked unjudged; absent, nobody is mailed. */
+  mailer?: SystemMailer | undefined;
+  appBaseUrl?: string | undefined;
   /** The parsing threads and cache the file scan uses; the process's own when absent. */
   media?: MediaDeps | undefined;
   tracking?:
@@ -780,6 +785,7 @@ async function sendQueued(
   // never customer content, so they never wait.
   let screened: { id: string; unjudged: boolean } | null = null;
   let probation = false;
+  let afterSend = false;
   let media: SendMedia | null = null;
   if (deps.monitor && !systemMail && !onboarding) {
     // Read once for the linkage check and the gate.
@@ -824,6 +830,17 @@ async function sendQueued(
     }
     if (gate.action === "park") {
       await parkQueued(db, email, `screening parked it (${gate.reason})`, gate.reason);
+      if (gate.unjudged) {
+        await notifyDestination(
+          db,
+          deps,
+          "monitor.destination_parked",
+          email.teamId,
+          null,
+          gate.unjudged,
+          new Date(),
+        );
+      }
       if (gate.reason === "media" && scan) {
         try {
           await saveMediaReview(db, deps.keyring, email, scanReview(scan), { keep: true });
@@ -835,6 +852,7 @@ async function sendQueued(
     }
     screened = gate.sample;
     probation = gate.probation === true;
+    afterSend = gate.afterSend === true;
   }
 
   // App-layer engagement tracking: when the domain has click or open tracking
@@ -1257,6 +1275,18 @@ async function sendQueued(
           emailId: email.id,
           broadcastId: null,
           kind: "agent_first_contact",
+          now,
+        });
+      } else if (afterSend) {
+        // Screening let it out unjudged: always drawn, within the team's
+        // daily cap, which bounds what such mail costs in judge calls.
+        const now = new Date();
+        await noteAcceptedSend(db, email.teamId, now);
+        await recordMonitorSample(db, deps.monitor, await deps.monitor.settings(), {
+          teamId: email.teamId,
+          emailId: email.id,
+          broadcastId: email.broadcastId,
+          kind: email.broadcastId ? "broadcast_copy" : "destination",
           now,
         });
       } else {

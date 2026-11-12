@@ -1532,9 +1532,16 @@ such notices to them go out without the 2-minute wait or a park and never
 hold the team, while the same message under another name is held as before.
 A notice that adds a domain beside its released site keeps the site's
 clearance while the new one is screened; any other released name in it, a
-carrier's page included, is taken back as before. These samples count against no daily cap; a team has 200 of
-them a day, past which its mail with a new destination waits for the next UTC
-day.
+carrier's page included, is taken back as before. These samples count against no daily cap.
+Mail whose new destinations all sat in one message screened the same UTC day
+is not screened again (unless one is a shortener, a loopback address or a
+link that cannot be read): it waits for that verdict and, once the verdict held
+and parked nothing, is sent and judged after it goes out, within the team's
+daily sample cap. A team's mail screens 200 sets of new destinations a day;
+past them, such mail of a team past New is sent and judged after it goes out
+the same way, and a New-tier team's is parked for the review list unjudged,
+and the operator is mailed at most once a day per team. None of it waits for
+the next day.
 
 **The review list.** Trust & safety lists every unsent email screening
 stopped, grouped by team: parked behind a review hold, waiting out its 2
