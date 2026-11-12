@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@millionsend/core": "workspace:*",
-    "pg-boss": "^12.38.0"
+    "pg-boss": "^12.38.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
