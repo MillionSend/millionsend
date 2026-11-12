@@ -236,7 +236,7 @@ it("takes a platform name's clearance back unless an operator gave it, and then 
   expect(mails).not.toContain("monitor.destination_revoked");
   const branded = await email(t, link("my-app.vercel.app"));
   expect(await sendEmail(db, sendDeps(), { emailId: branded })).toBe("sent");
-  await judge((await sampleOf(branded))?.id ?? "", verdict(85));
+  await judge((await sampleOf(branded))?.id ?? "", verdict(92));
   // The operator heard of a revoke today already; the clearance still goes.
   expect((await clearance(t.teamId, "my-app.vercel.app"))?.revokedAt).not.toBeNull();
 });
@@ -271,6 +271,12 @@ it("takes a destination's clearance back when mail to it is read as phishing aft
   const after = await sampleOf(lure);
   expect(after).toMatchObject({ kind: "destination", screening: false, status: "pending" });
   await judge(after?.id ?? "", verdict(85));
+  // Under 90 the clearance stands.
+  expect(await clearance(t.teamId, "agency-client.example")).toMatchObject({ revokedAt: null });
+  expect(mails).not.toContain("monitor.destination_revoked");
+  const sure = await email(t, link("agency-client.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: sure })).toBe("sent");
+  await judge((await sampleOf(sure))?.id ?? "", verdict(92));
   expect((await clearance(t.teamId, "agency-client.example"))?.revokedAt).not.toBeNull();
   expect(mails).toContain("monitor.destination_revoked");
 

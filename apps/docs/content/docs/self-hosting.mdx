@@ -1479,14 +1479,18 @@ service. A link shortener, a host every user's pages share and a mailbox
 provider are never the team's. A link that cannot be read counts as a
 destination too. A link to a loopback address (localhost and its subdomains,
 127.0.0.1, `::1`) never is: no page a sender serves is there, and it never
-clears; a private network's address is a destination like any other. A
+clears; a private network's address is a destination like any other. Nor is
+a platform nearly every sender links to (Facebook, Instagram, WhatsApp,
+YouTube, LinkedIn, X, TikTok, Google, Apple) or a mailbox provider, nor a
+name off the public web (`example.com`, `example.net`, `example.org`, a name
+under `.test`, `.invalid`, `.local` or `.internal`, a `ts.net` host). A
 verdict under 70 that names nothing phishing-type clears
 the message's destinations for the team, when it carried 5 new ones at most;
 so does releasing mail parked for a new destination, or waiting after a
 verdict, while releasing mail parked for its media or a failing judge clears
 none. A link shortener, or a link that cannot be read, is never cleared. For 7
 days after a destination clears, every email to it is judged after it is sent,
-and a phishing-type verdict from 80 on one takes the clearance back: mail to
+and a phishing-type verdict from 90 on one takes the clearance back: mail to
 it is judged before SES again, no verdict clears it again (an operator's
 release does), and the operator is mailed at most once a day per team. A
 message with more than 20 new destinations is not judged: it waits for the

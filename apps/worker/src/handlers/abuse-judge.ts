@@ -7,6 +7,7 @@ import {
   claimNotification,
   clearDestinations,
   clientIdentitySite,
+  DESTINATION_REVOKE_SCORE,
   decryptEmailBody,
   destinationVerdictParks,
   type EmailAttachment,
@@ -276,7 +277,7 @@ async function judgePending(
     (await deps.linkDomainAged?.(standing.all, now)) === true;
   const platformLink = vouched || (platformShape && sample.screening) || clientSpared;
   // Mail to a destination that cleared within its probation, read as
-  // phishing: the clearance goes, and the operator hears of it, unless an
+  // phishing from DESTINATION_REVOKE_SCORE: the clearance goes, and the operator hears of it, unless an
   // operator's release vouched for this shape on it. A client business's
   // notice keeps its released site's clearance while a link new beside it
   // is screened.
@@ -287,7 +288,7 @@ async function judgePending(
     standing.probation.every((d) => vouchedNames.has(d));
   const probation = standing.probation.filter((d) => d !== clientSite || !vouchedNames.has(d));
   const revoking =
-    !platformProbation && !vouched && isHoldVerdict(verdict, settings.holdRepeatScore)
+    !platformProbation && !vouched && isHoldVerdict(verdict, DESTINATION_REVOKE_SCORE)
       ? probation
       : [];
   // The verdict and its fold commit together: a crash between them would

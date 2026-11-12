@@ -1543,7 +1543,11 @@ usuários dividem o mesmo nome e um provedor de e-mail nunca são da equipe. Um 
 um link para um endereço de loopback (localhost e seus subdomínios,
 127.0.0.1, `::1`) nunca conta: ali não tem nenhuma página de quem envia, e ele
 nunca se torna conhecido. Um endereço de rede privada conta como qualquer
-outro destino.
+outro destino. Também nunca contam uma plataforma para a qual quase todo
+remetente aponta (Facebook, Instagram, WhatsApp, YouTube, LinkedIn, X,
+TikTok, Google, Apple) ou um provedor de e-mail, nem um nome fora da internet
+pública (`example.com`, `example.net`, `example.org`, um nome sob `.test`,
+`.invalid`, `.local` ou `.internal`, um host `ts.net`).
 Uma avaliação abaixo de 70 que não aponta nada do tipo phishing torna os
 destinos da mensagem conhecidos da equipe, quando ela levava no máximo 5
 destinos novos; liberar um e-mail em espera por um destino novo, ou esperando
@@ -1551,7 +1555,7 @@ depois de uma avaliação, também torna, e liberar um e-mail em espera pelas
 imagens ou arquivos, ou por uma falha do avaliador, não torna nenhum. Um
 encurtador de links, ou um link que não dá para ler, nunca se torna conhecido.
 Por 7 dias depois que um destino se torna conhecido, todo e-mail para ele é
-avaliado depois do envio, e uma avaliação do tipo phishing a partir de 80 num
+avaliado depois do envio, e uma avaliação do tipo phishing a partir de 90 num
 deles desfaz isso: e-mails para ele voltam a ser avaliados antes do SES,
 nenhuma avaliação o torna conhecido de novo (a liberação do operador torna), e
 o operador recebe e-mail no máximo uma vez por dia por equipe. Uma mensagem

@@ -51,10 +51,12 @@ import {
 import type { MonitorSettings } from "./monitor-settings.js";
 import {
   asciiHostname,
+  isDomainOrSubdomain,
   isLoopbackHost,
   ownerDomain,
   registeredName,
   registrableDomain,
+  topLevelLabel,
 } from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
 import { teamMemberEmails } from "./receiving/inbox-routing.js";
@@ -115,6 +117,8 @@ export const DESTINATION_CLEAR_BELOW = 70;
 export const DESTINATIONS_CLEARED_MAX = 5;
 /** For this long after a destination clears, every email to it is judged after sending. */
 export const DESTINATION_PROBATION_DAYS = 7;
+/** A verdict on mail to a destination in its probation takes its clearance back from this score. */
+export const DESTINATION_REVOKE_SCORE = 90;
 /** Link-age lookups one verdict waits on; the rest are looked up in the background. */
 export const LINK_AGE_LOOKUPS_PER_VERDICT = 3;
 /** A failed link-age lookup is not asked again for this long. */
@@ -196,7 +200,49 @@ export function messageDestinations(input: {
     if (domain) hosts.push(domain);
   }
   const own = new Set([...input.verifiedDomains.map(ownerDomain), ...(input.ignore ?? [])]);
-  return [...new Set(hosts.map(ownerDomain))].filter((d) => d !== "" && !own.has(d)).sort();
+  return [...new Set(hosts.map(ownerDomain))]
+    .filter((d) => d !== "" && !own.has(d) && !isUnscreenedDestination(d))
+    .sort();
+}
+
+/**
+ * Platforms and consumer mailboxes nearly every sender links to (a footer's
+ * social icons, a WhatsApp button, a store badge, a support Gmail behind a
+ * mailto): no team serves their pages, so mail to them is never screened
+ * for them nor loses a clearance over them.
+ */
+export const MAJOR_PLATFORM_DOMAINS: ReadonlySet<string> = new Set([
+  ...PUBLIC_MAILBOX_DOMAINS,
+  "facebook.com",
+  "instagram.com",
+  "wa.me",
+  "whatsapp.com",
+  "youtube.com",
+  "linkedin.com",
+  "x.com",
+  "twitter.com",
+  "tiktok.com",
+  "google.com",
+  "apple.com",
+]);
+
+const UNREACHABLE_TLDS: ReadonlySet<string> = new Set(["test", "invalid", "local", "internal"]);
+const UNREACHABLE_PARENTS = ["example.com", "example.net", "example.org", "ts.net"];
+
+/**
+ * A destination that is no destination: a major platform
+ * (MAJOR_PLATFORM_DOMAINS), or a name off the public web (a reserved last
+ * label, a documentation domain, a tailnet's ts.net host). A loopback address
+ * is handled apart: see destinationStanding. UNRESOLVED_DESTINATION sits
+ * under .invalid yet stands for a link that could lead anywhere.
+ */
+function isUnscreenedDestination(domain: string): boolean {
+  if (domain === UNRESOLVED_DESTINATION) return false;
+  return (
+    MAJOR_PLATFORM_DOMAINS.has(ownerDomain(domain)) ||
+    UNREACHABLE_TLDS.has(topLevelLabel(domain)) ||
+    UNREACHABLE_PARENTS.some((parent) => isDomainOrSubdomain(domain, parent))
+  );
 }
 
 const PUBLIC_MAILBOXES: ReadonlySet<string> = new Set(PUBLIC_MAILBOX_DOMAINS);
@@ -450,9 +496,10 @@ export async function spareWaitingSamples(
 }
 
 /**
- * Mail to these destinations drew a phishing-type verdict within their
- * probation: they are new again until an operator releases mail to them.
- * The ones revoked now.
+ * Mail to these destinations drew a phishing-type verdict from
+ * DESTINATION_REVOKE_SCORE within their probation: they are new again until
+ * an operator releases mail to them. A major platform or an unreachable name
+ * (isUnscreenedDestination) is never revoked. The ones revoked now.
  */
 export async function revokeDestinations(
   db: Db,
@@ -460,11 +507,12 @@ export async function revokeDestinations(
   destinations: readonly string[],
   now: Date,
 ): Promise<string[]> {
-  if (destinations.length === 0) return [];
+  const domains = destinations.filter((d) => !isUnscreenedDestination(d) && !isLoopbackHost(d));
+  if (domains.length === 0) return [];
   const rows = await db
     .update(td)
     .set({ revokedAt: now })
-    .where(and(eq(td.teamId, teamId), inArray(td.domain, [...destinations]), isNull(td.revokedAt)))
+    .where(and(eq(td.teamId, teamId), inArray(td.domain, domains), isNull(td.revokedAt)))
     .returning({ domain: td.domain });
   return rows.map((row) => row.domain);
 }

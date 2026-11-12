@@ -76,7 +76,29 @@ describe("a message's destinations, read as the judge reads its links", () => {
         replyTo: null,
         verifiedDomains: ["acme.dev"],
       }),
-    ).toEqual(["evil-pay.com", "google.com", "pix-promo.com", "secure-update.net"]);
+    ).toEqual(["evil-pay.com", "pix-promo.com", "secure-update.net"]);
+  });
+
+  it("are never a major platform, a consumer mailbox or a name off the public web", () => {
+    const hosts = [
+      "www.facebook.com",
+      "wa.me",
+      "m.youtube.com",
+      "localhost",
+      "docs.example.com",
+      "shop.test",
+      "printer.local",
+      "box.tailnet-1234.ts.net",
+      "evil-pay.com",
+    ];
+    expect(
+      messageDestinations({
+        html: hosts.map((host) => `<a href="https://${host}/">x</a>`).join(""),
+        text: null,
+        replyTo: ["Help <help@gmail.com>"],
+        verifiedDomains: [],
+      }),
+    ).toEqual(["evil-pay.com", "localhost"]);
   });
 
   it("are none for a team on tx.acme.com.br linking and replying to acme.com.br", () => {
@@ -172,7 +194,7 @@ describe("the destination registry", () => {
         text: null,
         replyTo: null,
       }),
-    ).toEqual(["gmail.com", "unverified.example"]);
+    ).toEqual(["unverified.example"]);
   });
 });
 
