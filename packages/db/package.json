@@ -22,7 +22,7 @@
   "dependencies": {
     "@millionsend/config": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "postgres": "^3.4.7",
+    "postgres": "^4.1.0",
     "tsx": "^4.23.15"
   },
   "devDependencies": {
