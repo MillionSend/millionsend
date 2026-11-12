@@ -254,7 +254,7 @@ it("emails the operator on the alert and on the pause, in that team's review lin
     .values({ teamId: fresh, sentTotal: 2, firstSendAt: new Date(NOW.getTime() - 3600_000) });
   const judge = fakeJudge(async () => ({ score: 100 }));
   const ids: string[] = [];
-  for (let i = 0; i < 12; i += 1) {
+  for (let i = 0; i < 60; i += 1) {
     const [row] = await db
       .insert(schema.monitorSamples)
       .values({
@@ -303,7 +303,7 @@ it("names the team's tier in the operator's language, never by its key", async (
       firstSendAt: new Date(NOW.getTime() - 10 * 86_400_000),
     });
     const judge = fakeJudge(async () => ({ score: 100 }));
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 30; i += 1) {
       const [row] = await db
         .insert(schema.monitorSamples)
         .values({
@@ -346,7 +346,7 @@ it("still emails the operator about a suspended team, through the system mailer"
     });
     const judge = fakeJudge(async () => ({ score: 100 }));
     const systemMailer = createSystemMailer({ db, keyring, enqueueSend: async () => {} });
-    for (let i = 0; i < 12; i += 1) {
+    for (let i = 0; i < 60; i += 1) {
       const [row] = await db
         .insert(schema.monitorSamples)
         .values({

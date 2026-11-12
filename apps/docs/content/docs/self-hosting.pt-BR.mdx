@@ -1534,20 +1534,14 @@ destino que a equipe ainda não conhece: o domínio dono de um link que um
 cliente de e-mail seguiria (uma âncora, uma área de mapa de imagem, uma ação
 de formulário, um link em SVG ou um URL do texto, lido como o navegador lê e
 passando por até três redirecionadores; um nome como `x.pages.dev`, de um
-serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios que
-a equipe tem: os dos seus domínios verificados e os dos e-mails de login dos
-membros depois de verificados, a não ser que o endereço seja de um provedor
-de e-mail (Gmail, Outlook, UOL e afins) ou de um serviço de e-mail
-descartável. Um encurtador de links, um serviço em que as páginas de todos os
-usuários dividem o mesmo nome e um provedor de e-mail nunca são da equipe. Um link que não dá para ler também conta como destino;
+serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios
+verificados da equipe. Um link que não dá para ler também conta como destino;
 um link para um endereço de loopback (localhost e seus subdomínios,
 127.0.0.1, `::1`) nunca conta: ali não tem nenhuma página de quem envia, e ele
 nunca se torna conhecido. Um endereço de rede privada conta como qualquer
-outro destino. Também nunca contam uma plataforma para a qual quase todo
-remetente aponta (Facebook, Instagram, WhatsApp, YouTube, LinkedIn, X,
-TikTok, Google, Apple) ou um provedor de e-mail, nem um nome fora da internet
-pública (`example.com`, `example.net`, `example.org`, um nome sob `.test`,
-`.invalid`, `.local` ou `.internal`, um host `ts.net`).
+outro destino. Também nunca conta um nome fora da internet pública
+(`example.com`, `example.net`, `example.org`, um nome sob `.test`,
+`.invalid`, `.local` ou `.internal`).
 Uma avaliação abaixo de 70 que não aponta nada do tipo phishing torna os
 destinos da mensagem conhecidos da equipe, quando ela levava no máximo 5
 destinos novos; liberar um e-mail em espera por um destino novo, ou esperando
@@ -1558,7 +1552,10 @@ Por 7 dias depois que um destino se torna conhecido, todo e-mail para ele é
 avaliado depois do envio, e uma avaliação do tipo phishing a partir de 90 num
 deles desfaz isso: e-mails para ele voltam a ser avaliados antes do SES,
 nenhuma avaliação o torna conhecido de novo (a liberação do operador torna), e
-o operador recebe e-mail no máximo uma vez por dia por equipe. Uma mensagem
+o operador recebe e-mail no máximo uma vez por dia por equipe. Uma plataforma
+para a qual quase todo remetente aponta (Facebook, Instagram, WhatsApp,
+YouTube, LinkedIn, X, TikTok, Google, Apple) ou um provedor de e-mail é
+avaliado como qualquer destino, mas nunca perde a liberação. Uma mensagem
 com mais de 20 destinos novos não é avaliada: fica em espera para o operador.
 Uma transmissão é avaliada antes de gravar as cópias quando o próprio HTML
 leva um destino novo, e uma cópia renderizada quando um campo do contato
@@ -1608,13 +1605,18 @@ página da transportadora, perde a liberação como antes.
 Essas amostras não contam para nenhum limite diário. Um e-mail cujos destinos
 novos estavam todos numa mensagem avaliada no mesmo dia UTC não é avaliado de
 novo (a menos que um seja um encurtador, um endereço de loopback ou um link que
-não dá para ler): espera esse veredito e, quando ele não pausou nem deixou nada em espera,
-sai e é avaliado depois do envio, dentro do limite diário de amostras da
-equipe. O e-mail de uma equipe passa pela avaliação de 200 conjuntos de
-destinos novos por dia; depois deles, esse e-mail de uma equipe que já passou
-de New sai e é avaliado depois do envio do mesmo jeito, e o de uma equipe New
-fica em espera na lista de revisão sem avaliação, e o operador recebe um
-e-mail no máximo uma vez por dia por equipe. Nada disso espera o dia seguinte.
+não dá para ler): espera esse veredito e, quando ele veio abaixo de 70 sem
+apontar nada do tipo phishing e não deixou nada em espera, sai e é avaliado
+depois do envio, todos eles, mesmo além do limite diário de amostras da
+equipe. Assim que qualquer avaliação desses destinos no dia, antes ou depois
+de um envio, for do tipo phishing a partir de 80, cada e-mail seguinte para
+eles volta a ser avaliado por conta própria. O e-mail de uma equipe passa pela
+avaliação de 200 conjuntos de destinos novos por dia, e a repetição de um
+conjunto já avaliado não gasta nenhum deles; depois deles, o e-mail que seria
+avaliado por um destino novo fica em espera na lista de revisão sem
+avaliação, em qualquer nível, e o operador recebe um e-mail no máximo uma vez
+por dia por equipe. Liberar esse e-mail o envia sem tornar os destinos dele
+conhecidos. Nada disso espera o dia seguinte.
 
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma
@@ -1679,8 +1681,10 @@ privacidade da instância (veja também o
 armazenado pelo MillionSend: o nome da equipe, os domínios verificados (mais o domínio
 registrável de cada um, a forma em que os links aparecem, quando o sufixo é
 inequívoco), os
-domínios próprios da equipe (esses, os que ela tem como descrito acima e os
-destinos para onde o operador liberou e-mails dela), os
+domínios próprios da equipe (esses e os domínios dos e-mails de login
+verificados dos membros, depois que o e-mail da equipe os tornou conhecidos
+como destinos, a não ser que o endereço seja de um provedor de e-mail ou de
+um serviço de e-mail descartável; nunca um nome que o operador liberou), os
 dias desde o primeiro envio e o plano; os cabeçalhos `From` e `Reply-To` como
 enviados; o `Subject`; a mensagem como o leitor a vê, lida da parte HTML (ou
 da parte em texto puro, quando o HTML falta ou está em branco): o texto

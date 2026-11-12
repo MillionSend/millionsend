@@ -563,15 +563,16 @@ export const en = {
   "monitor.destination_parked": {
     subject: "Content monitor parked mail to a new destination",
     body: [
-      "{team} sent mail to a destination it had not used before ({domain}). {why} That mail waits on Trust & safety, where you release it, which sends it and makes the destination known to the team, or cancel it.",
-      "The team is not held: the rest of its mail flows, and it is not told. Mail to the same destination is judged before sending until one is cleared.",
+      "{team} sent mail to a destination it had not used before ({domain}). {why}",
+      "The team is not held: the rest of its mail flows, and it is not told.",
     ],
     button: "Open review list",
     muted: ["Sent to the instance operator at most once a day per team."],
     extra: {
-      judged: "The judge scored it {score} ({verdict}).",
+      judged:
+        "The judge scored it {score} ({verdict}). That mail waits on Trust & safety, where you release it, which sends it and makes the destination known to the team, or cancel it. Mail to the same destination is judged before sending until one is cleared.",
       unjudged:
-        "It was not judged: the team is new, and its mail had already screened {n} sets of new destinations today.",
+        "It was not judged: the team's mail had already screened {n} sets of new destinations today. That mail waits on Trust & safety, where you release it, which sends it without making the destination known to the team, or cancel it. Mail to the same destination parks the same way for the rest of the UTC day, and is judged before sending from the next.",
     },
   },
   "monitor.media_blocked": {

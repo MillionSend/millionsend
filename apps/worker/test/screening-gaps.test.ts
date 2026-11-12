@@ -36,6 +36,7 @@ let judgeQueue: { sampleId: string; screening: boolean }[];
 let resent: string[];
 let rescheduled: { emailId: string; at: Date }[];
 let mails: string[];
+let mailTexts: string[];
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
@@ -50,6 +51,7 @@ beforeEach(() => {
   resent = [];
   rescheduled = [];
   mails = [];
+  mailTexts = [];
 });
 
 const sendDeps = (settings: Partial<MonitorSettings> = {}): SendDeps => ({
@@ -67,7 +69,12 @@ const sendDeps = (settings: Partial<MonitorSettings> = {}): SendDeps => ({
       void judgeQueue.push({ sampleId, screening: opts?.screening ?? false }),
   },
   reschedule: async (emailId, at) => void rescheduled.push({ emailId, at }),
-  mailer: { send: async (_to, m) => void mails.push(m.kind) },
+  mailer: {
+    send: async (_to, m) => {
+      mails.push(m.kind);
+      mailTexts.push(m.text);
+    },
+  },
 });
 
 const verdict = (score: number): AbuseJudge => ({
@@ -119,7 +126,12 @@ const judge = (
       judge: answer,
       keyring,
       settings: async () => MONITOR_SETTING_DEFAULTS,
-      mailer: { send: async (_to, m) => void mails.push(m.kind) },
+      mailer: {
+        send: async (_to, m) => {
+          mails.push(m.kind);
+          mailTexts.push(m.text);
+        },
+      },
       enqueueSend: async (emailId) => void resent.push(emailId),
       linkDomainYoung: async () => linkYoung,
       ...(now ? { now: () => now } : {}),
@@ -315,51 +327,80 @@ const screenedSets = (teamId: string, n: number) =>
     })),
   );
 
-it("screens a set of new destinations once a day: mail repeating it waits on that verdict, then is judged after sending", async () => {
+/** Six new destinations: more than one clean verdict clears, so each email to them is screened. */
+const sixLinks = (prefix: string) =>
+  Array.from({ length: 6 }, (_, i) => link(`${prefix}-${i}.example`)).join("");
+
+it("screens a set of new destinations once a day: mail repeating it waits on a clean verdict, then is judged after sending", async () => {
   const t = await team("repeat-set", "established");
-  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY - 2);
-  const first = await email(t, link("repeat.example"));
+  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY - 1);
+  const first = await email(t, sixLinks("repeat"));
   expect(await sendEmail(db, sendDeps(), { emailId: first })).toBe("deferred");
   const sample = await sampleOf(first);
-  expect(sample).toMatchObject({ screening: true, destinations: ["repeat.example"] });
+  expect(sample).toMatchObject({ screening: true });
 
-  const again = await email(t, link("repeat.example"));
+  const again = await email(t, sixLinks("repeat"));
   const before = Date.now();
   expect(await sendEmail(db, sendDeps(), { emailId: again })).toBe("deferred");
   expect(rescheduled.at(-1)?.at.getTime()).toBeGreaterThanOrEqual(before + 2 * 60_000);
   expect(await sampleOf(again)).toBeUndefined();
 
-  // Phishing-type under the hold line: neither clears the destination nor holds the mail.
-  await judge(sample?.id ?? "", verdict(72));
+  await judge(sample?.id ?? "", verdict(30));
   expect(await sendEmail(db, sendDeps(), { emailId: again })).toBe("sent");
-  expect(await sampleOf(again)).toMatchObject({ kind: "destination", screening: false });
+  const after = await sampleOf(again);
+  expect(after).toMatchObject({ kind: "destination", screening: false, status: "pending" });
 
-  // The repeat took no set: the day's last one still screens.
+  // The day's screenings are spent, yet the repeat took none of them.
   const other = await email(t, link("other.example"));
-  expect(await sendEmail(db, sendDeps(), { emailId: other })).toBe("deferred");
-  expect(await sampleOf(other)).toMatchObject({ screening: true, status: "pending" });
+  expect(await sendEmail(db, sendDeps(), { emailId: other })).toBe("parked");
+
+  // The after-send verdict reads the repeat as phishing: the next one is no
+  // repeat any more, and with the day's screenings spent it parks unsent.
+  await judge(after?.id ?? "", verdict(95));
+  const third = await email(t, sixLinks("repeat"));
+  expect(await sendEmail(db, sendDeps(), { emailId: third })).toBe("parked");
+  expect(await row(third)).toMatchObject({ parkReason: "destination" });
+  expect(await sampleOf(third)).toBeUndefined();
+  expect(sesCalls).toEqual([again]);
 });
 
-it("sends a team past new's mail with a new destination past the day's screenings, judged after sending", async () => {
-  const t = await team("budget", "established");
-  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
-  const id = await email(t, link("over-budget.example"));
-  expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("sent");
-  expect(sesCalls).toEqual([id]);
-  expect(rescheduled).toEqual([]);
-  expect(await sampleOf(id)).toMatchObject({ kind: "destination", screening: false });
-});
+it("never sends a repeat on a verdict that was not clean: each is screened before sending", async () => {
+  const t = await team("repeat-dirty", "established");
+  const first = await email(t, link("dirty.example"));
+  await sendEmail(db, sendDeps(), { emailId: first });
+  await judge((await sampleOf(first))?.id ?? "", verdict(72));
+  const grey = await email(t, link("dirty.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: grey })).toBe("deferred");
+  expect(await sampleOf(grey)).toMatchObject({ screening: true, status: "pending" });
 
-it("parks a new team's mail with a new destination past the day's screenings, and tells the operator", async () => {
-  const t = await team("budget-new", "ramp");
-  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
-  const id = await email(t, link("over-budget-new.example"));
-  expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("parked");
-  expect(await row(id)).toMatchObject({ latestStatus: "queued_quota", parkReason: "destination" });
-  expect(await sampleOf(id)).toBeUndefined();
-  expect(mails).toEqual(["monitor.destination_parked"]);
+  await judge((await sampleOf(grey))?.id ?? "", verdict(95));
+  expect(await sendEmail(db, sendDeps(), { emailId: grey })).toBe("parked");
+  const next = await email(t, link("dirty.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: next })).toBe("deferred");
+  expect(await sampleOf(next)).toMatchObject({ screening: true, status: "pending" });
   expect(sesCalls).toEqual([]);
 });
+
+for (const tier of ["established", "ramp"] as const) {
+  it(`parks ${tier === "ramp" ? "a new" : "an established"} team's mail with a new destination past the day's screenings, and tells the operator`, async () => {
+    const t = await team(`budget-${tier}`, tier);
+    await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
+    const id = await email(t, link(`over-budget-${tier}.example`));
+    expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("parked");
+    expect(await row(id)).toMatchObject({
+      latestStatus: "queued_quota",
+      parkReason: "destination",
+    });
+    expect(await sampleOf(id)).toBeUndefined();
+    expect(mails).toEqual(["monitor.destination_parked"]);
+    expect(mailTexts[0]).toContain(
+      `It was not judged: the team's mail had already screened ${DESTINATION_SCREENS_PER_DAY} sets`,
+    );
+    expect(mailTexts[0]).not.toContain("{");
+    expect(rescheduled).toEqual([]);
+    expect(sesCalls).toEqual([]);
+  });
+}
 
 it(`makes a team's next screening wait its turn behind ${SCREEN_OUTSTANDING_MAX} waiting on the judge`, async () => {
   const t = await team("outstanding", "first");
@@ -384,6 +425,9 @@ it("parks a team past new's lure when its new link domain's age is not known, an
   await judge((await sampleOf(parked))?.id ?? "", verdict(82), null);
   expect(await sendEmail(db, sendDeps(), { emailId: parked })).toBe("parked");
   expect(await row(parked)).toMatchObject({ parkReason: "destination" });
+  const notice = mailTexts[mails.indexOf("monitor.destination_parked")];
+  expect(notice).toContain("The judge scored it 82");
+  expect(notice).not.toContain("{");
 
   const fresh = await team("age-unknown-new", "ramp");
   const waits = await email(fresh, link("age-hidden-2.example"));

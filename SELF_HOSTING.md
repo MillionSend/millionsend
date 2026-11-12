@@ -1233,15 +1233,20 @@ the team has not cleared: the owner domain of a link (a free host's
 verified domains. A link to a loopback address (localhost and its
 subdomains, 127.0.0.1, `::1`) never is: no page a sender serves is there, and
 it never clears; a private network's address is a destination like any other.
+Nor is a name off the public web (`example.com`, `example.net`,
+`example.org`, a name under `.test`, `.invalid`, `.local` or `.internal`).
 A verdict under 70 that names nothing phishing-type clears
 the message's destinations for the team, when it carried 5 new ones at most;
 so does releasing mail parked for a new destination, or waiting after a
 verdict, while releasing mail parked for its media or a failing judge clears
 none. A link shortener is never cleared. For 7 days after a destination
 clears, every email to it is judged after it is sent, and a phishing-type
-verdict from 80 on one takes the clearance back: mail to it is judged before
+verdict from 90 on one takes the clearance back: mail to it is judged before
 SES again, no verdict clears it again (an operator's release does), and the
-operator is mailed at most once a day per team. A message with more than 20
+operator is mailed at most once a day per team. A platform nearly every
+sender links to (Facebook, Instagram, WhatsApp, YouTube, LinkedIn, X, TikTok,
+Google, Apple) or a mailbox provider is screened like any destination, but
+never loses its clearance. A message with more than 20
 new destinations is not judged: it waits for the operator. A broadcast is
 judged before its fan-out when its own HTML carries a new destination, and a
 rendered copy when a contact field put one there; mail that links only to
@@ -1300,9 +1305,20 @@ verdicts take no clearance back and count toward no repeat hold; the same
 message under another name still does all of that. A notice that adds a
 domain beside its released site keeps the site's clearance while the new one
 is screened; any other released name in it, a carrier's page included, is
-taken back as before. These samples count against no daily cap; a team has 200 of
-them a day, past which its mail with a new destination waits for the next
-UTC day.
+taken back as before. These samples count against no daily cap. Mail whose
+new destinations all sat in one message screened the same UTC day is not
+screened again (unless one is a shortener, a loopback address or a link that
+cannot be read): it waits for that verdict and, once that verdict came back
+under 70 naming nothing phishing-type and parked nothing, is sent and judged
+after it goes out, every one, past the team's daily sample cap too. Once any
+verdict on those destinations that day, before or after a send, is
+phishing-type from 80, each later email to them is screened as its own
+again. A team's mail screens 200 sets of new destinations a day, and a
+repeat of a set already screened takes none of them; past them, mail that
+would be screened for a new destination is parked for the review list
+unjudged, at every tier, and the operator is mailed at most once a day per
+team. Releasing such mail sends it without clearing its destinations. None
+of it waits for the next day.
 
 **The review list.** Trust & safety lists every unsent email screening
 stopped, grouped by team: parked behind a review hold, waiting out its 2
@@ -1356,8 +1372,11 @@ notice (see also its [customer agreement](https://typesafe.ai/legal/mca) and
 
 **Exactly what Jev sees**, built in memory per call and never stored by
 MillionSend: the team's name, verified domains (plus each one's registrable
-domain, the form links are shown in, where the suffix is unambiguous), days since its first send
-and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
+domain, the form links are shown in, where the suffix is unambiguous), the
+team's own domains (those, and the domains of its members' verified sign-in
+addresses once the team's mail cleared them as destinations, unless the
+address is on a mailbox provider or a disposable-mail service; never a name
+an operator released), days since its first send and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
 rendered visible text, without elements hidden by an inline style or the
 `hidden` attribute (up to 6,000
 characters); a table of link anchor texts and their registrable domains (up to 30 rows),

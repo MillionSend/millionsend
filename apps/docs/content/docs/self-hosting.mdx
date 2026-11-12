@@ -1472,18 +1472,12 @@ the team has not cleared: the owner domain of a link a mail client would
 follow (an anchor, an image-map area, a form action, an SVG link or a URL in
 the text, read as a browser reads it and through up to three redirect
 wrappers; a free host's `x.pages.dev` counts on its own) or of its Reply-To,
-less the domains the team holds: those of its verified domains, and those of
-its members' sign-in addresses once verified, unless the address is on a
-mailbox provider (Gmail, Outlook, UOL and the like) or a disposable-mail
-service. A link shortener, a host every user's pages share and a mailbox
-provider are never the team's. A link that cannot be read counts as a
+less the team's verified domains. A link that cannot be read counts as a
 destination too. A link to a loopback address (localhost and its subdomains,
 127.0.0.1, `::1`) never is: no page a sender serves is there, and it never
 clears; a private network's address is a destination like any other. Nor is
-a platform nearly every sender links to (Facebook, Instagram, WhatsApp,
-YouTube, LinkedIn, X, TikTok, Google, Apple) or a mailbox provider, nor a
-name off the public web (`example.com`, `example.net`, `example.org`, a name
-under `.test`, `.invalid`, `.local` or `.internal`, a `ts.net` host). A
+a name off the public web (`example.com`, `example.net`, `example.org`, a name
+under `.test`, `.invalid`, `.local` or `.internal`). A
 verdict under 70 that names nothing phishing-type clears
 the message's destinations for the team, when it carried 5 new ones at most;
 so does releasing mail parked for a new destination, or waiting after a
@@ -1493,6 +1487,9 @@ days after a destination clears, every email to it is judged after it is sent,
 and a phishing-type verdict from 90 on one takes the clearance back: mail to
 it is judged before SES again, no verdict clears it again (an operator's
 release does), and the operator is mailed at most once a day per team. A
+platform nearly every sender links to (Facebook, Instagram, WhatsApp,
+YouTube, LinkedIn, X, TikTok, Google, Apple) or a mailbox provider is
+screened like any destination, but never loses its clearance. A
 message with more than 20 new destinations is not judged: it waits for the
 operator. A broadcast is judged before its fan-out when its own HTML carries a
 new destination, and a rendered copy when a contact field put one there; mail
@@ -1535,13 +1532,17 @@ clearance while the new one is screened; any other released name in it, a
 carrier's page included, is taken back as before. These samples count against no daily cap.
 Mail whose new destinations all sat in one message screened the same UTC day
 is not screened again (unless one is a shortener, a loopback address or a
-link that cannot be read): it waits for that verdict and, once the verdict held
-and parked nothing, is sent and judged after it goes out, within the team's
-daily sample cap. A team's mail screens 200 sets of new destinations a day;
-past them, such mail of a team past New is sent and judged after it goes out
-the same way, and a New-tier team's is parked for the review list unjudged,
-and the operator is mailed at most once a day per team. None of it waits for
-the next day.
+link that cannot be read): it waits for that verdict and, once that verdict
+came back under 70 naming nothing phishing-type and parked nothing, is sent
+and judged after it goes out, every one, past the team's daily sample cap
+too. Once any verdict on those destinations that day, before or after a
+send, is phishing-type from 80, each later email to them is screened as its
+own again. A team's mail screens 200 sets of new destinations a day, and a
+repeat of a set already screened takes none of them; past them, mail that
+would be screened for a new destination is parked for the review list
+unjudged, at every tier, and the operator is mailed at most once a day per
+team. Releasing such mail sends it without clearing its destinations. None
+of it waits for the next day.
 
 **The review list.** Trust & safety lists every unsent email screening
 stopped, grouped by team: parked behind a review hold, waiting out its 2
@@ -1598,8 +1599,10 @@ notice (see also its [customer agreement](https://typesafe.ai/legal/mca) and
 **Exactly what Jev sees**, built in memory per call and never stored by
 MillionSend: the team's name, verified domains (plus each one's registrable
 domain, the form links are shown in, where the suffix is unambiguous), the
-team's own domains (those, the domains the team holds as above, and the
-destinations an operator released its mail to), days since its first send
+team's own domains (those, and the domains of its members' verified sign-in
+addresses once the team's mail cleared them as destinations, unless the
+address is on a mailbox provider or a disposable-mail service; never a
+name an operator released), days since its first send
 and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
 message as a reader sees it, read from the HTML part (or the plain-text part
 when the HTML is missing or blank): the rendered visible text (its first

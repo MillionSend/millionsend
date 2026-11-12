@@ -76,14 +76,13 @@ describe("a message's destinations, read as the judge reads its links", () => {
         replyTo: null,
         verifiedDomains: ["acme.dev"],
       }),
-    ).toEqual(["evil-pay.com", "pix-promo.com", "secure-update.net"]);
+    ).toEqual(["evil-pay.com", "google.com", "pix-promo.com", "secure-update.net"]);
   });
 
-  it("are never a major platform, a consumer mailbox or a name off the public web", () => {
+  it("are never a name off the public web, and a platform or mailbox still is one", () => {
     const hosts = [
       "www.facebook.com",
-      "wa.me",
-      "m.youtube.com",
+      "sites.google.com",
       "localhost",
       "docs.example.com",
       "shop.test",
@@ -98,7 +97,14 @@ describe("a message's destinations, read as the judge reads its links", () => {
         replyTo: ["Help <help@gmail.com>"],
         verifiedDomains: [],
       }),
-    ).toEqual(["evil-pay.com", "localhost"]);
+    ).toEqual([
+      "evil-pay.com",
+      "facebook.com",
+      "gmail.com",
+      "google.com",
+      "localhost",
+      "tailnet-1234.ts.net",
+    ]);
   });
 
   it("are none for a team on tx.acme.com.br linking and replying to acme.com.br", () => {
@@ -159,7 +165,7 @@ describe("the destination registry", () => {
     ).toEqual(["new.example"]);
   });
 
-  it("reads verified work addresses and operator releases as the team's own, never a shared name", async () => {
+  it("reads a verified work address the team's mail cleared as its own, never a release or a shared name", async () => {
     const teamId = await createTeam(db, "registry-held");
     await db
       .insert(schema.domains)
@@ -174,13 +180,13 @@ describe("the destination registry", () => {
       await db.insert(schema.user).values({ id, name: id, email, emailVerified });
       await db.insert(schema.teamMembers).values({ teamId, userId: id });
     }
-    await clearDestinations(db, teamId, ["released.example", "wa.me"], NOW, { operator: true });
-    await clearDestinations(db, teamId, ["judged.example"], NOW);
-    expect(await teamOwnDomains(db, teamId)).toEqual([
-      "acme-mail.example",
-      "acme-store.example",
-      "released.example",
-    ]);
+    // Not cleared yet: a sign-in address proves a mailbox, not the domain.
+    expect(await teamOwnDomains(db, teamId)).toEqual(["acme-mail.example"]);
+    await clearDestinations(db, teamId, ["released.example", "google.com"], NOW, {
+      operator: true,
+    });
+    await clearDestinations(db, teamId, ["acme-store.example", "gmail.com"], NOW);
+    expect(await teamOwnDomains(db, teamId)).toEqual(["acme-mail.example", "acme-store.example"]);
     const links = [
       "acme-mail.example",
       "www.acme-store.example",

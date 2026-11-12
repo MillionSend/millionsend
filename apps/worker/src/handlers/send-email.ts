@@ -1278,8 +1278,8 @@ async function sendQueued(
           now,
         });
       } else if (afterSend) {
-        // Screening let it out unjudged: always drawn, within the team's
-        // daily cap, which bounds what such mail costs in judge calls.
+        // Screening let it out on another email's verdict: always drawn, past
+        // the team's daily cap too, so a hold verdict on it stops the next one.
         const now = new Date();
         await noteAcceptedSend(db, email.teamId, now);
         await recordMonitorSample(db, deps.monitor, await deps.monitor.settings(), {
@@ -1287,6 +1287,7 @@ async function sendQueued(
           emailId: email.id,
           broadcastId: email.broadcastId,
           kind: email.broadcastId ? "broadcast_copy" : "destination",
+          novelty: true,
           now,
         });
       } else {

@@ -59,7 +59,7 @@ export interface JudgeBlockInput {
     verifiedDomains: string[];
     /**
      * Owner domains the team is known to hold beyond them (teamOwnDomains):
-     * its members' work addresses' and the names an operator released.
+     * its members' work addresses' once its mail cleared them.
      */
     ownDomains?: string[] | undefined;
     /** Days since the team's first accepted send; null before it. */

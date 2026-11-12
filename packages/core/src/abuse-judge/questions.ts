@@ -12,7 +12,7 @@ export const ABUSE_JUDGE_QUESTIONS_VERSION = "jev-4";
 
 export const ABUSE_JUDGE_POLICY =
   "Outbound abuse judge for an email-sending platform. " +
-  "The sending team verified the listed domains, and 'Team's own domains' lists those and the other domains the team is known to hold (its members' work addresses, names the platform's operator released): that proves control of those domains, not honesty. " +
+  "The sending team verified the listed domains, and 'Team's own domains' lists those and the other domains the team is known to hold (such as its members' work addresses): that proves control of those domains, not honesty. " +
   "The team's own brand is its own domains, and its name only when one of those domains carries that name: a team named after a brand none of its own domains carries is impersonating that brand. " +
   "A link to one of the team's own domains is on the team's domain, whichever of them the mail is sent from. " +
   "Mail that poses as another known brand, bank, government, carrier, or platform from a domain that is not that organisation's is impersonation at any team age. " +
