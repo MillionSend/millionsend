@@ -149,6 +149,7 @@ describe("buildJudgeBlock", () => {
     expect(block.split("\n")).toEqual([
       "Team name: Acme",
       "Verified domains: acme.dev",
+      "Team's own domains: acme.dev",
       "Team age (days): 3",
       "Plan: free",
       "From: Acme <no-reply@acme.dev>",
@@ -296,6 +297,7 @@ describe("buildJudgeBlock", () => {
     const labels = [
       "Team name:",
       "Verified domains:",
+      "Team's own domains:",
       "Team age (days):",
       "Plan:",
       "From:",

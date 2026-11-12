@@ -14,6 +14,7 @@ import {
   linkDomainsAged,
   messageDestinations,
   teamNovelDestinations,
+  teamOwnDomains,
   unclearedDestinations,
 } from "../src/screening.js";
 import { DAY_MS } from "../src/utc-day.js";
@@ -134,6 +135,44 @@ describe("the destination registry", () => {
         replyTo: null,
       }),
     ).toEqual(["new.example"]);
+  });
+
+  it("reads verified work addresses and operator releases as the team's own, never a shared name", async () => {
+    const teamId = await createTeam(db, "registry-held");
+    await db
+      .insert(schema.domains)
+      .values({ teamId, name: "send.acme-mail.example", region: "us-east-1", status: "verified" });
+    const members = [
+      ["held-work", "ana@shop.acme-store.example", true],
+      ["held-unverified", "bia@unverified.example", false],
+      ["held-gmail", "caio@gmail.com", true],
+      ["held-hotmail", "dani@hotmail.fr", true],
+    ] as const;
+    for (const [id, email, emailVerified] of members) {
+      await db.insert(schema.user).values({ id, name: id, email, emailVerified });
+      await db.insert(schema.teamMembers).values({ teamId, userId: id });
+    }
+    await clearDestinations(db, teamId, ["released.example", "wa.me"], NOW, { operator: true });
+    await clearDestinations(db, teamId, ["judged.example"], NOW);
+    expect(await teamOwnDomains(db, teamId)).toEqual([
+      "acme-mail.example",
+      "acme-store.example",
+      "released.example",
+    ]);
+    const links = [
+      "acme-mail.example",
+      "www.acme-store.example",
+      "unverified.example",
+      "gmail.com",
+    ];
+    expect(
+      await teamNovelDestinations(db, {
+        teamId,
+        html: links.map((host) => `<a href="https://${host}/">x</a>`).join(""),
+        text: null,
+        replyTo: null,
+      }),
+    ).toEqual(["gmail.com", "unverified.example"]);
   });
 });
 

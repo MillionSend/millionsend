@@ -790,6 +790,11 @@ const SHARED_CONTENT_HOSTS: ReadonlySet<string> = new Set([
   "t.me",
 ]);
 
+/** Whether every user of this host's pages shares its registered name (SHARED_CONTENT_HOSTS). */
+export function isSharedContentHost(domain: string): boolean {
+  return SHARED_CONTENT_HOSTS.has(domain);
+}
+
 /**
  * A platform's notice for one client business, sent under the platform's own
  * verified domain ("Acme Tiles" <orders@platform.example>, replying to and

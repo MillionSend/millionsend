@@ -18,6 +18,7 @@ import type { MediaIssue } from "./abuse-judge/media.js";
 import {
   inFirstWindow,
   isHoldVerdict,
+  isSharedContentHost,
   loadMonitorState,
   MONITOR_HOLD_CATEGORIES,
   MONITOR_HOLD_REASONS,
@@ -29,7 +30,9 @@ import {
   YOUNG_DOMAIN_DAYS,
 } from "./abuse-monitor.js";
 import { countDistinctRecipients } from "./accept-email.js";
+import { disposableDomains, isDisposableDomain } from "./disposable-domains.js";
 import type { DomainAgeResolver } from "./domain-age.js";
+import { PUBLIC_MAILBOX_DOMAINS } from "./domain-lifecycle.js";
 import { isShortener } from "./email-insights.js";
 import { addressKey } from "./inboxes/compose.js";
 import { threadSenders } from "./inboxes/send.js";
@@ -40,9 +43,19 @@ import {
   resolveTextUrl,
   UNRESOLVED_DESTINATION,
 } from "./links.js";
-import { recipientDomain, SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
+import {
+  mailboxProvider,
+  recipientDomain,
+  SES_MAILBOX_SIMULATOR_DOMAIN,
+} from "./mailbox-providers.js";
 import type { MonitorSettings } from "./monitor-settings.js";
-import { isLoopbackHost, ownerDomain, registrableDomain } from "./org-domain.js";
+import {
+  asciiHostname,
+  isLoopbackHost,
+  ownerDomain,
+  registeredName,
+  registrableDomain,
+} from "./org-domain.js";
 import { releaseQuota } from "./quota.js";
 import { teamMemberEmails } from "./receiving/inbox-routing.js";
 import { parseSingleSender } from "./sender-address.js";
@@ -186,6 +199,77 @@ export function messageDestinations(input: {
   return [...new Set(hosts.map(ownerDomain))].filter((d) => d !== "" && !own.has(d)).sort();
 }
 
+const PUBLIC_MAILBOXES: ReadonlySet<string> = new Set(PUBLIC_MAILBOX_DOMAINS);
+
+/**
+ * Whether a name may stand for a team's own: a registered name nobody else
+ * shares. A mailbox provider, a shortener, a host every user's pages share,
+ * a bare suffix, an IP or the reader's own machine never does, whoever
+ * vouched for it, so no team can make a name strangers also use its own.
+ */
+function mayBeOwnDomain(name: string): boolean {
+  const registrable = registrableDomain(name);
+  return (
+    registeredName(name) !== null &&
+    !isLoopbackHost(name) &&
+    !isShortener(name) &&
+    !isSharedContentHost(registrable) &&
+    !PUBLIC_MAILBOXES.has(registrable) &&
+    mailboxProvider(registrable) === "other"
+  );
+}
+
+/**
+ * The owner domains a team holds, by control alone: those of its verified
+ * sending domains, and those of its members' sign-in addresses once
+ * verified, unless a mailbox provider or a disposable-mail service hands
+ * that address out. Proof that a domain is the team's, never that its mail
+ * is honest. Sorted, each once.
+ */
+async function heldDomains(db: Db, teamId: string): Promise<string[]> {
+  const d = schema.domains;
+  const [verified, members, disposable] = await Promise.all([
+    db
+      .select({ name: d.name })
+      .from(d)
+      .where(and(eq(d.teamId, teamId), eq(d.status, "verified"))),
+    db
+      .select({ email: schema.user.email })
+      .from(schema.teamMembers)
+      .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
+      .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.user.emailVerified, true))),
+    // The worker's daily copy; before its first download no address counts as disposable.
+    disposableDomains(db, new Set()),
+  ]);
+  const mailDomains = members.flatMap(({ email }) => {
+    const host = asciiHostname(email.slice(email.lastIndexOf("@") + 1));
+    return host && !isDisposableDomain(host, disposable) ? [host] : [];
+  });
+  return [
+    ...new Set(
+      [...verified.map((row) => row.name), ...mailDomains].filter(mayBeOwnDomain).map(ownerDomain),
+    ),
+  ].sort();
+}
+
+/**
+ * The team's own domains, as the judge is told of them: those it holds
+ * (heldDomains) and the destinations an operator released its mail to and
+ * no verdict took back since.
+ */
+export async function teamOwnDomains(db: Db, teamId: string): Promise<string[]> {
+  const [held, released] = await Promise.all([
+    heldDomains(db, teamId),
+    db
+      .select({ domain: td.domain })
+      .from(td)
+      .where(and(eq(td.teamId, teamId), isNotNull(td.operatorClearedAt), isNull(td.revokedAt))),
+  ]);
+  return [
+    ...new Set([...held, ...released.map((row) => row.domain).filter(mayBeOwnDomain)]),
+  ].sort();
+}
+
 /**
  * A message's destinations as its team stands with them: `novel`, never
  * cleared, revoked, or a shortener, which a shortener always is; and
@@ -243,18 +327,13 @@ export async function teamDestinationStanding(
     now: Date;
   },
 ): Promise<{ novel: string[]; probation: string[]; vouched: string[]; all: string[] }> {
-  const d = schema.domains;
-  const verified = await db
-    .select({ name: d.name })
-    .from(d)
-    .where(and(eq(d.teamId, input.teamId), eq(d.status, "verified")));
   const destinations = messageDestinations({
     html: input.html,
     text: input.text,
     replyTo: input.replyTo,
     links: input.links,
     ignore: input.ignore,
-    verifiedDomains: verified.map((row) => row.name),
+    verifiedDomains: await heldDomains(db, input.teamId),
   });
   return {
     ...(await destinationStanding(db, input.teamId, destinations, input.now)),

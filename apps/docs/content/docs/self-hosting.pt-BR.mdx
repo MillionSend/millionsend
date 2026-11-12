@@ -1534,8 +1534,12 @@ destino que a equipe ainda não conhece: o domínio dono de um link que um
 cliente de e-mail seguiria (uma âncora, uma área de mapa de imagem, uma ação
 de formulário, um link em SVG ou um URL do texto, lido como o navegador lê e
 passando por até três redirecionadores; um nome como `x.pages.dev`, de um
-serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios
-verificados da equipe. Um link que não dá para ler também conta como destino;
+serviço gratuito, conta sozinho) ou do seu Reply-To, menos os domínios que
+a equipe tem: os dos seus domínios verificados e os dos e-mails de login dos
+membros depois de verificados, a não ser que o endereço seja de um provedor
+de e-mail (Gmail, Outlook, UOL e afins) ou de um serviço de e-mail
+descartável. Um encurtador de links, um serviço em que as páginas de todos os
+usuários dividem o mesmo nome e um provedor de e-mail nunca são da equipe. Um link que não dá para ler também conta como destino;
 um link para um endereço de loopback (localhost e seus subdomínios,
 127.0.0.1, `::1`) nunca conta: ali não tem nenhuma página de quem envia, e ele
 nunca se torna conhecido. Um endereço de rede privada conta como qualquer
@@ -1664,6 +1668,8 @@ privacidade da instância (veja também o
 armazenado pelo MillionSend: o nome da equipe, os domínios verificados (mais o domínio
 registrável de cada um, a forma em que os links aparecem, quando o sufixo é
 inequívoco), os
+domínios próprios da equipe (esses, os que ela tem como descrito acima e os
+destinos para onde o operador liberou e-mails dela), os
 dias desde o primeiro envio e o plano; os cabeçalhos `From` e `Reply-To` como
 enviados; o `Subject`; a mensagem como o leitor a vê, lida da parte HTML (ou
 da parte em texto puro, quando o HTML falta ou está em branco): o texto
@@ -1679,7 +1685,7 @@ imagem, ações de formulário, links em SVG e os URLs do texto), cada um com o
 seu texto e o domínio registrável onde ele chega, lido como o navegador lê e
 passando por até três redirecionadores conhecidos, como o `/url?q=` do
 Google, e os links para domínios que a equipe nunca usou, os que não dá para
-ler e os que saem dos domínios verificados dela listados primeiro (até 30
+ler e os que saem dos domínios próprios dela listados primeiro (até 30
 linhas), com um link para um endereço de loopback (localhost, 127.0.0.1)
 marcado `(local address)` e listado por último; uma linha que avisa quando a mensagem
 mostra menos de 100 caracteres de texto ao lado de uma imagem, de um anexo

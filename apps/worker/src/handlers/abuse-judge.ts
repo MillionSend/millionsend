@@ -34,6 +34,7 @@ import {
   teamDestinationStanding,
   teamMonitorOverview,
   teamMonitorRow,
+  teamOwnDomains,
   UNNAMED_ATTACHMENT,
   utcDay,
   type VerdictOutcome,
@@ -514,6 +515,7 @@ async function loadBlockInput(
   const context: JudgeBlockInput["team"] = {
     name: team.name,
     verifiedDomains: domains.map((d) => d.name),
+    ownDomains: await teamOwnDomains(db, sample.teamId),
     ageDays: monitor.firstSendAt
       ? Math.floor((now.getTime() - monitor.firstSendAt.getTime()) / DAY_MS)
       : 0,

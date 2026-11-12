@@ -788,6 +788,7 @@ export {
   spareWaitingSamples,
   teamDestinationStanding,
   teamNovelDestinations,
+  teamOwnDomains,
   unclearedDestinations,
   verdictClearsDestinations,
 } from "./screening.js";
