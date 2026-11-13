@@ -31,7 +31,7 @@ it("mails the operator one digest of counts per team, once, and nothing when emp
   const bolt = await createTeam(db, "bolt");
   await noteForDigest(db, acme, "destination_parked");
   await noteForDigest(db, acme, "destination_parked");
-  await noteForDigest(db, acme, "alert");
+  await noteForDigest(db, acme, "destination_revoked");
   await noteForDigest(db, bolt, "media_blocked");
 
   const [first, second] = await Promise.all([
@@ -42,7 +42,7 @@ it("mails the operator one digest of counts per team, once, and nothing when emp
   expect(mails).toMatchObject([{ to: "op@example.com", kind: "monitor.digest" }]);
   const text = mails[0]?.text ?? "";
   expect(text).toContain(
-    `acme: 2 emails parked for new destinations and 1 risk alert. https://app.example.test/console/safety/${acme}`,
+    `acme: 2 times mail to new destinations was parked and 1 email that took a destination's clearance back. https://app.example.test/console/safety/${acme}`,
   );
   expect(text).toContain(
     `bolt: 1 email whose images the image reader refused. https://app.example.test/console/safety/${bolt}`,
@@ -50,4 +50,18 @@ it("mails the operator one digest of counts per team, once, and nothing when emp
 
   expect(await sendMonitorDigest(db, deps)).toBe(0);
   expect(mails).toHaveLength(1);
+});
+
+it("keeps the counts for the next digest when the mail fails", async () => {
+  const team = await createTeam(db, "kept");
+  await noteForDigest(db, team, "destination_parked");
+  const failing = {
+    send: async () => {
+      throw new Error("Throttling");
+    },
+  };
+  expect(await sendMonitorDigest(db, { mailer: failing })).toBe(0);
+  await noteForDigest(db, team, "destination_parked");
+  const rows = await db.select().from(schema.monitorDigest);
+  expect(rows).toMatchObject([{ teamId: team, kind: "destination_parked", count: 2 }]);
 });

@@ -503,6 +503,21 @@ export const ptBR = {
     button: "Abrir métricas",
     extra: { waiting: " Os e-mails que estavam esperando já estão saindo." },
   },
+  "monitor.alert": {
+    subject: "Monitor de conteúdo: uma equipe precisa de uma olhada",
+    body: [
+      "O risco do monitor de conteúdo para {team} chegou a {risk} (nível {tier}, {samples} amostras avaliadas nos últimos 7 dias, {flagged} acima do limite de sinalização). O modelo lê uma amostra dos e-mails aceitos; este alerta, por si só, não pausa nem segura nada.",
+      "Abra a página de revisão para ver as avaliações das amostras, as verificações de conteúdo e o histórico da equipe, e decida. Este aviso se repete no máximo uma vez por dia por equipe enquanto o risco ficar acima do limite.",
+    ],
+    button: "Abrir revisão",
+    extra: {
+      new: "novo",
+      probation: "em observação",
+      established: "estabelecido",
+      trusted: "confiável",
+      exempt: "isento",
+    },
+  },
   "monitor.broadcasts_paused": {
     subject: "O monitor de conteúdo pausou as transmissões de uma equipe",
     body: [
@@ -561,6 +576,15 @@ export const ptBR = {
       "Enviado ao operador da instância no máximo a cada seis horas enquanto o percentual ficar acima de 20%, o provedor continuar recusando a chave de API ou a avaliação antes do envio desistir de algum e-mail.",
     ],
   },
+  "monitor.media_blocked": {
+    subject: "Monitor de conteúdo: o leitor de imagens recusou as imagens de um e-mail",
+    body: [
+      "O Amazon Bedrock se recusou a ler as imagens de um e-mail de {team} (HTTP 400). O Bedrock responde assim quando a detecção de abuso dele bloqueia uma imagem, o que inclui material de abuso sexual infantil. Nenhuma prévia dessas imagens fica guardada.",
+      "O e-mail foi avaliado depois do envio e já foi entregue. Isso sozinho não deixa a equipe pausada para revisão, e ela não fica sabendo. Um e-mail recusado antes do envio fica em espera em Confiança e segurança e entra no resumo diário.",
+    ],
+    button: "Abrir lista de revisão",
+    muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
+  },
   "monitor.digest": {
     subject: "Monitor de conteúdo: resumo diário",
     body: [
@@ -572,10 +596,8 @@ export const ptBR = {
     ],
     extra: {
       team: "{team}: {counts}. {page}",
-      "alert.one": "{n} alerta de risco",
-      "alert.other": "{n} alertas de risco",
-      "destination_parked.one": "{n} e-mail em espera por um destino novo",
-      "destination_parked.other": "{n} e-mails em espera por destinos novos",
+      "destination_parked.one": "{n} vez em que e-mails para um destino novo ficaram em espera",
+      "destination_parked.other": "{n} vezes em que e-mails para destinos novos ficaram em espera",
       "destination_revoked.one": "{n} e-mail que tirou a liberação de um destino",
       "destination_revoked.other": "{n} e-mails que tiraram a liberação de destinos",
       "media_blocked.one": "{n} e-mail cujas imagens o leitor de imagens recusou",

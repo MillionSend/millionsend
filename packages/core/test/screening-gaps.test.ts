@@ -110,11 +110,14 @@ describe("clearing a destination", () => {
       probation: ["lately.example"],
       vouched: [],
     });
-    // A platform every sender links to never loses its clearance.
-    await clearDestinations(db, teamId, ["facebook.com"], NOW);
-    expect(await revokeDestinations(db, teamId, ["lately.example", "facebook.com"], NOW)).toEqual([
-      "lately.example",
-    ]);
+    // A platform every sender links to never loses its clearance, but for one
+    // that serves pages anyone publishes (a Google form).
+    await clearDestinations(db, teamId, ["facebook.com", "google.com"], NOW);
+    expect(
+      (
+        await revokeDestinations(db, teamId, ["lately.example", "facebook.com", "google.com"], NOW)
+      ).sort(),
+    ).toEqual(["google.com", "lately.example"]);
     // No verdict clears it again; an operator's release does.
     await clearDestinations(db, teamId, ["lately.example"], NOW);
     expect((await destinationStanding(db, teamId, all, NOW)).novel).toContain("lately.example");

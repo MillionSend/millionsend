@@ -4,6 +4,7 @@ import {
   accountMailPhrase,
   applyJudgedSample,
   buildJudgeBlock,
+  claimNotification,
   clearDestinations,
   clientIdentitySite,
   DESTINATION_REVOKE_SCORE,
@@ -32,9 +33,11 @@ import {
   sendingDomainYoung,
   spareWaitingSamples,
   teamDestinationStanding,
+  teamMonitorOverview,
   teamMonitorRow,
   teamOwnDomains,
   UNNAMED_ATTACHMENT,
+  utcDay,
   type VerdictOutcome,
   verdictClearsDestinations,
 } from "@millionsend/core";
@@ -174,9 +177,14 @@ async function judgePending(
       { teamId: sample.teamId, ...loaded.sendingDomain, shared },
       now,
     )) === true;
-  if (issues.includes("vision_blocked")) await noteForDigest(db, sample.teamId, "media_blocked");
   // Mail this verdict holds back keeps what screening read, for the person who decides on it.
   const waiting = sample.screening && loaded.waiting;
+  // Refused images on mail that waits are parked for review and can wait for
+  // the digest; on mail already out (possibly CSAM) the operator hears now.
+  if (issues.includes("vision_blocked")) {
+    if (waiting) await noteForDigest(db, sample.teamId, "media_blocked");
+    else await notifyMediaBlocked(db, deps, sample.teamId, now);
+  }
   let kept = false;
   const keepMedia = async () => {
     if (kept || !media || !loaded.email) return;
@@ -362,9 +370,8 @@ async function judgePending(
     await noteForDigest(db, sample.teamId, "destination_parked");
   }
   if (waiting && (destinationParks || outcome.held)) await keepMedia();
-  if (outcome.alert) await noteForDigest(db, sample.teamId, "alert");
-  if ((outcome.paused || outcome.held) && deps.mailer) {
-    await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings);
+  if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
+    await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings, now);
   }
   if (outcome.held && deps.syncTenant) {
     // The hold already refuses every send; the tenant is a second lock, so a
@@ -538,6 +545,36 @@ async function loadBlockInput(
   };
 }
 
+/**
+ * The operator hears once a day per team that the image reader's provider
+ * refused the images of an email already sent, as Bedrock's CSAM check does.
+ */
+async function notifyMediaBlocked(db: Db, deps: JudgeDeps, teamId: string, now: Date) {
+  if (!deps.mailer) return;
+  try {
+    const claimed = await claimNotification(db, {
+      teamId,
+      kind: "monitor.media_blocked",
+      periodKey: utcDay(now),
+    });
+    if (!claimed) return;
+    const [team] = await db
+      .select({ name: schema.teams.name })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, teamId));
+    await mailOperator(
+      db,
+      deps.mailer,
+      "monitor.media_blocked",
+      "/console/safety",
+      { team: team?.name ?? teamId },
+      deps.appBaseUrl,
+    );
+  } catch (err) {
+    console.error(`abuse.judge: blocked-images mail for team ${teamId} failed`, err);
+  }
+}
+
 async function notifyOperator(
   db: Db,
   deps: JudgeDeps,
@@ -545,6 +582,7 @@ async function notifyOperator(
   verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons">,
   outcome: VerdictOutcome,
   settings: MonitorSettings,
+  now: Date,
 ): Promise<void> {
   if (!deps.mailer) return;
   const [team] = await db
@@ -589,6 +627,25 @@ async function notifyOperator(
         "monitor.broadcasts_paused",
         path,
         { team: name, risk, score },
+        deps.appBaseUrl,
+      );
+    }
+    // A hold or pause mail already tells the operator of the team; a team
+    // past New gets neither, so its alert is the only prompt to look.
+    if (outcome.alert && !held && !outcome.paused) {
+      const overview = await teamMonitorOverview(db, teamId, settings, now);
+      await mailOperator(
+        db,
+        deps.mailer,
+        "monitor.alert",
+        path,
+        (locale) => ({
+          team: name,
+          risk,
+          tier: accountMailPhrase({ locale, kind: "monitor.alert", key: outcome.tier }),
+          samples: String(overview.judged7d),
+          flagged: String(overview.flagged7d),
+        }),
         deps.appBaseUrl,
       );
     }

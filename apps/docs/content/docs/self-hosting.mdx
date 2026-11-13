@@ -1409,7 +1409,7 @@ leave it off.
 **What it does.** It opens the `monitor` flag on Trust & safety when a team's risk crosses the flag line and the judge called at least
 one of its messages abuse from the flag score in the last 7 days (a risk that
 only clean verdicts carried over the line opens nothing; an open flag stays
-until the risk falls back under the line), counts the team in the operator's daily digest past the alert line (once a day per team), and, for a team in the New tier only (inside its first 1,000
+until the risk falls back under the line), emails the operator past the alert line (once a day per team, and not on a verdict whose hold or pause mail already names the team), and, for a team in the New tier only (inside its first 1,000
 sends or 72 hours, or under 10,000 sends within 7 days), pauses broadcasts
 when the risk passes the pause line and a sampled message scored 90 or more
 within a day, or at once when a broadcast's own HTML or a rendered copy
@@ -1488,7 +1488,8 @@ it is judged before SES again, no verdict clears it again (an operator's
 release does), and the operator's daily digest counts it. A
 platform nearly every sender links to (Facebook, Instagram, WhatsApp,
 YouTube, LinkedIn, X, TikTok, Google, Apple) or a mailbox provider is
-screened like any destination, but never loses its clearance. A
+screened like any destination, but never loses its clearance, except Google,
+whose docs, drive, sites and forms anyone can publish to. A
 message with more than 20 new destinations is not judged: it waits for the
 operator. A broadcast is judged before its fan-out when its own HTML carries a
 new destination, and a rendered copy when a contact field put one there; mail
@@ -1535,12 +1536,15 @@ came back under 70 naming nothing phishing-type and parked nothing, is sent
 and judged after it goes out, every one, past the team's daily sample cap
 too. Once any verdict on those destinations that day, before or after a
 send, is phishing-type from 80, each later email to them is screened as its
-own again. A team's mail screens 200 sets of new destinations a day, and a
+own again, and so is every email to a set holding a destination whose
+clearance was taken back. A team's mail screens 200 sets of new destinations a day, and a
 repeat of a set already screened takes none of them; past them, mail that
 would be screened for a new destination is sent and judged after it goes
 out, every one, past the team's daily sample cap too, when its team is
-Established or Trusted and has had no flag opened, for any reason, in the
-last 30 days; any other team's is parked for the review list unjudged, and the operator's daily digest counts it. Releasing such mail
+Established or Trusted, has had no flag opened, for any reason, in the
+last 30 days, drew no phishing-type verdict from 80 that day, before or
+after a send, and the set holds no destination whose clearance was taken
+back; any other team's is parked for the review list unjudged, and the operator's daily digest counts it. Releasing such mail
 sends it without clearing its destinations. None of it waits for the next
 day.
 
@@ -1673,7 +1677,7 @@ file the policy flags, refuses or cannot open parks it at once; after the
 verdict, so does a QR code the image reader saw that no decoder read, or
 images the reader declined. Images Bedrock refuses (a `ValidationException`
 that the same request without the images does not get) park any team's
-unsent email, keep no preview, and the operator's daily digest counts it. When a body image cannot be fetched or Bedrock does not
+unsent email, keep no preview, and the operator's daily digest counts it; on an email already sent, the operator is mailed at once, once a day per team. When a body image cannot be fetched or Bedrock does not
 answer, a New-tier team's mail from a sending domain under 7 days old waits
 as for a judge outage; other mail is judged without those images, and Jev is
 told what was not read. Links in files and QR codes count as destinations at
@@ -1784,7 +1788,7 @@ is; the console wins.
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Draws after sending per team per UTC day; past it they stop silently. Mail judged before SES neither counts nor is capped |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide draws after sending; past it tier sampling stops, first sends and anomalies continue |
 | `MONITOR_FLAG_RISK` | 0.85 | The team samples four times as much, and gets the `monitor` flag with an abuse verdict from `MONITOR_FLAG_SCORE` in the last 7 days; the flag stays until the risk falls back under this |
-| `MONITOR_ALERT_RISK` | 0.9 | The team is counted in the operator's daily digest, once per team per day |
+| `MONITOR_ALERT_RISK` | 0.9 | The operator is emailed, once per team per day, unless that verdict's hold or pause mail already went |
 | `MONITOR_PAUSE_RISK` | 0.95 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
 | `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score, and the `monitor` flag wants an abuse verdict from it in the last 7 days |
@@ -1799,14 +1803,16 @@ hourly sample count, and the operator is emailed, at most once every six
 hours, when more than 20% of an hour's samples (at least 20 of them) went
 unjudged, or as soon as TypeSafe rejects the API key.
 
-**Operator mail.** A review hold, a broadcast pause, a new team that matches
-a team suspended for phishing, and a judge that keeps failing are mailed at
-once. The rest waits for one daily digest at 09:00 UTC (`monitor.digest`):
-for each team, how many alerts, emails parked for a new destination,
-destinations whose clearance was taken back, and emails whose images
+**Operator mail.** A review hold, a broadcast pause, a risk alert, images
+Bedrock refused on an email already sent, a new team that matches a team
+suspended for phishing, and a judge that keeps failing are mailed at once.
+The rest waits for one daily digest at 09:00 UTC (`monitor.digest`): for
+each team, how many times mail was parked for a new destination,
+destinations whose clearance was taken back, and unsent emails whose images
 Bedrock refused, with a link to its review page. It gives counts only, never
 a sender, subject, destination or verdict, and no digest goes out on a day
-with nothing to report.
+with nothing to report. When the digest cannot be sent, its counts wait for
+the next one.
 
 ## New-domain warm-up (optional)
 

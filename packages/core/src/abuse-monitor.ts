@@ -597,7 +597,7 @@ export async function planBroadcastSamples(
 export interface VerdictOutcome {
   risk: number;
   tier: MonitorTier;
-  /** Counted for the operator's digest now: the risk crossed the alert line, first today. */
+  /** The operator is told now: the risk crossed the alert line, first today. */
   alert: boolean;
   /** Broadcasts were paused now by the policy. */
   paused: boolean;

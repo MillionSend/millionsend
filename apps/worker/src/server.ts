@@ -817,8 +817,6 @@ await queue.work(
         tracking,
         monitor,
         platformDomains,
-        mailer,
-        appBaseUrl: env.APP_BASE_URL,
         ...(unsubscribe ? { unsubscribe } : {}),
       },
       payload,

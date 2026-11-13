@@ -2,6 +2,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { MONITOR_TIERS } from "../src/abuse-monitor.js";
 import { en } from "../src/account-mail/en.js";
 import { ptBR } from "../src/account-mail/pt-BR.js";
 import {
@@ -124,6 +125,24 @@ describe("account mail catalogs", () => {
     ).toBe(
       "1.000 e-mails em quarentena, 1 rascunho aguardando aprovação e 1 envio barrado pelas regras das suas caixas",
     );
+  });
+  it("names every monitor tier in the operator's language, never by its key", () => {
+    for (const locale of MAIL_LOCALES) {
+      for (const tier of MONITOR_TIERS) {
+        expect(accountMailPhrase({ locale, kind: "monitor.alert", key: tier }), tier).toBeTruthy();
+      }
+    }
+    const alert = buildAccountMail({
+      kind: "monitor.alert",
+      locale: "pt-BR",
+      url: "https://app.example/console/safety/t",
+      values: {
+        ...VALUES,
+        tier: accountMailPhrase({ locale: "pt-BR", kind: "monitor.alert", key: "probation" }),
+      },
+    });
+    expect(alert.text).toContain("(nível em observação,");
+    expect(alert.text).not.toContain("probation");
   });
 });
 

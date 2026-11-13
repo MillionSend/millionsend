@@ -67,11 +67,6 @@ const sendDeps = (settings: Partial<MonitorSettings> = {}): SendDeps => ({
       void judgeQueue.push({ sampleId, screening: opts?.screening ?? false }),
   },
   reschedule: async (emailId, at) => void rescheduled.push({ emailId, at }),
-  mailer: {
-    send: async (_to, m) => {
-      mails.push(m.kind);
-    },
-  },
 });
 
 const verdict = (score: number): AbuseJudge => ({
@@ -427,6 +422,37 @@ it("sends an established team's mail with a new destination past the day's scree
   expect(judgeQueue).toHaveLength(1);
   expect(mails).toEqual([]);
   expect(sesCalls).toEqual([id]);
+
+  // One phishing verdict after the send stops the rest of the day's past-cap mail.
+  await judge((await sampleOf(id))?.id ?? "", verdict(95));
+  const next = await email(t, link("over-budget-next.example"));
+  expect(await sendEmail(db, sendDeps(capped), { emailId: next })).toBe("parked");
+  expect(await row(next)).toMatchObject({ parkReason: "destination" });
+  expect(sesCalls).toEqual([id]);
+});
+
+it("screens every email to a revoked destination, past a clean verdict on it and past the cap", async () => {
+  const t = await team("revoked-repeat", "established");
+  const past = new Date(Date.now() - 3 * DAY);
+  await db.insert(schema.teamDestinations).values({
+    teamId: t.teamId,
+    domain: "revoked.example",
+    clearedAt: past,
+    revokedAt: past,
+  });
+  const first = await email(t, link("revoked.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: first })).toBe("deferred");
+  await judge((await sampleOf(first))?.id ?? "", verdict(10));
+  expect(await sendEmail(db, sendDeps(), { emailId: first })).toBe("sent");
+  const again = await email(t, link("revoked.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: again })).toBe("deferred");
+  expect(await sampleOf(again)).toMatchObject({ screening: true, status: "pending" });
+  await judge((await sampleOf(again))?.id ?? "", verdict(10));
+
+  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
+  const capped = await email(t, link("revoked.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: capped })).toBe("parked");
+  expect(sesCalls).toEqual([first]);
 });
 
 it(`makes a team's next screening wait its turn behind ${SCREEN_OUTSTANDING_MAX} waiting on the judge`, async () => {

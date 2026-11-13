@@ -5,11 +5,7 @@ import { inArray, sql } from "drizzle-orm";
 import { mailOperator, type SystemMailer } from "../system-mail.js";
 
 /** The monitor notices that wait for the daily digest instead of mailing the operator at once. */
-export type MonitorDigestKind =
-  | "alert"
-  | "destination_parked"
-  | "destination_revoked"
-  | "media_blocked";
+export type MonitorDigestKind = "destination_parked" | "destination_revoked" | "media_blocked";
 
 /**
  * Counts one notice toward the team's next digest. A failure is logged, not
@@ -34,15 +30,40 @@ export async function noteForDigest(
 /**
  * One mail to the operator with every team's counts since the last digest,
  * by kind of notice, never the mail's own words; nothing when there are
- * none. The delete is the claim: a second worker gets no rows. A send that
- * fails is logged, not retried. Returns how many teams it named.
+ * none. The delete is the claim: a second worker gets no rows. When the
+ * mail fails the counts go back, added to any noted since, for the next
+ * digest. Returns how many teams it named.
  */
 export async function sendMonitorDigest(
   db: Db,
   deps: { mailer?: SystemMailer | undefined; appBaseUrl?: string | undefined },
 ): Promise<number> {
-  const items = await db.delete(schema.monitorDigest).returning();
-  if (items.length === 0 || !deps.mailer) return 0;
+  const { mailer } = deps;
+  if (!mailer) return 0;
+  const d = schema.monitorDigest;
+  const items = await db.delete(d).returning();
+  if (items.length === 0) return 0;
+  try {
+    return await mailDigest(db, mailer, deps.appBaseUrl, items);
+  } catch (err) {
+    console.error(`monitor.digest: operator mail failed, counts kept: ${errorSummary(err)}`);
+    await db
+      .insert(d)
+      .values(items)
+      .onConflictDoUpdate({
+        target: [d.teamId, d.kind],
+        set: { count: sql`${d.count} + excluded.count` },
+      });
+    return 0;
+  }
+}
+
+async function mailDigest(
+  db: Db,
+  mailer: SystemMailer,
+  appBaseUrl: string | undefined,
+  items: (typeof schema.monitorDigest.$inferSelect)[],
+): Promise<number> {
   const teams = await db
     .select({ id: schema.teams.id, name: schema.teams.name })
     .from(schema.teams)
@@ -55,30 +76,19 @@ export async function sendMonitorDigest(
       ),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  try {
-    await mailOperator(
-      db,
-      deps.mailer,
-      "monitor.digest",
-      "/console/safety",
-      {},
-      deps.appBaseUrl,
-      (locale) =>
-        byTeam.map((team) =>
-          accountMailPhrase({
-            locale,
-            kind: "monitor.digest",
-            key: "team",
-            values: {
-              team: team.name,
-              counts: mailCountList(locale, "monitor.digest", team.counts),
-              page: `${deps.appBaseUrl ?? ""}/console/safety/${team.id}`,
-            },
-          }),
-        ),
-    );
-  } catch (err) {
-    console.error(`monitor.digest: operator mail failed: ${errorSummary(err)}`);
-  }
+  await mailOperator(db, mailer, "monitor.digest", "/console/safety", {}, appBaseUrl, (locale) =>
+    byTeam.map((team) =>
+      accountMailPhrase({
+        locale,
+        kind: "monitor.digest",
+        key: "team",
+        values: {
+          team: team.name,
+          counts: mailCountList(locale, "monitor.digest", team.counts),
+          page: `${appBaseUrl ?? ""}/console/safety/${team.id}`,
+        },
+      }),
+    ),
+  );
   return byTeam.length;
 }

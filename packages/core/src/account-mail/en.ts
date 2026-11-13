@@ -487,6 +487,21 @@ export const en = {
     button: "Open metrics",
     extra: { waiting: " Mail that was waiting is going out now." },
   },
+  "monitor.alert": {
+    subject: "Content monitor: a team needs a look",
+    body: [
+      "The content monitor's risk for {team} reached {risk} ({tier} tier, {samples} samples judged in the last 7 days, {flagged} over the flag line). The model reads a sample of accepted mail; this alert by itself pauses and holds nothing.",
+      "Open the review page to see the sampled verdicts, the content checks and the team's history, and decide. This notice repeats at most once a day per team while the risk stays over the line.",
+    ],
+    button: "Open review",
+    extra: {
+      new: "new",
+      probation: "probation",
+      established: "established",
+      trusted: "trusted",
+      exempt: "exempt",
+    },
+  },
   "monitor.broadcasts_paused": {
     subject: "Content monitor paused a team's broadcasts",
     body: [
@@ -545,6 +560,15 @@ export const en = {
       "Sent to the instance operator at most once every six hours while the share stays over 20%, the provider keeps rejecting the API key, or screening before sending gives up on mail.",
     ],
   },
+  "monitor.media_blocked": {
+    subject: "Content monitor: the image reader refused an email's images",
+    body: [
+      "Amazon Bedrock refused to read the images in an email from {team} (HTTP 400). Bedrock answers this way when its abuse detection blocks an image, which includes child sexual abuse material. No preview of these images is kept.",
+      "The email was judged after sending and was already delivered. This alone does not hold the team, and the team is not told. An email refused before sending waits on Trust & safety and is counted in the daily digest instead.",
+    ],
+    button: "Open review list",
+    muted: ["Sent to the instance operator at most once a day per team."],
+  },
   "monitor.digest": {
     subject: "Content monitor: daily digest",
     body: [
@@ -556,10 +580,8 @@ export const en = {
     ],
     extra: {
       team: "{team}: {counts}. {page}",
-      "alert.one": "{n} risk alert",
-      "alert.other": "{n} risk alerts",
-      "destination_parked.one": "{n} email parked for a new destination",
-      "destination_parked.other": "{n} emails parked for new destinations",
+      "destination_parked.one": "{n} time mail to a new destination was parked",
+      "destination_parked.other": "{n} times mail to new destinations was parked",
       "destination_revoked.one": "{n} email that took a destination's clearance back",
       "destination_revoked.other": "{n} emails that took destinations' clearance back",
       "media_blocked.one": "{n} email whose images the image reader refused",
