@@ -57,6 +57,11 @@ export interface JudgeBlockInput {
   team: {
     name: string;
     verifiedDomains: string[];
+    /**
+     * Owner domains the team is known to hold beyond them (teamOwnDomains):
+     * its members' work addresses' once its mail cleared them.
+     */
+    ownDomains?: string[] | undefined;
     /** Days since the team's first accepted send; null before it. */
     ageDays: number | null;
     plan: string;
@@ -95,6 +100,13 @@ function verifiedDomains(names: string[]): string[] {
   const verified = names.map(oneLine);
   const owned = verified.flatMap((name) => vouchedRegistrableDomain(name) ?? []);
   return [...new Set([...verified, ...owned])];
+}
+
+/** The verified domains as the block lists them, and every other owner domain the team holds. */
+function ownDomains(team: JudgeBlockInput["team"]): string[] {
+  return [
+    ...new Set([...verifiedDomains(team.verifiedDomains), ...(team.ownDomains ?? []).map(oneLine)]),
+  ];
 }
 
 export function redacted(s: string): string {
@@ -228,13 +240,14 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
   // The text part's own links count when the judge reads it: as the body, or beside a different HTML.
   const rows = linkRows(
     extractLinks(stripped?.html ?? null, !stripped || plainShown ? input.text : null),
-    input.team.verifiedDomains,
+    [...input.team.verifiedDomains, ...(input.team.ownDomains ?? [])],
     input.novelDomains,
     { markLocal: true },
   );
   const lines = [
     `Team name: ${oneLine(input.team.name)}`,
     `Verified domains: ${verifiedDomains(input.team.verifiedDomains).join(", ") || "(none)"}`,
+    `Team's own domains: ${ownDomains(input.team).join(", ") || "(none)"}`,
     `Team age (days): ${input.team.ageDays ?? "unknown"}`,
     `Plan: ${oneLine(input.team.plan)}`,
     `From: ${oneLine(input.from)}`,

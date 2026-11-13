@@ -1539,7 +1539,9 @@ verificados da equipe. Um link que não dá para ler também conta como destino;
 um link para um endereço de loopback (localhost e seus subdomínios,
 127.0.0.1, `::1`) nunca conta: ali não tem nenhuma página de quem envia, e ele
 nunca se torna conhecido. Um endereço de rede privada conta como qualquer
-outro destino.
+outro destino. Também nunca conta um nome fora da internet pública
+(`example.com`, `example.net`, `example.org`, um nome sob `.test`,
+`.invalid`, `.local` ou `.internal`).
 Uma avaliação abaixo de 70 que não aponta nada do tipo phishing torna os
 destinos da mensagem conhecidos da equipe, quando ela levava no máximo 5
 destinos novos; liberar um e-mail em espera por um destino novo, ou esperando
@@ -1547,10 +1549,13 @@ depois de uma avaliação, também torna, e liberar um e-mail em espera pelas
 imagens ou arquivos, ou por uma falha do avaliador, não torna nenhum. Um
 encurtador de links, ou um link que não dá para ler, nunca se torna conhecido.
 Por 7 dias depois que um destino se torna conhecido, todo e-mail para ele é
-avaliado depois do envio, e uma avaliação do tipo phishing a partir de 80 num
+avaliado depois do envio, e uma avaliação do tipo phishing a partir de 90 num
 deles desfaz isso: e-mails para ele voltam a ser avaliados antes do SES,
 nenhuma avaliação o torna conhecido de novo (a liberação do operador torna), e
-o operador recebe e-mail no máximo uma vez por dia por equipe. Uma mensagem
+o operador recebe e-mail no máximo uma vez por dia por equipe. Uma plataforma
+para a qual quase todo remetente aponta (Facebook, Instagram, WhatsApp,
+YouTube, LinkedIn, X, TikTok, Google, Apple) ou um provedor de e-mail é
+avaliado como qualquer destino, mas nunca perde a liberação. Uma mensagem
 com mais de 20 destinos novos não é avaliada: fica em espera para o operador.
 Uma transmissão é avaliada antes de gravar as cópias quando o próprio HTML
 leva um destino novo, e uma cópia renderizada quando um campo do contato
@@ -1597,9 +1602,24 @@ pausar a equipe, e a mesma mensagem com outro nome ainda pausa a equipe. Um
 aviso que traz um domínio novo ao lado do site já liberado mantém a liberação
 do site enquanto o novo é avaliado; outro domínio liberado no aviso, como a
 página da transportadora, perde a liberação como antes.
-Essas amostras não contam para nenhum limite diário; uma equipe tem 200 delas
-por dia, e depois disso o e-mail dela com um destino novo espera o próximo dia
-UTC.
+Essas amostras não contam para nenhum limite diário. Um e-mail cujos destinos
+novos estavam todos numa mensagem avaliada no mesmo dia UTC não é avaliado de
+novo (a menos que um seja um encurtador, um endereço de loopback ou um link que
+não dá para ler): espera esse veredito e, quando ele veio abaixo de 70 sem
+apontar nada do tipo phishing e não deixou nada em espera, sai e é avaliado
+depois do envio, todos eles, mesmo além do limite diário de amostras da
+equipe. Assim que qualquer avaliação desses destinos no dia, antes ou depois
+de um envio, for do tipo phishing a partir de 80, cada e-mail seguinte para
+eles volta a ser avaliado por conta própria. O e-mail de uma equipe passa pela
+avaliação de 200 conjuntos de destinos novos por dia, e a repetição de um
+conjunto já avaliado não gasta nenhum deles; depois deles, o e-mail que
+seria avaliado por um destino novo sai e é avaliado depois do envio, todos
+eles, mesmo além do limite diário de amostras da equipe, quando a equipe
+está no nível Estabelecida ou Confiável e não teve nenhuma sinalização
+aberta, por qualquer motivo, nos últimos 30 dias; o de qualquer outra equipe
+fica em espera na lista de revisão sem avaliação, e o operador recebe um
+e-mail no máximo uma vez por dia por equipe. Liberar esse e-mail o envia sem
+tornar os destinos dele conhecidos. Nada disso espera o dia seguinte.
 
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma
@@ -1664,6 +1684,10 @@ privacidade da instância (veja também o
 armazenado pelo MillionSend: o nome da equipe, os domínios verificados (mais o domínio
 registrável de cada um, a forma em que os links aparecem, quando o sufixo é
 inequívoco), os
+domínios próprios da equipe (esses e os domínios dos e-mails de login
+verificados dos membros, depois que o e-mail da equipe os tornou conhecidos
+como destinos, a não ser que o endereço seja de um provedor de e-mail ou de
+um serviço de e-mail descartável; nunca um nome que o operador liberou), os
 dias desde o primeiro envio e o plano; os cabeçalhos `From` e `Reply-To` como
 enviados; o `Subject`; a mensagem como o leitor a vê, lida da parte HTML (ou
 da parte em texto puro, quando o HTML falta ou está em branco): o texto
@@ -1679,7 +1703,7 @@ imagem, ações de formulário, links em SVG e os URLs do texto), cada um com o
 seu texto e o domínio registrável onde ele chega, lido como o navegador lê e
 passando por até três redirecionadores conhecidos, como o `/url?q=` do
 Google, e os links para domínios que a equipe nunca usou, os que não dá para
-ler e os que saem dos domínios verificados dela listados primeiro (até 30
+ler e os que saem dos domínios próprios dela listados primeiro (até 30
 linhas), com um link para um endereço de loopback (localhost, 127.0.0.1)
 marcado `(local address)` e listado por último; uma linha que avisa quando a mensagem
 mostra menos de 100 caracteres de texto ao lado de uma imagem, de um anexo
@@ -1856,9 +1880,9 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | Uma anomalia (uma checagem de domínio de link, encurtador ou padrão de phishing falhando, menos de 100 caracteres de texto com imagens ou arquivos levando a mensagem, um anexo) multiplica a taxa; duas forçam a amostra |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Sorteios depois do envio por equipe por dia UTC; além disso param em silêncio. E-mail avaliado antes do SES não conta nem tem limite |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Sorteios depois do envio na instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
-| `MONITOR_FLAG_RISK` | 0.5 | A equipe é amostrada quatro vezes mais e recebe a sinalização `monitor` com uma avaliação de abuso a partir de `MONITOR_FLAG_SCORE` nos últimos 7 dias; a sinalização fica até o risco voltar abaixo deste valor |
-| `MONITOR_ALERT_RISK` | 0.7 | O operador é avisado por e-mail, uma vez por equipe por dia |
-| `MONITOR_PAUSE_RISK` | 0.85 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |
+| `MONITOR_FLAG_RISK` | 0.85 | A equipe é amostrada quatro vezes mais e recebe a sinalização `monitor` com uma avaliação de abuso a partir de `MONITOR_FLAG_SCORE` nos últimos 7 dias; a sinalização fica até o risco voltar abaixo deste valor |
+| `MONITOR_ALERT_RISK` | 0.9 | O operador é avisado por e-mail, uma vez por equipe por dia |
+| `MONITOR_PAUSE_RISK` | 0.95 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
 | `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação, e a sinalização `monitor` pede uma avaliação de abuso a partir dela nos últimos 7 dias |
 | `MONITOR_HOLD_SCORE` | 90 | Só equipes novas: uma avaliação do tipo phishing a partir desta pontuação pausa a equipe para revisão |

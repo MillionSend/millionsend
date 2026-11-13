@@ -144,12 +144,12 @@ describe("liftDeliverabilityPause", () => {
       .insert(schema.teamFlags)
       .values({ teamId: branded, reason: "brand", detail: { brand: "Example" } });
     const monitored = await pausedTeam("acme-monitored");
-    // Settled verdicts over the flag line: the risk reads about 0.73.
+    // Settled verdicts over the flag line: the risk reads about 0.89.
     await db.insert(schema.teamMonitor).values({
       teamId: monitored,
       firstSendAt: new Date(now.getTime() - 90 * DAY_MS),
-      riskNum: 9,
-      riskDen: 10,
+      riskNum: 20,
+      riskDen: 20,
       riskUpdatedAt: now,
     });
 

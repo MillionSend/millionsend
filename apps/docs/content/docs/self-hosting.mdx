@@ -1475,16 +1475,21 @@ wrappers; a free host's `x.pages.dev` counts on its own) or of its Reply-To,
 less the team's verified domains. A link that cannot be read counts as a
 destination too. A link to a loopback address (localhost and its subdomains,
 127.0.0.1, `::1`) never is: no page a sender serves is there, and it never
-clears; a private network's address is a destination like any other. A
+clears; a private network's address is a destination like any other. Nor is
+a name off the public web (`example.com`, `example.net`, `example.org`, a name
+under `.test`, `.invalid`, `.local` or `.internal`). A
 verdict under 70 that names nothing phishing-type clears
 the message's destinations for the team, when it carried 5 new ones at most;
 so does releasing mail parked for a new destination, or waiting after a
 verdict, while releasing mail parked for its media or a failing judge clears
 none. A link shortener, or a link that cannot be read, is never cleared. For 7
 days after a destination clears, every email to it is judged after it is sent,
-and a phishing-type verdict from 80 on one takes the clearance back: mail to
+and a phishing-type verdict from 90 on one takes the clearance back: mail to
 it is judged before SES again, no verdict clears it again (an operator's
 release does), and the operator is mailed at most once a day per team. A
+platform nearly every sender links to (Facebook, Instagram, WhatsApp,
+YouTube, LinkedIn, X, TikTok, Google, Apple) or a mailbox provider is
+screened like any destination, but never loses its clearance. A
 message with more than 20 new destinations is not judged: it waits for the
 operator. A broadcast is judged before its fan-out when its own HTML carries a
 new destination, and a rendered copy when a contact field put one there; mail
@@ -1524,8 +1529,22 @@ such notices to them go out without the 2-minute wait or a park and never
 hold the team, while the same message under another name is held as before.
 A notice that adds a domain beside its released site keeps the site's
 clearance while the new one is screened; any other released name in it, a
-carrier's page included, is taken back as before. These samples count against no daily cap; a team has 200 of
-them a day, past which its mail with a new destination waits for the next UTC
+carrier's page included, is taken back as before. These samples count against no daily cap.
+Mail whose new destinations all sat in one message screened the same UTC day
+is not screened again (unless one is a shortener, a loopback address or a
+link that cannot be read): it waits for that verdict and, once that verdict
+came back under 70 naming nothing phishing-type and parked nothing, is sent
+and judged after it goes out, every one, past the team's daily sample cap
+too. Once any verdict on those destinations that day, before or after a
+send, is phishing-type from 80, each later email to them is screened as its
+own again. A team's mail screens 200 sets of new destinations a day, and a
+repeat of a set already screened takes none of them; past them, mail that
+would be screened for a new destination is sent and judged after it goes
+out, every one, past the team's daily sample cap too, when its team is
+Established or Trusted and has had no flag opened, for any reason, in the
+last 30 days; any other team's is parked for the review list unjudged, and
+the operator is mailed at most once a day per team. Releasing such mail
+sends it without clearing its destinations. None of it waits for the next
 day.
 
 **The review list.** Trust & safety lists every unsent email screening
@@ -1582,7 +1601,11 @@ notice (see also its [customer agreement](https://typesafe.ai/legal/mca) and
 
 **Exactly what Jev sees**, built in memory per call and never stored by
 MillionSend: the team's name, verified domains (plus each one's registrable
-domain, the form links are shown in, where the suffix is unambiguous), days since its first send
+domain, the form links are shown in, where the suffix is unambiguous), the
+team's own domains (those, and the domains of its members' verified sign-in
+addresses once the team's mail cleared them as destinations, unless the
+address is on a mailbox provider or a disposable-mail service; never a
+name an operator released), days since its first send
 and plan; the `From` and `Reply-To` headers as sent; the `Subject`; the
 message as a reader sees it, read from the HTML part (or the plain-text part
 when the HTML is missing or blank): the rendered visible text (its first
@@ -1597,7 +1620,7 @@ form actions, SVG links and the URLs in the text), each with its anchor text
 and the registrable domain it lands on, read as a browser reads it and
 through up to three redirect wrappers such as Google's `/url?q=`, and links
 to domains the team has never sent to, links that cannot be read and other
-links off its verified domains listed first (up to 30 rows), a link to a
+links off its own domains listed first (up to 30 rows), a link to a
 loopback address (localhost, 127.0.0.1) marked `(local address)` and listed
 last; a line flagging a message that shows under 100 characters of
 text beside an image, an attachment or a QR code drawn with characters or
@@ -1764,9 +1787,9 @@ is; the console wins.
 | `MONITOR_ANOMALY_MULTIPLIER` | 20 | One anomaly (a failing link-domain, shortener or phishing-pattern check, under 100 characters of text carried by images or files, an attachment) multiplies the rate; two force the sample |
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Draws after sending per team per UTC day; past it they stop silently. Mail judged before SES neither counts nor is capped |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide draws after sending; past it tier sampling stops, first sends and anomalies continue |
-| `MONITOR_FLAG_RISK` | 0.5 | The team samples four times as much, and gets the `monitor` flag with an abuse verdict from `MONITOR_FLAG_SCORE` in the last 7 days; the flag stays until the risk falls back under this |
-| `MONITOR_ALERT_RISK` | 0.7 | The operator is emailed, once per team per day |
-| `MONITOR_PAUSE_RISK` | 0.85 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
+| `MONITOR_FLAG_RISK` | 0.85 | The team samples four times as much, and gets the `monitor` flag with an abuse verdict from `MONITOR_FLAG_SCORE` in the last 7 days; the flag stays until the risk falls back under this |
+| `MONITOR_ALERT_RISK` | 0.9 | The operator is emailed, once per team per day |
+| `MONITOR_PAUSE_RISK` | 0.95 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
 | `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score, and the `monitor` flag wants an abuse verdict from it in the last 7 days |
 | `MONITOR_HOLD_SCORE` | 90 | New teams only: a phishing-type verdict from this score holds the team for review |

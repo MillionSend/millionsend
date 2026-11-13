@@ -23,7 +23,7 @@ export function validMonitorValue(kind: MonitorSettingKind, value: number): bool
 }
 
 /** The colour a monitor risk reads in: danger from the alert line, warn from the flag line. */
-export function riskColor(risk: number, flagRisk = 0.5, alertRisk = 0.7): string | undefined {
+export function riskColor(risk: number, flagRisk = 0.85, alertRisk = 0.9): string | undefined {
   return risk >= alertRisk ? "var(--ms-danger)" : risk >= flagRisk ? "var(--ms-warn)" : undefined;
 }
 

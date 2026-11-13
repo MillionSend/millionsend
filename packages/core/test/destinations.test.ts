@@ -14,6 +14,7 @@ import {
   linkDomainsAged,
   messageDestinations,
   teamNovelDestinations,
+  teamOwnDomains,
   unclearedDestinations,
 } from "../src/screening.js";
 import { DAY_MS } from "../src/utc-day.js";
@@ -78,6 +79,34 @@ describe("a message's destinations, read as the judge reads its links", () => {
     ).toEqual(["evil-pay.com", "google.com", "pix-promo.com", "secure-update.net"]);
   });
 
+  it("are never a name off the public web, and a platform or mailbox still is one", () => {
+    const hosts = [
+      "www.facebook.com",
+      "sites.google.com",
+      "localhost",
+      "docs.example.com",
+      "shop.test",
+      "printer.local",
+      "box.tailnet-1234.ts.net",
+      "evil-pay.com",
+    ];
+    expect(
+      messageDestinations({
+        html: hosts.map((host) => `<a href="https://${host}/">x</a>`).join(""),
+        text: null,
+        replyTo: ["Help <help@gmail.com>"],
+        verifiedDomains: [],
+      }),
+    ).toEqual([
+      "evil-pay.com",
+      "facebook.com",
+      "gmail.com",
+      "google.com",
+      "localhost",
+      "tailnet-1234.ts.net",
+    ]);
+  });
+
   it("are none for a team on tx.acme.com.br linking and replying to acme.com.br", () => {
     expect(
       messageDestinations({
@@ -134,6 +163,44 @@ describe("the destination registry", () => {
         replyTo: null,
       }),
     ).toEqual(["new.example"]);
+  });
+
+  it("reads a verified work address the team's mail cleared as its own, never a release or a shared name", async () => {
+    const teamId = await createTeam(db, "registry-held");
+    await db
+      .insert(schema.domains)
+      .values({ teamId, name: "send.acme-mail.example", region: "us-east-1", status: "verified" });
+    const members = [
+      ["held-work", "ana@shop.acme-store.example", true],
+      ["held-unverified", "bia@unverified.example", false],
+      ["held-gmail", "caio@gmail.com", true],
+      ["held-hotmail", "dani@hotmail.fr", true],
+    ] as const;
+    for (const [id, email, emailVerified] of members) {
+      await db.insert(schema.user).values({ id, name: id, email, emailVerified });
+      await db.insert(schema.teamMembers).values({ teamId, userId: id });
+    }
+    // Not cleared yet: a sign-in address proves a mailbox, not the domain.
+    expect(await teamOwnDomains(db, teamId)).toEqual(["acme-mail.example"]);
+    await clearDestinations(db, teamId, ["released.example", "google.com"], NOW, {
+      operator: true,
+    });
+    await clearDestinations(db, teamId, ["acme-store.example", "gmail.com"], NOW);
+    expect(await teamOwnDomains(db, teamId)).toEqual(["acme-mail.example", "acme-store.example"]);
+    const links = [
+      "acme-mail.example",
+      "www.acme-store.example",
+      "unverified.example",
+      "gmail.com",
+    ];
+    expect(
+      await teamNovelDestinations(db, {
+        teamId,
+        html: links.map((host) => `<a href="https://${host}/">x</a>`).join(""),
+        text: null,
+        replyTo: null,
+      }),
+    ).toEqual(["unverified.example"]);
   });
 });
 

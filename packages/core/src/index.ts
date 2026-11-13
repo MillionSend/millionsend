@@ -755,6 +755,7 @@ export {
   clearDestinations,
   DESTINATION_CLEAR_BELOW,
   DESTINATION_PROBATION_DAYS,
+  DESTINATION_REVOKE_SCORE,
   DESTINATION_SCREENS_PER_DAY,
   DESTINATIONS_CLEARED_MAX,
   destinationStanding,
@@ -762,6 +763,7 @@ export {
   judgeAfterSend,
   LINK_AGE_LOOKUPS_PER_VERDICT,
   linkDomainsAged,
+  MAJOR_PLATFORM_DOMAINS,
   mediaParks,
   messageDestinations,
   NOVEL_DESTINATIONS_MAX,
@@ -788,6 +790,7 @@ export {
   spareWaitingSamples,
   teamDestinationStanding,
   teamNovelDestinations,
+  teamOwnDomains,
   unclearedDestinations,
   verdictClearsDestinations,
 } from "./screening.js";

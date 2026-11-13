@@ -7,6 +7,8 @@ import {
   claimNotification,
   clearDestinations,
   clientIdentitySite,
+  DESTINATION_REVOKE_SCORE,
+  DESTINATION_SCREENS_PER_DAY,
   decryptEmailBody,
   destinationVerdictParks,
   type EmailAttachment,
@@ -34,6 +36,7 @@ import {
   teamDestinationStanding,
   teamMonitorOverview,
   teamMonitorRow,
+  teamOwnDomains,
   UNNAMED_ATTACHMENT,
   utcDay,
   type VerdictOutcome,
@@ -275,7 +278,7 @@ async function judgePending(
     (await deps.linkDomainAged?.(standing.all, now)) === true;
   const platformLink = vouched || (platformShape && sample.screening) || clientSpared;
   // Mail to a destination that cleared within its probation, read as
-  // phishing: the clearance goes, and the operator hears of it, unless an
+  // phishing from DESTINATION_REVOKE_SCORE: the clearance goes, and the operator hears of it, unless an
   // operator's release vouched for this shape on it. A client business's
   // notice keeps its released site's clearance while a link new beside it
   // is screened.
@@ -286,7 +289,7 @@ async function judgePending(
     standing.probation.every((d) => vouchedNames.has(d));
   const probation = standing.probation.filter((d) => d !== clientSite || !vouchedNames.has(d));
   const revoking =
-    !platformProbation && !vouched && isHoldVerdict(verdict, settings.holdRepeatScore)
+    !platformProbation && !vouched && isHoldVerdict(verdict, DESTINATION_REVOKE_SCORE)
       ? probation
       : [];
   // The verdict and its fold commit together: a crash between them would
@@ -444,14 +447,15 @@ async function resumeScreened(
  * The operator hears once a day per team, per kind, that mail to a new
  * destination was parked, or that a cleared destination drew a
  * phishing-type verdict and is new again; the review list holds every
- * parked email.
+ * parked email. A null verdict: the mail parked unjudged, past the team's
+ * screenings of the day.
  */
-async function notifyDestination(
+export async function notifyDestination(
   db: Db,
-  deps: JudgeDeps,
+  deps: Pick<JudgeDeps, "mailer" | "appBaseUrl">,
   kind: "monitor.destination_parked" | "monitor.destination_revoked",
   teamId: string,
-  verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons">,
+  verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons"> | null,
   destinations: readonly string[],
   now: Date,
 ): Promise<void> {
@@ -463,17 +467,32 @@ async function notifyDestination(
       .select({ name: schema.teams.name })
       .from(schema.teams)
       .where(eq(schema.teams.id, teamId));
+    const judged = verdict
+      ? {
+          score: String(verdict.score),
+          verdict: [...verdict.categories, ...verdict.reasons].join(", "),
+        }
+      : null;
     await mailOperator(
       db,
       deps.mailer,
       kind,
       "/console/safety",
-      {
+      (locale) => ({
         team: team?.name ?? teamId,
-        score: String(verdict.score),
-        verdict: [...verdict.categories, ...verdict.reasons].join(", "),
         domain: destinations.slice(0, 5).join(", "),
-      },
+        ...judged,
+        ...(kind === "monitor.destination_parked"
+          ? {
+              why: accountMailPhrase({
+                locale,
+                kind,
+                key: judged ? "judged" : "unjudged",
+                values: judged ?? { n: String(DESTINATION_SCREENS_PER_DAY) },
+              }),
+            }
+          : {}),
+      }),
       deps.appBaseUrl,
     );
   } catch (err) {
@@ -514,6 +533,7 @@ async function loadBlockInput(
   const context: JudgeBlockInput["team"] = {
     name: team.name,
     verifiedDomains: domains.map((d) => d.name),
+    ownDomains: await teamOwnDomains(db, sample.teamId),
     ageDays: monitor.firstSendAt
       ? Math.floor((now.getTime() - monitor.firstSendAt.getTime()) / DAY_MS)
       : 0,

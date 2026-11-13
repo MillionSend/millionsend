@@ -95,14 +95,14 @@ it("opens the monitor flag off the team's risk and carries it on the standing", 
   const risky = await createTeam(db, "risky");
   const later = new Date(NOW.getTime() + 30 * 60_000);
   await db.insert(schema.usageCounters).values({ teamId: risky, day: DAY, sent: 50 });
-  // Twelve certain verdicts an hour ago: about 0.83 now, decaying toward the settled prior.
+  // Twenty certain verdicts an hour ago: about 0.89 now, decaying toward the settled prior.
   await db.insert(schema.teamMonitor).values({
     teamId: risky,
     sentTotal: 50,
     firstSendAt: new Date(NOW.getTime() - 40 * 86_400_000),
-    risk: 0.83,
-    riskNum: 12,
-    riskDen: 12,
+    risk: 0.89,
+    riskNum: 20,
+    riskDen: 20,
     riskUpdatedAt: NOW,
   });
   await db.insert(schema.monitorSamples).values([
@@ -126,11 +126,11 @@ it("opens the monitor flag off the team's risk and carries it on the standing", 
   ]);
   expect(await runSafetyFlags(db, { now: later })).toMatchObject({ opened: 1 });
   expect(await flagsOf(risky)).toMatchObject([
-    { status: "open", reason: "monitor", detail: { risk: 0.83, samples: 2 } },
+    { status: "open", reason: "monitor", detail: { risk: 0.889, samples: 2 } },
   ]);
   expect(
     (await db.select().from(schema.teamStandings)).find((s) => s.teamId === risky)?.monitorRisk,
-  ).toBeCloseTo(0.83, 2);
+  ).toBeCloseTo(0.89, 2);
   // A higher configured line leaves the same team alone next run.
   const evenLater = new Date(later.getTime() + 15 * 60_000);
   expect(await runSafetyFlags(db, { now: evenLater, monitorFlagRisk: 0.9 })).toMatchObject({

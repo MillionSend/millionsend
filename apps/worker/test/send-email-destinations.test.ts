@@ -947,7 +947,7 @@ it("parks a client's notice that also links a carrier, and its release vouches f
 it("keeps a released client site's clearance when its notice links a new carrier, and takes it back on a lure", async () => {
   for (const [answer, kept] of [
     [clientBrand(85), true],
-    [verdict(85), false],
+    [verdict(92), false],
   ] as const) {
     const t = await team(`store-carrier-${kept}`, "new", "example");
     const first = await clientNotice(t);
@@ -968,7 +968,8 @@ it("keeps a released client site's clearance when its notice links a new carrier
         ),
       );
     expect(site?.revokedAt === null, `${kept}`).toBe(kept);
-    expect(await suspension(t.teamId), `${kept}`).toBeNull();
+    // A lure from 90 holds a new team on its own.
+    expect(await suspension(t.teamId), `${kept}`).toBe(kept ? null : "review");
   }
 });
 
@@ -982,7 +983,7 @@ it("takes back a released carrier beside the client's site when a new one joins 
     extra: `${tracking()}${tracking("second-carrier.example")}`,
   });
   await sendEmail(db, sendDeps, { emailId: next });
-  await judge((await sampleOf(next))?.id ?? "", clientBrand(85));
+  await judge((await sampleOf(next))?.id ?? "", clientBrand(92));
   const rows = await db
     .select({
       domain: schema.teamDestinations.domain,
@@ -1007,7 +1008,7 @@ it("counts released spares again on the verdict that takes their site's release 
   await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: ids, holdLine: 80 });
   const lure = await email(t, `https://${CLIENT_SITE}/login`);
   await sendEmail(db, sendDeps, { emailId: lure });
-  await judge((await sampleOf(lure))?.id ?? "", verdict(85));
+  await judge((await sampleOf(lure))?.id ?? "", verdict(92));
   expect(await suspension(t.teamId)).toBe("review");
   expect(await sendEmail(db, sendDeps, { emailId: lure })).toBe("parked");
 });

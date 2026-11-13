@@ -579,11 +579,17 @@ export const ptBR = {
   "monitor.destination_parked": {
     subject: "O monitor de conteúdo deixou em espera e-mails para um destino novo",
     body: [
-      "{team} enviou e-mails para um destino que nunca tinha usado ({domain}), e o avaliador deu pontuação {score} ({verdict}). Esses e-mails estão em espera em Confiança e segurança, onde você os libera, o que os envia e torna o destino conhecido da equipe, ou os cancela.",
-      "A equipe não fica pausada para revisão: o resto do e-mail dela continua saindo, e ela não fica sabendo. E-mails para o mesmo destino são avaliados antes do envio até que um seja liberado.",
+      "{team} enviou e-mails para um destino que nunca tinha usado ({domain}). {why}",
+      "A equipe não fica pausada para revisão: o resto do e-mail dela continua saindo, e ela não fica sabendo.",
     ],
     button: "Abrir lista de revisão",
     muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
+    extra: {
+      judged:
+        "O avaliador deu pontuação {score} ({verdict}). Esses e-mails estão em espera em Confiança e segurança, onde você os libera, o que os envia e torna o destino conhecido da equipe, ou os cancela. E-mails para o mesmo destino são avaliados antes do envio até que um seja liberado.",
+      unjudged:
+        "Eles não foram avaliados: o e-mail da equipe já tinha passado pela avaliação de {n} conjuntos de destinos novos hoje. Esses e-mails estão em espera em Confiança e segurança, onde você os libera, o que os envia sem tornar o destino conhecido da equipe, ou os cancela. E-mails para o mesmo destino ficam em espera do mesmo jeito pelo resto do dia UTC, e a partir do dia seguinte são avaliados antes do envio.",
+    },
   },
   "monitor.media_blocked": {
     subject: "Monitor de conteúdo: o leitor de imagens recusou as imagens de um e-mail",
