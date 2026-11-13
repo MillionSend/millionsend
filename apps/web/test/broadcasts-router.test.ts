@@ -993,6 +993,17 @@ describe("paced sends", () => {
       .values({ registrableDomain: "example.com", day: utcDay(), accepted: used });
   }
 
+  /** The new domain limit resets at 00:00 UTC; a run crossing it would see a fresh day. */
+  function pinMidday() {
+    const midday = new Date();
+    midday.setUTCHours(12, 0, 0, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(midday);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+  }
+
   const nextMidnight = () => {
     const at = new Date();
     at.setUTCHours(24, 0, 0, 0);
@@ -1000,6 +1011,7 @@ describe("paced sends", () => {
   };
 
   it("sendPlan plans a young domain's send under its new domain limit, never refusing it", async () => {
+    pinMidday();
     stubAccount({ max24h: 100_000, sentLast24h: 0, maxSendRate: 14 });
     const teamId = await createTeam(db, "team-a");
     await seedVerifiedDomain(teamId);
@@ -1023,6 +1035,7 @@ describe("paced sends", () => {
   });
 
   it("a send in progress from a young domain finishes after the limit's reset", async () => {
+    pinMidday();
     stubAccount({ max24h: 100_000, sentLast24h: 0, maxSendRate: 14 });
     const teamId = await createTeam(db, "team-a");
     const { caller, id } = await seedSendingBroadcast(teamId);
