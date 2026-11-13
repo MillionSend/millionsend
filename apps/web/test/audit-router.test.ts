@@ -257,7 +257,7 @@ describe("audit.list", () => {
 
     // A run of certain verdicts on a new team: the monitor pauses its broadcasts.
     const quiet = { ...MONITOR_SETTING_DEFAULTS, autoPause: false };
-    for (let i = 0; i < 12; i += 1) await applyJudgedSample(db, quiet, { teamId, score: 100 });
+    for (let i = 0; i < 60; i += 1) await applyJudgedSample(db, quiet, { teamId, score: 100 });
     const paused = await applyJudgedSample(db, MONITOR_SETTING_DEFAULTS, { teamId, score: 95 });
     expect(paused.paused).toBe(true);
     await operator.console.monitor.resumeBroadcasts({ teamId });
