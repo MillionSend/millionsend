@@ -597,7 +597,7 @@ export async function planBroadcastSamples(
 export interface VerdictOutcome {
   risk: number;
   tier: MonitorTier;
-  /** The operator is emailed now: the risk crossed the alert line and no alert went out today. */
+  /** The operator is told now: the risk crossed the alert line, first today. */
   alert: boolean;
   /** Broadcasts were paused now by the policy. */
   paused: boolean;

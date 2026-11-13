@@ -115,6 +115,7 @@ import { drainWebhookEndpoint } from "./handlers/deliver-webhook.js";
 import { forwardToOwners } from "./handlers/inbox-forward.js";
 import { runInstanceProbes } from "./handlers/instance-probes.js";
 import { alertLinkedTeams } from "./handlers/linkage-alerts.js";
+import { sendMonitorDigest } from "./handlers/monitor-digest.js";
 import { runMonitorHealth } from "./handlers/monitor-health.js";
 import { reportPlanMove, sweepNotifications } from "./handlers/notify.js";
 import { runPlatformBreaker } from "./handlers/platform-breaker.js";
@@ -617,6 +618,10 @@ await queue.scheduleCrons({
       cards: stripe ? (customerId) => cardFingerprints(stripe, customerId) : undefined,
     });
   },
+  "monitor.digest": async () => {
+    const teams = await sendMonitorDigest(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    if (teams > 0) console.log(`monitor.digest: teams=${teams}`);
+  },
   "monitor.health": async () => {
     const result = await runMonitorHealth(db, {
       judge: judgeConfig,
@@ -812,8 +817,6 @@ await queue.work(
         tracking,
         monitor,
         platformDomains,
-        mailer,
-        appBaseUrl: env.APP_BASE_URL,
         ...(unsubscribe ? { unsubscribe } : {}),
       },
       payload,

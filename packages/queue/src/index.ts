@@ -244,6 +244,9 @@ export const CRON_JOBS = {
   // Every 10 min: the content monitor's sample count and unjudged share as
   // probes, and the operator's notice when the judge keeps failing.
   "monitor.health": "*/10 * * * *",
+  // Daily: the operator's one mail of monitor notices that need no action
+  // now (alerts, parked or revoked destinations, refused images).
+  "monitor.digest": "0 9 * * *",
   // Daily: third-party reference data (the disposable-domain list, and the
   // DB-IP databases, monthly files) is refreshed where it is switched on; a
   // failed download keeps the last copy.

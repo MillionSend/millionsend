@@ -576,38 +576,33 @@ export const ptBR = {
       "Enviado ao operador da instância no máximo a cada seis horas enquanto o percentual ficar acima de 20%, o provedor continuar recusando a chave de API ou a avaliação antes do envio desistir de algum e-mail.",
     ],
   },
-  "monitor.destination_parked": {
-    subject: "O monitor de conteúdo deixou em espera e-mails para um destino novo",
-    body: [
-      "{team} enviou e-mails para um destino que nunca tinha usado ({domain}). {why}",
-      "A equipe não fica pausada para revisão: o resto do e-mail dela continua saindo, e ela não fica sabendo.",
-    ],
-    button: "Abrir lista de revisão",
-    muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
-    extra: {
-      judged:
-        "O avaliador deu pontuação {score} ({verdict}). Esses e-mails estão em espera em Confiança e segurança, onde você os libera, o que os envia e torna o destino conhecido da equipe, ou os cancela. E-mails para o mesmo destino são avaliados antes do envio até que um seja liberado.",
-      unjudged:
-        "Eles não foram avaliados: o e-mail da equipe já tinha passado pela avaliação de {n} conjuntos de destinos novos hoje. Esses e-mails estão em espera em Confiança e segurança, onde você os libera, o que os envia sem tornar o destino conhecido da equipe, ou os cancela. E-mails para o mesmo destino ficam em espera do mesmo jeito pelo resto do dia UTC, e a partir do dia seguinte são avaliados antes do envio.",
-    },
-  },
   "monitor.media_blocked": {
     subject: "Monitor de conteúdo: o leitor de imagens recusou as imagens de um e-mail",
     body: [
       "O Amazon Bedrock se recusou a ler as imagens de um e-mail de {team} (HTTP 400). O Bedrock responde assim quando a detecção de abuso dele bloqueia uma imagem, o que inclui material de abuso sexual infantil. Nenhuma prévia dessas imagens fica guardada.",
-      "Um e-mail que ainda não tinha sido enviado fica em espera em Confiança e segurança até você liberar ou cancelar; um avaliado depois do envio já foi entregue. Isso sozinho não deixa a equipe pausada para revisão, e ela não fica sabendo.",
+      "O e-mail foi avaliado depois do envio e já foi entregue. Isso sozinho não deixa a equipe pausada para revisão, e ela não fica sabendo. Um e-mail recusado antes do envio fica em espera em Confiança e segurança e entra no resumo diário.",
     ],
     button: "Abrir lista de revisão",
     muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
   },
-  "monitor.destination_revoked": {
-    subject: "Monitor de conteúdo: e-mail para um destino já liberado foi avaliado como phishing",
+  "monitor.digest": {
+    subject: "Monitor de conteúdo: resumo diário",
     body: [
-      "{team} enviou e-mail para {domain}, um destino que e-mails anteriores tinham liberado na última semana, e o avaliador deu pontuação {score} ({verdict}) depois do envio. O destino deixou de estar liberado: e-mails para ele voltam a ser avaliados antes do envio e ficam em espera em Confiança e segurança com uma avaliação do tipo phishing, e nenhuma avaliação o libera de novo. Liberar e-mails para ele na lista de revisão libera.",
-      "Isso sozinho não deixa a equipe pausada para revisão: o resto do e-mail dela continua saindo, e ela não fica sabendo.",
+      "Desde o último resumo, o monitor de conteúdo registrou estes avisos. Nenhum deles pausou uma equipe para revisão nem as transmissões dela: esses são enviados na hora.",
     ],
     button: "Abrir lista de revisão",
-    muted: ["Enviado ao operador da instância no máximo uma vez por dia por equipe."],
+    muted: [
+      "Enviado ao operador da instância uma vez por dia, só quando há algo a informar. Traz apenas contagens: os e-mails, os destinos e as avaliações estão na página de revisão de cada equipe.",
+    ],
+    extra: {
+      team: "{team}: {counts}. {page}",
+      "destination_parked.one": "{n} vez em que e-mails para um destino novo ficaram em espera",
+      "destination_parked.other": "{n} vezes em que e-mails para destinos novos ficaram em espera",
+      "destination_revoked.one": "{n} e-mail que tirou a liberação de um destino",
+      "destination_revoked.other": "{n} e-mails que tiraram a liberação de destinos",
+      "media_blocked.one": "{n} e-mail cujas imagens o leitor de imagens recusou",
+      "media_blocked.other": "{n} e-mails cujas imagens o leitor de imagens recusou",
+    },
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

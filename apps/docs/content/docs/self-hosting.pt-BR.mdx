@@ -1465,8 +1465,7 @@ quando o risco de uma equipe cruza o limite de sinalização e o avaliador
 considerou abuso pelo menos uma das mensagens dela, a partir da pontuação de
 sinalização, nos últimos 7 dias (um risco que só avaliações limpas levaram
 acima do limite não abre nada; uma sinalização aberta fica até o risco voltar
-abaixo do limite), avisa o operador
-por e-mail uma vez por dia por equipe acima do limite de alerta e, só para uma
+abaixo do limite), manda e-mail ao operador acima do limite de alerta (uma vez por dia por equipe, e não numa avaliação cujo e-mail de pausa já cita a equipe) e, só para uma
 equipe no nível Nova (nos primeiros 1.000 envios ou 72 horas, ou abaixo de
 10.000 envios em 7 dias), pausa as transmissões quando o risco passa do
 limite de pausa e uma mensagem amostrada teve pontuação 90 ou mais no último dia,
@@ -1551,11 +1550,11 @@ encurtador de links, ou um link que não dá para ler, nunca se torna conhecido.
 Por 7 dias depois que um destino se torna conhecido, todo e-mail para ele é
 avaliado depois do envio, e uma avaliação do tipo phishing a partir de 90 num
 deles desfaz isso: e-mails para ele voltam a ser avaliados antes do SES,
-nenhuma avaliação o torna conhecido de novo (a liberação do operador torna), e
-o operador recebe e-mail no máximo uma vez por dia por equipe. Uma plataforma
+nenhuma avaliação o torna conhecido de novo (a liberação do operador torna), e o resumo diário do operador conta isso. Uma plataforma
 para a qual quase todo remetente aponta (Facebook, Instagram, WhatsApp,
 YouTube, LinkedIn, X, TikTok, Google, Apple) ou um provedor de e-mail é
-avaliado como qualquer destino, mas nunca perde a liberação. Uma mensagem
+avaliado como qualquer destino, mas nunca perde a liberação, menos o Google,
+cujos docs, drive, sites e formulários qualquer pessoa pode publicar. Uma mensagem
 com mais de 20 destinos novos não é avaliada: fica em espera para o operador.
 Uma transmissão é avaliada antes de gravar as cópias quando o próprio HTML
 leva um destino novo, e uma cópia renderizada quando um campo do contato
@@ -1572,7 +1571,7 @@ menos de 7 dias pausa a equipe para revisão, e uma de idade desconhecida faz o
 e-mail esperar 2 minutos. Depois do nível Nova, o e-mail fica em espera na
 lista de revisão com uma avaliação do tipo phishing a partir de 90, ou a
 partir de 80 com um domínio de link com menos de 7 dias ou de idade
-desconhecida, e o operador recebe e-mail no máximo uma vez por dia por equipe;
+desconhecida, e o resumo diário do operador conta isso;
 uma equipe depois do nível Nova nunca é pausada para revisão automaticamente.
 Uma equipe no nível Nova é poupada da pausa que uma avaliação traria quando a
 avaliação se apoia só num link de login, troca de senha ou cobrança para o
@@ -1610,15 +1609,18 @@ apontar nada do tipo phishing e não deixou nada em espera, sai e é avaliado
 depois do envio, todos eles, mesmo além do limite diário de amostras da
 equipe. Assim que qualquer avaliação desses destinos no dia, antes ou depois
 de um envio, for do tipo phishing a partir de 80, cada e-mail seguinte para
-eles volta a ser avaliado por conta própria. O e-mail de uma equipe passa pela
+eles volta a ser avaliado por conta própria, e também todo e-mail para um
+conjunto com um destino que perdeu a liberação. O e-mail de uma equipe passa pela
 avaliação de 200 conjuntos de destinos novos por dia, e a repetição de um
 conjunto já avaliado não gasta nenhum deles; depois deles, o e-mail que
 seria avaliado por um destino novo sai e é avaliado depois do envio, todos
 eles, mesmo além do limite diário de amostras da equipe, quando a equipe
-está no nível Estabelecida ou Confiável e não teve nenhuma sinalização
-aberta, por qualquer motivo, nos últimos 30 dias; o de qualquer outra equipe
-fica em espera na lista de revisão sem avaliação, e o operador recebe um
-e-mail no máximo uma vez por dia por equipe. Liberar esse e-mail o envia sem
+está no nível Estabelecida ou Confiável, não teve nenhuma sinalização
+aberta, por qualquer motivo, nos últimos 30 dias, não recebeu nenhuma
+avaliação do tipo phishing a partir de 80 naquele dia, antes ou depois de um
+envio, e o conjunto não tem nenhum destino que perdeu a liberação; o de
+qualquer outra equipe
+fica em espera na lista de revisão sem avaliação, e o resumo diário do operador conta isso. Liberar esse e-mail o envia sem
 tornar os destinos dele conhecidos. Nada disso espera o dia seguinte.
 
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
@@ -1765,8 +1767,7 @@ deixam um QR code que o leitor de imagens viu e nenhum decodificador leu, ou
 imagens que o leitor se recusou a ler. Imagens que o Bedrock recusa (um
 `ValidationException` que a mesma requisição sem as imagens não recebe)
 deixam em espera o e-mail ainda não enviado de qualquer equipe, nenhuma
-prévia fica guardada, e o operador recebe e-mail no máximo uma vez por dia
-por equipe. Quando uma imagem do corpo não pode ser baixada ou o Bedrock não
+prévia fica guardada, e o resumo diário do operador conta isso; num e-mail já enviado, o operador recebe um e-mail na hora, uma vez por dia por equipe. Quando uma imagem do corpo não pode ser baixada ou o Bedrock não
 responde, o e-mail de uma equipe no nível Nova enviado de um domínio com
 menos de 7 dias espera como numa falha do avaliador; os outros são avaliados
 sem essas imagens, e o Jev fica sabendo o que não foi lido. Links em arquivos
@@ -1881,7 +1882,7 @@ ambiente `MONITOR_*` até lá; o console prevalece.
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Sorteios depois do envio por equipe por dia UTC; além disso param em silêncio. E-mail avaliado antes do SES não conta nem tem limite |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Sorteios depois do envio na instância toda; além disso a amostragem por nível para, primeiros envios e anomalias continuam |
 | `MONITOR_FLAG_RISK` | 0.85 | A equipe é amostrada quatro vezes mais e recebe a sinalização `monitor` com uma avaliação de abuso a partir de `MONITOR_FLAG_SCORE` nos últimos 7 dias; a sinalização fica até o risco voltar abaixo deste valor |
-| `MONITOR_ALERT_RISK` | 0.9 | O operador é avisado por e-mail, uma vez por equipe por dia |
+| `MONITOR_ALERT_RISK` | 0.9 | O operador recebe um e-mail, uma vez por equipe por dia, a não ser que o e-mail de pausa daquela avaliação já tenha saído |
 | `MONITOR_PAUSE_RISK` | 0.95 | Só equipes novas: as transmissões são pausadas, com uma pontuação de 90 ou mais no último dia |
 | `MONITOR_AUTO_PAUSE` | true | Se a política de pausa se aplica |
 | `MONITOR_FLAG_SCORE` | 70 | Uma amostra conta como sinalizada no console a partir desta pontuação, e a sinalização `monitor` pede uma avaliação de abuso a partir dela nos últimos 7 dias |
@@ -1896,6 +1897,18 @@ visão geral mostra a contagem de amostras por hora, e o operador é avisado
 por e-mail, no máximo a cada seis horas, quando mais de 20% das amostras de
 uma hora (pelo menos 20 delas) ficaram sem avaliação, ou assim que a
 TypeSafe recusa a chave de API.
+
+**E-mails ao operador.** Uma pausa para revisão, uma pausa de transmissões,
+um alerta de risco, imagens que o Bedrock recusou num e-mail já enviado, uma
+equipe nova que corresponde a uma equipe suspensa por phishing e um
+avaliador que continua falhando são avisados na hora. O resto espera um
+resumo diário às 09:00 UTC (`monitor.digest`): para cada equipe, quantas
+vezes e-mails para um destino novo ficaram em espera, destinos que perderam
+a liberação e e-mails não enviados cujas imagens o Bedrock recusou, com um
+link para a página de revisão dela. Ele traz só contagens, nunca um
+remetente, assunto, destino ou avaliação, e nenhum resumo sai num dia sem
+nada a informar. Quando o resumo não pode ser enviado, as contagens esperam
+o próximo.
 
 ## Aquecimento de domínio novo (opcional)
 

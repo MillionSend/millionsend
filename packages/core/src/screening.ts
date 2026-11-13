@@ -10,7 +10,6 @@ import {
   isNotNull,
   isNull,
   lte,
-  notExists,
   or,
   type SQL,
   sql,
@@ -113,7 +112,8 @@ export const NOVEL_DESTINATIONS_MAX = 20;
  * bounds the judge calls its mail to new destinations can force. Past it
  * mail to a set not screened today is sent and judged after sending for an
  * established or trusted team with no flag opened in PAST_CAP_CLEAN_DAYS,
- * and parks for an operator for every other team.
+ * no hold-type verdict today and no revoked destination in the set, and
+ * parks for an operator otherwise.
  */
 export const DESTINATION_SCREENS_PER_DAY = 200;
 /** A flag of any reason opened this recently parks a team's mail past DESTINATION_SCREENS_PER_DAY. */
@@ -254,6 +254,13 @@ function isUnreachableName(domain: string): boolean {
 }
 
 const isMajorPlatform = (domain: string) => MAJOR_PLATFORM_DOMAINS.has(ownerDomain(domain));
+
+/**
+ * Major platforms whose own name serves pages anyone publishes (Google's
+ * docs, drive, sites and forms are common credential-harvest hosts): unlike
+ * the rest of MAJOR_PLATFORM_DOMAINS, a lure to one takes its clearance back.
+ */
+const REVOCABLE_PLATFORMS: ReadonlySet<string> = new Set(["google.com"]);
 
 const PUBLIC_MAILBOXES: ReadonlySet<string> = new Set(PUBLIC_MAILBOX_DOMAINS);
 
@@ -511,8 +518,8 @@ export async function spareWaitingSamples(
  * Mail to these destinations drew a phishing-type verdict from
  * DESTINATION_REVOKE_SCORE within their probation: they are new again until
  * an operator releases mail to them. A major platform
- * (MAJOR_PLATFORM_DOMAINS) or a name off the public web (isUnreachableName)
- * is never revoked. The ones revoked now.
+ * (MAJOR_PLATFORM_DOMAINS, but for REVOCABLE_PLATFORMS) or a name off the
+ * public web (isUnreachableName) is never revoked. The ones revoked now.
  */
 export async function revokeDestinations(
   db: Db,
@@ -521,7 +528,10 @@ export async function revokeDestinations(
   now: Date,
 ): Promise<string[]> {
   const domains = destinations.filter(
-    (d) => !isMajorPlatform(d) && !isUnreachableName(d) && !isLoopbackHost(d),
+    (d) =>
+      (!isMajorPlatform(d) || REVOCABLE_PLATFORMS.has(ownerDomain(d))) &&
+      !isUnreachableName(d) &&
+      !isLoopbackHost(d),
   );
   if (domains.length === 0) return [];
   const rows = await db
@@ -1059,11 +1069,37 @@ const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
 /**
  * Whether a team's mail past DESTINATION_SCREENS_PER_DAY goes out to be
  * judged after sending: a settled team's volume is mostly legitimate, so it
- * keeps flowing under after-send judgement; a newer team, or one flagged for
- * any reason within PAST_CAP_CLEAN_DAYS, waits for an operator.
+ * keeps flowing under after-send judgement; a newer team, one flagged for
+ * any reason within PAST_CAP_CLEAN_DAYS, one whose mail drew a hold-type
+ * verdict today (screening or after the send), or mail to a revoked
+ * destination waits for an operator. The verdict check is what stops a
+ * settled team, which no hold or pause stops, at its first phishing verdict
+ * rather than when the risk flag opens.
  */
-async function pastCapSends(db: Db, teamId: string, tier: MonitorTier, now: Date) {
-  if (tier !== "established" && tier !== "trusted") return false;
+async function pastCapSends(
+  db: Db,
+  s: Pick<MonitorSettings, "holdRepeatScore">,
+  input: { teamId: string; tier: MonitorTier; revoked: boolean; now: Date },
+) {
+  const { teamId, tier, now } = input;
+  if (input.revoked || (tier !== "established" && tier !== "trusted")) return false;
+  const verdicts = await db
+    .select({
+      verdict: ms.verdict,
+      score: ms.score,
+      categories: ms.categories,
+      reasons: ms.reasons,
+    })
+    .from(ms)
+    .where(
+      and(
+        eq(ms.teamId, teamId),
+        eq(ms.status, "judged"),
+        gte(ms.createdAt, new Date(`${utcDay(now)}T00:00:00Z`)),
+        gte(ms.score, s.holdRepeatScore),
+      ),
+    );
+  if (verdicts.some((v) => isHoldVerdict(v, s.holdRepeatScore))) return false;
   const f = schema.teamFlags;
   const [flag] = await db
     .select({ id: f.id })
@@ -1087,6 +1123,8 @@ async function pastCapSends(db: Db, teamId: string, tier: MonitorTier, now: Date
  * its own: it waits on that verdict while it is pending, and once that
  * verdict came back clean (under DESTINATION_CLEAR_BELOW, nothing
  * phishing-type) and parked nothing, it is sent and judged after sending.
+ * A set holding a revoked destination is always screened as its own: only
+ * an operator's release vouches for it again.
  * A verdict on the set today that would hold, screening or after the send,
  * makes each later email to it screened as its own, so the first
  * after-send verdict that reads such mail as phishing stops the rest. Past
@@ -1118,38 +1156,29 @@ async function startScreening(
   const today = and(sameDay, eq(ms.screening, true));
   const key = [...read.novel].sort();
   const destinationOnly = read.reasons.length === 1 && read.reasons[0] === "destination";
+  const revoked =
+    key.length > 0 &&
+    (
+      await db
+        .select({ domain: td.domain })
+        .from(td)
+        .where(and(eq(td.teamId, email.teamId), inArray(td.domain, key), isNotNull(td.revokedAt)))
+        .limit(1)
+    ).length > 0;
   // What never clears is judged on every message: one verdict says nothing of
   // where the next shortened or unreadable link leads.
-  const repeatable = key.every(
-    (d) => d !== UNRESOLVED_DESTINATION && !isShortener(d) && !isLoopbackHost(d),
-  );
+  const repeatable =
+    !revoked &&
+    key.every((d) => d !== UNRESOLVED_DESTINATION && !isShortener(d) && !isLoopbackHost(d));
   let counted = false;
   if (destinationOnly && repeatable) {
     // The judge rewrites a sample's destinations as every new one its message
     // carried, so containment also matches a broadcast copy, whose own set
-    // leaves out the broadcast's, and an after-send draw. A verdict from
-    // before a destination's revocation no longer speaks for it.
+    // leaves out the broadcast's, and an after-send draw.
     const seen = await db
       .select()
       .from(ms)
-      .where(
-        and(
-          sameDay,
-          sql`${ms.destinations} @> ${JSON.stringify(key)}::jsonb`,
-          notExists(
-            db
-              .select({ one: sql`1` })
-              .from(td)
-              .where(
-                and(
-                  eq(td.teamId, ms.teamId),
-                  inArray(td.domain, key),
-                  gte(td.revokedAt, ms.createdAt),
-                ),
-              ),
-          ),
-        ),
-      );
+      .where(and(sameDay, sql`${ms.destinations} @> ${JSON.stringify(key)}::jsonb`));
     // A verdict on the set that would hold, screening or after the send,
     // speaks for none of it: the mail is screened as its own, under the cap.
     const held = seen.some(
@@ -1201,7 +1230,7 @@ async function startScreening(
       .where(today);
     if ((screened?.n ?? 0) >= DESTINATION_SCREENS_PER_DAY) {
       if (destinationOnly) {
-        if (await pastCapSends(db, email.teamId, input.tier, now)) {
+        if (await pastCapSends(db, s, { teamId: email.teamId, tier: input.tier, revoked, now })) {
           return { action: "send", sample: null, afterSend: true };
         }
         return { action: "park", reason: "destination", unjudged: key };

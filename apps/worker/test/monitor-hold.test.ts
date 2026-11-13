@@ -9,7 +9,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, digestCounts } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { judgeSample } from "../src/handlers/abuse-judge.js";
@@ -118,7 +118,7 @@ it("holds a new team on its first phishing verdict, and parks what it sends next
   expect(parked?.latestStatus).toBe("queued_quota");
 });
 
-it("still sends the operator every alert about a team it holds, and pauses nothing", async () => {
+it("tells the operator of a team it holds once, with no alert beside it, and pauses nothing", async () => {
   const teamId = await createTeam(db, "lure-hot");
   await db.insert(schema.teamMembers).values({ teamId, userId: "owner", role: "owner" });
   // Earlier verdicts already carry the risk past the alert and pause lines.
@@ -146,10 +146,8 @@ it("still sends the operator every alert about a team it holds, and pauses nothi
     },
     { sampleId: sample?.id ?? "" },
   );
-  expect(mails).toEqual([
-    { to: "op@example.com", kind: "monitor.team_held" },
-    { to: "op@example.com", kind: "monitor.alert" },
-  ]);
+  expect(mails).toEqual([{ to: "op@example.com", kind: "monitor.team_held" }]);
+  expect(await digestCounts(db, teamId)).toEqual({});
   const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
   expect(team).toMatchObject({ suspensionReason: "review", broadcastsPausedByOperatorAt: null });
 });

@@ -276,7 +276,7 @@ describe("suspended teams", () => {
       "updates.confirm",
       "welcome",
       "password_changed",
-      "monitor.alert",
+      "monitor.digest",
       "monitor.team_held",
       "quota.paused",
     ] as const) {

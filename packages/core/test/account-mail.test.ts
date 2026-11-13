@@ -126,7 +126,6 @@ describe("account mail catalogs", () => {
       "1.000 e-mails em quarentena, 1 rascunho aguardando aprovação e 1 envio barrado pelas regras das suas caixas",
     );
   });
-
   it("names every monitor tier in the operator's language, never by its key", () => {
     for (const locale of MAIL_LOCALES) {
       for (const tier of MONITOR_TIERS) {

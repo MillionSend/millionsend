@@ -14,7 +14,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, digestCounts } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { judgeSample } from "../src/handlers/abuse-judge.js";
@@ -336,7 +336,8 @@ it("parks mail whose images the reader's provider blocked, keeps no preview, and
   await sendEmail(db, sendDeps(), { emailId: id });
   const blocked = reader(() => ({ status: "blocked" }));
   expect(await judge((await sampleOf(id))?.id ?? "", fakeJudge(5), blocked)).toBe("judged");
-  expect(mails.map((m) => m.kind)).toEqual(["monitor.media_blocked"]);
+  expect(mails).toEqual([]);
+  expect(await digestCounts(db, t.teamId)).toEqual({ media_blocked: 1 });
   expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("parked");
   expect(await row(id)).toMatchObject({ parkReason: "media" });
   expect(await review(id)).toMatchObject({ previews: [], issues: ["vision_blocked"] });

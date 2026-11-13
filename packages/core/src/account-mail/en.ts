@@ -560,38 +560,33 @@ export const en = {
       "Sent to the instance operator at most once every six hours while the share stays over 20%, the provider keeps rejecting the API key, or screening before sending gives up on mail.",
     ],
   },
-  "monitor.destination_parked": {
-    subject: "Content monitor parked mail to a new destination",
-    body: [
-      "{team} sent mail to a destination it had not used before ({domain}). {why}",
-      "The team is not held: the rest of its mail flows, and it is not told.",
-    ],
-    button: "Open review list",
-    muted: ["Sent to the instance operator at most once a day per team."],
-    extra: {
-      judged:
-        "The judge scored it {score} ({verdict}). That mail waits on Trust & safety, where you release it, which sends it and makes the destination known to the team, or cancel it. Mail to the same destination is judged before sending until one is cleared.",
-      unjudged:
-        "It was not judged: the team's mail had already screened {n} sets of new destinations today. That mail waits on Trust & safety, where you release it, which sends it without making the destination known to the team, or cancel it. Mail to the same destination parks the same way for the rest of the UTC day, and is judged before sending from the next.",
-    },
-  },
   "monitor.media_blocked": {
     subject: "Content monitor: the image reader refused an email's images",
     body: [
       "Amazon Bedrock refused to read the images in an email from {team} (HTTP 400). Bedrock answers this way when its abuse detection blocks an image, which includes child sexual abuse material. No preview of these images is kept.",
-      "An email that had not been sent yet waits on Trust & safety until you release or cancel it; one judged after sending was already delivered. This alone does not hold the team, and the team is not told.",
+      "The email was judged after sending and was already delivered. This alone does not hold the team, and the team is not told. An email refused before sending waits on Trust & safety and is counted in the daily digest instead.",
     ],
     button: "Open review list",
     muted: ["Sent to the instance operator at most once a day per team."],
   },
-  "monitor.destination_revoked": {
-    subject: "Content monitor: mail to a cleared destination was judged as phishing",
+  "monitor.digest": {
+    subject: "Content monitor: daily digest",
     body: [
-      "{team} sent mail to {domain}, a destination its earlier mail had cleared in the last week, and the judge scored it {score} ({verdict}) after it went out. The destination is no longer cleared: mail to it is judged before sending again and waits on Trust & safety on a phishing-type verdict, and no verdict clears it again. Releasing mail to it from the review list does.",
-      "This alone does not hold the team: the rest of its mail flows, and it is not told.",
+      "Since the last digest the content monitor recorded these notices. None of them held a team or paused its broadcasts: those are mailed at once.",
     ],
     button: "Open review list",
-    muted: ["Sent to the instance operator at most once a day per team."],
+    muted: [
+      "Sent to the instance operator once a day, only when there is something to report. It gives counts only: the emails, destinations and verdicts are on each team's review page.",
+    ],
+    extra: {
+      team: "{team}: {counts}. {page}",
+      "destination_parked.one": "{n} time mail to a new destination was parked",
+      "destination_parked.other": "{n} times mail to new destinations was parked",
+      "destination_revoked.one": "{n} email that took a destination's clearance back",
+      "destination_revoked.other": "{n} emails that took destinations' clearance back",
+      "media_blocked.one": "{n} email whose images the image reader refused",
+      "media_blocked.other": "{n} emails whose images the image reader refused",
+    },
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;
 

@@ -66,8 +66,7 @@ import * as mimeFuncs from "nodemailer/lib/mime-funcs";
 import { MediaPoolError } from "../media/pool.js";
 import { saveMediaReview } from "../media/read.js";
 import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
-import type { SystemMailer } from "../system-mail.js";
-import { notifyDestination } from "./abuse-judge.js";
+import { noteForDigest } from "./monitor-digest.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
 import { clearSharedTenant, isTenantNotAssociated } from "./tenants.js";
 
@@ -168,9 +167,6 @@ export interface SendDeps {
   monitor?: MonitorDeps | undefined;
   /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
   platformDomains?: ReadonlySet<string> | undefined;
-  /** Tells the operator of mail screening parked unjudged; absent, nobody is mailed. */
-  mailer?: SystemMailer | undefined;
-  appBaseUrl?: string | undefined;
   /** The parsing threads and cache the file scan uses; the process's own when absent. */
   media?: MediaDeps | undefined;
   tracking?:
@@ -830,17 +826,7 @@ async function sendQueued(
     }
     if (gate.action === "park") {
       await parkQueued(db, email, `screening parked it (${gate.reason})`, gate.reason);
-      if (gate.unjudged) {
-        await notifyDestination(
-          db,
-          deps,
-          "monitor.destination_parked",
-          email.teamId,
-          null,
-          gate.unjudged,
-          new Date(),
-        );
-      }
+      if (gate.unjudged) await noteForDigest(db, email.teamId, "destination_parked");
       if (gate.reason === "media" && scan) {
         try {
           await saveMediaReview(db, deps.keyring, email, scanReview(scan), { keep: true });

@@ -11,7 +11,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, digestCounts } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
@@ -271,13 +271,10 @@ it("emails the operator on the alert and on the pause, in that team's review lin
       sampleId: id,
     });
   }
-  const kinds = sends.map((s) => s.kind);
-  expect(kinds.filter((k) => k === "monitor.alert")).toHaveLength(1);
-  expect(kinds.filter((k) => k === "monitor.broadcasts_paused")).toHaveLength(1);
+  expect(sends.map((s) => s.kind)).toEqual(["monitor.alert", "monitor.broadcasts_paused"]);
   expect(sends[0]).toMatchObject({ to: "op@example.com" });
-  expect(sends.find((s) => s.kind === "monitor.alert")?.text).toContain(
-    `https://app.example.test/console/safety/${fresh}`,
-  );
+  expect(sends[0]?.text).toContain(`https://app.example.test/console/safety/${fresh}`);
+  expect(await digestCounts(db, fresh)).toEqual({});
   expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toBe(
     "Content monitor paused a team's broadcasts",
   );
@@ -303,7 +300,7 @@ it("names the team's tier in the operator's language, never by its key", async (
       firstSendAt: new Date(NOW.getTime() - 10 * 86_400_000),
     });
     const judge = fakeJudge(async () => ({ score: 100 }));
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < 60; i += 1) {
       const [row] = await db
         .insert(schema.monitorSamples)
         .values({
@@ -362,13 +359,13 @@ it("still emails the operator about a suspended team, through the system mailer"
       .select({ to: schema.emails.to, tags: schema.emails.tags })
       .from(schema.emails)
       .where(eq(schema.emails.teamId, system));
-    expect(mailed).toHaveLength(2);
     expect(mailed).toEqual(
       expect.arrayContaining([
         { to: ["op@example.com"], tags: { millionsend_system: "monitor.alert" } },
         { to: ["op@example.com"], tags: { millionsend_system: "monitor.broadcasts_paused" } },
       ]),
     );
+    expect(mailed).toHaveLength(2);
   } finally {
     vi.unstubAllEnvs();
   }
