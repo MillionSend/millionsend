@@ -139,8 +139,8 @@ const judge = (
     { sampleId },
   );
 
-/** A team of a tier: new in its first window, new past it, or established. */
-async function team(slug: string, tier: "first" | "ramp" | "established") {
+/** A team of a tier: new in its first window, new past it, on probation, or established. */
+async function team(slug: string, tier: "first" | "ramp" | "probation" | "established") {
   const teamId = await createTeam(db, slug);
   const [domain] = await db
     .insert(schema.domains)
@@ -157,11 +157,23 @@ async function team(slug: string, tier: "first" | "ramp" | "established") {
     await db.insert(schema.teamMonitor).values({
       teamId,
       sentTotal: tier === "ramp" ? 2_000 : 20_000,
-      firstSendAt: new Date(Date.now() - (tier === "ramp" ? 4 : 200) * DAY),
+      firstSendAt: new Date(
+        Date.now() - (tier === "ramp" ? 4 : tier === "probation" ? 10 : 200) * DAY,
+      ),
     });
   }
   return { teamId, domainId: domain?.id ?? "", slug };
 }
+
+/** A flag opened ten days ago and cleared since. */
+const recentFlag = (teamId: string) =>
+  db.insert(schema.teamFlags).values({
+    teamId,
+    reason: "complaints",
+    status: "cleared",
+    openedAt: new Date(Date.now() - 10 * DAY),
+    clearedAt: new Date(Date.now() - 5 * DAY),
+  });
 
 async function email(
   t: { teamId: string; domainId: string; slug: string },
@@ -333,6 +345,8 @@ const sixLinks = (prefix: string) =>
 
 it("screens a set of new destinations once a day: mail repeating it waits on a clean verdict, then is judged after sending", async () => {
   const t = await team("repeat-set", "established");
+  // Past the day's screenings a recently flagged team's mail parks.
+  await recentFlag(t.teamId);
   await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY - 1);
   const first = await email(t, sixLinks("repeat"));
   expect(await sendEmail(db, sendDeps(), { emailId: first })).toBe("deferred");
@@ -381,9 +395,14 @@ it("never sends a repeat on a verdict that was not clean: each is screened befor
   expect(sesCalls).toEqual([]);
 });
 
-for (const tier of ["established", "ramp"] as const) {
-  it(`parks ${tier === "ramp" ? "a new" : "an established"} team's mail with a new destination past the day's screenings, and tells the operator`, async () => {
+for (const [tier, flagged] of [
+  ["ramp", false],
+  ["probation", false],
+  ["established", true],
+] as const) {
+  it(`parks a ${tier}${flagged ? ", recently flagged" : ""} team's mail with a new destination past the day's screenings, and tells the operator`, async () => {
     const t = await team(`budget-${tier}`, tier);
+    if (flagged) await recentFlag(t.teamId);
     await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
     const id = await email(t, link(`over-budget-${tier}.example`));
     expect(await sendEmail(db, sendDeps(), { emailId: id })).toBe("parked");
@@ -401,6 +420,22 @@ for (const tier of ["established", "ramp"] as const) {
     expect(sesCalls).toEqual([]);
   });
 }
+
+it("sends an established team's mail with a new destination past the day's screenings and judges it after sending", async () => {
+  const t = await team("budget-clean", "established");
+  await screenedSets(t.teamId, DESTINATION_SCREENS_PER_DAY);
+  const id = await email(t, link("over-budget-clean.example"));
+  const capped = { teamDailyCap: 0 };
+  expect(await sendEmail(db, sendDeps(capped), { emailId: id })).toBe("sent");
+  expect(await sampleOf(id)).toMatchObject({
+    kind: "destination",
+    screening: false,
+    status: "pending",
+  });
+  expect(judgeQueue).toHaveLength(1);
+  expect(mails).toEqual([]);
+  expect(sesCalls).toEqual([id]);
+});
 
 it(`makes a team's next screening wait its turn behind ${SCREEN_OUTSTANDING_MAX} waiting on the judge`, async () => {
   const t = await team("outstanding", "first");

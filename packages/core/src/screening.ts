@@ -111,9 +111,13 @@ export const NOVEL_DESTINATIONS_MAX = 20;
 /**
  * The sets of new destinations a team's mail has screened today, which
  * bounds the judge calls its mail to new destinations can force. Past it
- * mail to a set not screened today parks for an operator, at every tier.
+ * mail to a set not screened today is sent and judged after sending for an
+ * established or trusted team with no flag opened in PAST_CAP_CLEAN_DAYS,
+ * and parks for an operator for every other team.
  */
 export const DESTINATION_SCREENS_PER_DAY = 200;
+/** A flag of any reason opened this recently parks a team's mail past DESTINATION_SCREENS_PER_DAY. */
+export const PAST_CAP_CLEAN_DAYS = 30;
 /**
  * A verdict clears a message's new destinations only under this score,
  * naming nothing phishing-type, and only when they are this many at most.
@@ -1028,9 +1032,10 @@ export type ScreenDecision =
       sample: { id: string; unjudged: boolean } | null;
       probation?: boolean | undefined;
       /**
-       * Its new destinations were not screened for it, a clean verdict on
-       * the same set today stands in (startScreening): it is always judged
-       * after the send.
+       * Its new destinations were not screened for it: a clean verdict on
+       * the same set today stands in, or the team's mail is past
+       * DESTINATION_SCREENS_PER_DAY and pastCapSends (startScreening). It is
+       * always judged after the send.
        */
       afterSend?: boolean | undefined;
     }
@@ -1044,12 +1049,34 @@ export type ScreenDecision =
    * see mediaParks; a new team's flagged file parks on the send path's own
    * read, before any verdict), or the judge read cold shared-domain mail as
    * phishing ("recipient"). `unjudged`: the new destinations of mail
-   * parked past DESTINATION_SCREENS_PER_DAY, which no verdict tells the
-   * operator of.
+   * parked past DESTINATION_SCREENS_PER_DAY (pastCapSends said no), which no
+   * verdict tells the operator of.
    */
   | { action: "park"; reason: ScreenParkReason; unjudged?: readonly string[] | undefined };
 
 const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
+
+/**
+ * Whether a team's mail past DESTINATION_SCREENS_PER_DAY goes out to be
+ * judged after sending: a settled team's volume is mostly legitimate, so it
+ * keeps flowing under after-send judgement; a newer team, or one flagged for
+ * any reason within PAST_CAP_CLEAN_DAYS, waits for an operator.
+ */
+async function pastCapSends(db: Db, teamId: string, tier: MonitorTier, now: Date) {
+  if (tier !== "established" && tier !== "trusted") return false;
+  const f = schema.teamFlags;
+  const [flag] = await db
+    .select({ id: f.id })
+    .from(f)
+    .where(
+      and(
+        eq(f.teamId, teamId),
+        gte(f.openedAt, new Date(now.getTime() - PAST_CAP_CLEAN_DAYS * DAY_MS)),
+      ),
+    )
+    .limit(1);
+  return flag === undefined;
+}
 
 /**
  * Starts screening an email that has a reason and no sample: more new
@@ -1064,8 +1091,9 @@ const SEND_UNSCREENED: ScreenDecision = { action: "send", sample: null };
  * makes each later email to it screened as its own, so the first
  * after-send verdict that reads such mail as phishing stops the rest. Past
  * the day's DESTINATION_SCREENS_PER_DAY sets, mail that would be screened
- * as its own parks for an operator; a repeat of a set already counted
- * takes no slot. None of these waits for the next day.
+ * as its own is sent and judged after sending when pastCapSends, and parks
+ * for an operator otherwise; a repeat of a set already counted takes no
+ * slot. None of these waits for the next day.
  */
 async function startScreening(
   db: Db,
@@ -1172,7 +1200,12 @@ async function startScreening(
       .from(ms)
       .where(today);
     if ((screened?.n ?? 0) >= DESTINATION_SCREENS_PER_DAY) {
-      if (destinationOnly) return { action: "park", reason: "destination", unjudged: key };
+      if (destinationOnly) {
+        if (await pastCapSends(db, email.teamId, input.tier, now)) {
+          return { action: "send", sample: null, afterSend: true };
+        }
+        return { action: "park", reason: "destination", unjudged: key };
+      }
       // Another reason screens it anyway, as that reason's sample.
       destination = false;
     }

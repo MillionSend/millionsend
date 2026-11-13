@@ -1315,10 +1315,13 @@ verdict on those destinations that day, before or after a send, is
 phishing-type from 80, each later email to them is screened as its own
 again. A team's mail screens 200 sets of new destinations a day, and a
 repeat of a set already screened takes none of them; past them, mail that
-would be screened for a new destination is parked for the review list
-unjudged, at every tier, and the operator is mailed at most once a day per
-team. Releasing such mail sends it without clearing its destinations. None
-of it waits for the next day.
+would be screened for a new destination is sent and judged after it goes
+out, every one, past the team's daily sample cap too, when its team is
+Established or Trusted and has had no flag opened, for any reason, in the
+last 30 days; any other team's is parked for the review list unjudged, and
+the operator is mailed at most once a day per team. Releasing such mail
+sends it without clearing its destinations. None of it waits for the next
+day.
 
 **The review list.** Trust & safety lists every unsent email screening
 stopped, grouped by team: parked behind a review hold, waiting out its 2

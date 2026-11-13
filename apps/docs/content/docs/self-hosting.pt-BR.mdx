@@ -1612,11 +1612,14 @@ equipe. Assim que qualquer avaliação desses destinos no dia, antes ou depois
 de um envio, for do tipo phishing a partir de 80, cada e-mail seguinte para
 eles volta a ser avaliado por conta própria. O e-mail de uma equipe passa pela
 avaliação de 200 conjuntos de destinos novos por dia, e a repetição de um
-conjunto já avaliado não gasta nenhum deles; depois deles, o e-mail que seria
-avaliado por um destino novo fica em espera na lista de revisão sem
-avaliação, em qualquer nível, e o operador recebe um e-mail no máximo uma vez
-por dia por equipe. Liberar esse e-mail o envia sem tornar os destinos dele
-conhecidos. Nada disso espera o dia seguinte.
+conjunto já avaliado não gasta nenhum deles; depois deles, o e-mail que
+seria avaliado por um destino novo sai e é avaliado depois do envio, todos
+eles, mesmo além do limite diário de amostras da equipe, quando a equipe
+está no nível Estabelecida ou Confiável e não teve nenhuma sinalização
+aberta, por qualquer motivo, nos últimos 30 dias; o de qualquer outra equipe
+fica em espera na lista de revisão sem avaliação, e o operador recebe um
+e-mail no máximo uma vez por dia por equipe. Liberar esse e-mail o envia sem
+tornar os destinos dele conhecidos. Nada disso espera o dia seguinte.
 
 **A lista de revisão.** Confiança e segurança lista, por equipe, todo e-mail
 não enviado que a avaliação antes do envio segurou: em espera atrás de uma
