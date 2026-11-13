@@ -913,6 +913,9 @@ function InstanceSection() {
           />
         </div>
         <p style={{ margin: "8px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
+          {t("instance.retentionNote")}
+        </p>
+        <p style={{ margin: "8px 0 0", color: "var(--ms-muted)", fontSize: "var(--ms-fs-label)" }}>
           {t.rich("instance.reserveNote", {
             link: (chunks) =>
               operator.data?.isOperator ? <Link href="/console/regions">{chunks}</Link> : chunks,

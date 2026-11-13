@@ -250,6 +250,7 @@
     "subtitle": "Vale para toda esta instalação, todas as equipes.",
     "rateLabel": "Taxa de envio SES (mensagens/segundo)",
     "retentionLabel": "Retenção de corpos de e-mails enviados (dias)",
+    "retentionNote": "E-mails enviados de uma caixa de entrada seguem a janela dos e-mails recebidos (RECEIVED_RETENTION_DAYS), para que uma conversa guarde as respostas pelo mesmo tempo que as mensagens recebidas.",
     "reserveLabel": "Reserva transacional (% da cota de envio)",
     "reserveNote": "A reserva transacional é definida em <link>Console → Regiões</link>.",
     "save": "Salvar",

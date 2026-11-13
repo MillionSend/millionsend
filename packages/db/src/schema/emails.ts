@@ -175,8 +175,17 @@ export const emails = pgTable(
     uniqueIndex("emails_ses_message_id_idx")
       .on(t.sesMessageId)
       .where(sql`${t.sesMessageId} is not null`),
-    // Partial index drives the retention purge scan (rows whose body still exists).
-    index("emails_body_unpurged_idx").on(t.createdAt).where(isNull(t.bodyPurgedAt)),
+    // The retention purges run one loop per clock (sent mail, inbox-thread
+    // mail), each over an index holding only its own rows, so neither loop
+    // re-reads rows the other clock keeps on every batch.
+    index("emails_sent_body_unpurged_idx")
+      .on(t.createdAt)
+      .where(sql`${t.bodyPurgedAt} is null and ${t.threadId} is null`),
+    index("emails_thread_body_unpurged_idx")
+      .on(t.createdAt)
+      .where(sql`${t.bodyPurgedAt} is null and ${t.threadId} is not null`),
+    index("emails_sent_created_idx").on(t.createdAt).where(isNull(t.threadId)),
+    index("emails_thread_only_created_idx").on(t.createdAt).where(isNotNull(t.threadId)),
     // Events-health window: sends in the last hours, without scanning the table.
     index("emails_sent_at_idx").on(t.sentAt).where(isNotNull(t.sentAt)),
     // Accept counts a team's parked rows whenever its daily quota is exhausted.

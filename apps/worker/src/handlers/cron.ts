@@ -860,10 +860,12 @@ export async function reconcileStalledSends(
  * past the cutoff is purged unconditionally — retention is a compliance
  * promise, so even a zombie still-queued email loses its body (the send
  * handler then marks it failed on the missing body).
+ * Mail sent in an inbox thread follows `threadRetentionDays` instead, so a
+ * thread keeps its replies as long as its received side.
  */
 export async function purgeExpiredEmailBodies(
   db: Db,
-  params: { defaultRetentionDays: number; now?: Date },
+  params: { defaultRetentionDays: number; threadRetentionDays?: number; now?: Date },
 ): Promise<number> {
   // Read the instance setting fresh each run so a Settings → Instance change
   // applies to the next purge without a worker restart; NULL falls back to
@@ -872,36 +874,43 @@ export async function purgeExpiredEmailBodies(
   const retentionDays = emailRetentionDays ?? params.defaultRetentionDays;
   const now = params.now ?? new Date();
   const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
+  const threadCutoff = new Date(
+    now.getTime() - (params.threadRetentionDays ?? retentionDays) * DAY_MS,
+  );
   const e = schema.emails;
   // Batched like the metadata purge: a backlog (a shortened retention, a
   // worker outage) must not become one statement returning millions of ids.
   let purged = 0;
-  for (;;) {
-    const batch = affectedRows(
-      await db
-        .update(e)
-        .set(purgedEmailBodyColumns(now))
-        .where(
-          inArray(
-            e.id,
-            db
-              .select({ id: e.id })
-              .from(e)
-              .where(
-                and(
-                  lt(e.createdAt, cutoff),
-                  isNull(e.bodyPurgedAt),
-                  or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
-                  or(isNull(e.freeBurstAt), lt(e.freeBurstAt, cutoff)),
-                ),
-              )
-              .orderBy(asc(e.createdAt))
-              .limit(PURGE_BATCH),
+  for (const [threaded, before] of [
+    [false, cutoff],
+    [true, threadCutoff],
+  ] as const) {
+    for (;;) {
+      const batch = affectedRows(
+        await db
+          .update(e)
+          .set(purgedEmailBodyColumns(now))
+          .where(
+            inArray(
+              e.id,
+              db
+                .select({ id: e.id })
+                .from(e)
+                .where(
+                  and(
+                    emailPastRetention(threaded, before),
+                    isNull(e.bodyPurgedAt),
+                    or(isNull(e.freeBurstAt), lt(e.freeBurstAt, before)),
+                  ),
+                )
+                .orderBy(asc(e.createdAt))
+                .limit(PURGE_BATCH),
+            ),
           ),
-        ),
-    );
-    purged += batch;
-    if (batch < PURGE_BATCH) break;
+      );
+      purged += batch;
+      if (batch < PURGE_BATCH) break;
+    }
   }
   return purged;
 }
@@ -1326,19 +1335,43 @@ export async function reapStaleTrackingSubdomains(
 const PURGE_BATCH = 1000;
 
 /**
+ * An email row past its window on one clock: inbox-thread mail (threaded) or
+ * the rest, each looped separately so its scan walks a partial created_at
+ * index holding only rows on that clock, never stepping over the rows the
+ * other clock keeps. Future-scheduled rows are kept on the same clock.
+ */
+function emailPastRetention(threaded: boolean, before: Date) {
+  const e = schema.emails;
+  return and(
+    threaded ? isNotNull(e.threadId) : isNull(e.threadId),
+    lt(e.createdAt, before),
+    or(isNull(e.scheduledAt), lt(e.scheduledAt, before)),
+  );
+}
+
+/**
  * Metadata retention: whole email rows (recipients, subject, headers, tags —
  * events cascade with them) past the metadata window are deleted in batches.
  * Webhook deliveries are a log with their own, shorter window
  * (`deliveryRetentionDays`), purged here on the same schedule.
- * Future-scheduled rows are kept like the body purge does. Env-only
- * windows; no instance setting overrides them.
+ * Future-scheduled rows are kept like the body purge does, and inbox-thread
+ * mail follows `threadRetentionDays`. Env-only windows; no instance setting
+ * overrides them.
  */
 export async function purgeExpiredEmailMetadata(
   db: Db,
-  params: { retentionDays: number; deliveryRetentionDays?: number; now?: Date },
+  params: {
+    retentionDays: number;
+    threadRetentionDays?: number;
+    deliveryRetentionDays?: number;
+    now?: Date;
+  },
 ): Promise<{ emails: number; deliveries: number; broadcasts: number }> {
   const now = params.now ?? new Date();
   const cutoff = new Date(now.getTime() - params.retentionDays * DAY_MS);
+  const threadCutoff = new Date(
+    now.getTime() - (params.threadRetentionDays ?? params.retentionDays) * DAY_MS,
+  );
   const deliveryCutoff = new Date(
     now.getTime() - (params.deliveryRetentionDays ?? params.retentionDays) * DAY_MS,
   );
@@ -1374,24 +1407,29 @@ export async function purgeExpiredEmailMetadata(
   `),
   );
   let emails = 0;
-  for (;;) {
-    const batch = affectedRows(
-      await db.delete(e).where(
-        inArray(
-          e.id,
-          db
-            .select({ id: e.id })
-            .from(e)
-            .where(
-              and(lt(e.createdAt, cutoff), or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff))),
-            )
-            .orderBy(asc(e.createdAt))
-            .limit(PURGE_BATCH),
-        ),
-      ),
-    );
-    emails += batch;
-    if (batch < PURGE_BATCH) break;
+  for (const [threaded, before] of [
+    [false, cutoff],
+    [true, threadCutoff],
+  ] as const) {
+    for (;;) {
+      const batch = affectedRows(
+        await db
+          .delete(e)
+          .where(
+            inArray(
+              e.id,
+              db
+                .select({ id: e.id })
+                .from(e)
+                .where(emailPastRetention(threaded, before))
+                .orderBy(asc(e.createdAt))
+                .limit(PURGE_BATCH),
+            ),
+          ),
+      );
+      emails += batch;
+      if (batch < PURGE_BATCH) break;
+    }
   }
   const d = schema.webhookDeliveries;
   let deliveries = 0;
