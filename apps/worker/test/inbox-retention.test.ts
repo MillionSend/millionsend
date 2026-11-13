@@ -222,3 +222,34 @@ it("keeps mail sent in an inbox thread on the received clock, the rest on the se
   const left = await db.select({ id: schema.emails.id }).from(schema.emails);
   expect(left.map((r) => r.id)).toEqual([reply]);
 });
+
+it("judges a thread row's schedule against the thread clock, not the sent one", async () => {
+  const threadId = await thread();
+  await db.insert(schema.emails).values({
+    teamId,
+    inboxId,
+    threadId,
+    from: "bot@in.retention.test",
+    to: ["r@example.com"],
+    subject: "s",
+    createdAt: ago(200),
+    scheduledAt: ago(190),
+    bodyCiphertext: Buffer.from("x"),
+    bodyIv: Buffer.from("y"),
+    bodyWrappedDek: Buffer.from("z"),
+    bodyKeyVersion: 1,
+  });
+  expect(
+    await purgeExpiredEmailBodies(db, {
+      defaultRetentionDays: 365,
+      threadRetentionDays: 180,
+      now: NOW,
+    }),
+  ).toBe(1);
+  const meta = await purgeExpiredEmailMetadata(db, {
+    retentionDays: 365,
+    threadRetentionDays: 180,
+    now: NOW,
+  });
+  expect(meta.emails).toBe(1);
+});

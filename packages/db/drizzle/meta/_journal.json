@@ -477,6 +477,13 @@
       "when": 1793296621109,
       "tag": "0067_pause_lift",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794533462333,
+      "tag": "0068_split_retention_indexes",
+      "breakpoints": true
     }
   ]
 }

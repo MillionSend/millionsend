@@ -250,6 +250,7 @@
     "subtitle": "Applies to this whole deployment, every team.",
     "rateLabel": "SES send rate (messages/second)",
     "retentionLabel": "Sent email body retention (days)",
+    "retentionNote": "Mail sent from an inbox follows the received mail window (RECEIVED_RETENTION_DAYS) instead, so a thread keeps its replies as long as its inbound messages.",
     "reserveLabel": "Transactional reserve (% of the sending quota)",
     "reserveNote": "The transactional reserve is set from <link>Console → Regions</link>.",
     "save": "Save",

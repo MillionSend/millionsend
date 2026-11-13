@@ -881,32 +881,36 @@ export async function purgeExpiredEmailBodies(
   // Batched like the metadata purge: a backlog (a shortened retention, a
   // worker outage) must not become one statement returning millions of ids.
   let purged = 0;
-  for (;;) {
-    const batch = affectedRows(
-      await db
-        .update(e)
-        .set(purgedEmailBodyColumns(now))
-        .where(
-          inArray(
-            e.id,
-            db
-              .select({ id: e.id })
-              .from(e)
-              .where(
-                and(
-                  emailPastRetention(cutoff, threadCutoff),
-                  isNull(e.bodyPurgedAt),
-                  or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
-                  or(isNull(e.freeBurstAt), lt(e.freeBurstAt, cutoff)),
-                ),
-              )
-              .orderBy(asc(e.createdAt))
-              .limit(PURGE_BATCH),
+  for (const [threaded, before] of [
+    [false, cutoff],
+    [true, threadCutoff],
+  ] as const) {
+    for (;;) {
+      const batch = affectedRows(
+        await db
+          .update(e)
+          .set(purgedEmailBodyColumns(now))
+          .where(
+            inArray(
+              e.id,
+              db
+                .select({ id: e.id })
+                .from(e)
+                .where(
+                  and(
+                    emailPastRetention(threaded, before),
+                    isNull(e.bodyPurgedAt),
+                    or(isNull(e.freeBurstAt), lt(e.freeBurstAt, before)),
+                  ),
+                )
+                .orderBy(asc(e.createdAt))
+                .limit(PURGE_BATCH),
+            ),
           ),
-        ),
-    );
-    purged += batch;
-    if (batch < PURGE_BATCH) break;
+      );
+      purged += batch;
+      if (batch < PURGE_BATCH) break;
+    }
   }
   return purged;
 }
@@ -1331,18 +1335,17 @@ export async function reapStaleTrackingSubdomains(
 const PURGE_BATCH = 1000;
 
 /**
- * An email row past its window: inbox-thread mail on the thread clock, the
- * rest on the sent clock. The outer bound on the later cutoff keeps the
- * created_at index range tight.
+ * An email row past its window on one clock: inbox-thread mail (threaded) or
+ * the rest, each looped separately so its scan walks a partial created_at
+ * index holding only rows on that clock, never stepping over the rows the
+ * other clock keeps. Future-scheduled rows are kept on the same clock.
  */
-function emailPastRetention(cutoff: Date, threadCutoff: Date) {
+function emailPastRetention(threaded: boolean, before: Date) {
   const e = schema.emails;
   return and(
-    lt(e.createdAt, cutoff > threadCutoff ? cutoff : threadCutoff),
-    or(
-      and(isNull(e.threadId), lt(e.createdAt, cutoff)),
-      and(isNotNull(e.threadId), lt(e.createdAt, threadCutoff)),
-    ),
+    threaded ? isNotNull(e.threadId) : isNull(e.threadId),
+    lt(e.createdAt, before),
+    or(isNull(e.scheduledAt), lt(e.scheduledAt, before)),
   );
 }
 
@@ -1404,27 +1407,29 @@ export async function purgeExpiredEmailMetadata(
   `),
   );
   let emails = 0;
-  for (;;) {
-    const batch = affectedRows(
-      await db.delete(e).where(
-        inArray(
-          e.id,
-          db
-            .select({ id: e.id })
-            .from(e)
-            .where(
-              and(
-                emailPastRetention(cutoff, threadCutoff),
-                or(isNull(e.scheduledAt), lt(e.scheduledAt, cutoff)),
-              ),
-            )
-            .orderBy(asc(e.createdAt))
-            .limit(PURGE_BATCH),
-        ),
-      ),
-    );
-    emails += batch;
-    if (batch < PURGE_BATCH) break;
+  for (const [threaded, before] of [
+    [false, cutoff],
+    [true, threadCutoff],
+  ] as const) {
+    for (;;) {
+      const batch = affectedRows(
+        await db
+          .delete(e)
+          .where(
+            inArray(
+              e.id,
+              db
+                .select({ id: e.id })
+                .from(e)
+                .where(emailPastRetention(threaded, before))
+                .orderBy(asc(e.createdAt))
+                .limit(PURGE_BATCH),
+            ),
+          ),
+      );
+      emails += batch;
+      if (batch < PURGE_BATCH) break;
+    }
   }
   const d = schema.webhookDeliveries;
   let deliveries = 0;
