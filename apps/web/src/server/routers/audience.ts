@@ -33,7 +33,7 @@ import { escapeLike } from "@/lib/sql";
 import { propertyTypeMessage } from "@/lib/trpc-error";
 import { beforeCursor, createdAtCursorField, cursorSchema, paginate } from "../keyset";
 import { adminProcedure, router, teamProcedure } from "../trpc";
-import { assertSegment, segmentPredicate } from "./segments";
+import { assertSegment, savedSegmentPredicate } from "./segments";
 import { assertTopic, topicMembershipSql } from "./topics";
 
 const emailSchema = z.string().trim().pipe(z.email()).pipe(z.string().max(320));
@@ -205,14 +205,11 @@ export const audienceRouter = router({
             or(ilike(t.email, pattern), ilike(t.firstName, pattern), ilike(t.lastName, pattern)),
           );
         }
-        // Segment filter AND's the ONE core translator's predicate; a foreign
-        // segment is rejected before it can widen the scope.
-        if (input.segmentId) {
-          const segment = await assertSegment(ctx, input.segmentId);
-          // undefined = empty filter (all contacts); nothing to AND in then.
-          const predicate = segmentPredicate(segment.filter);
-          if (predicate) filters.push(predicate);
-        }
+        // Segment filter AND's the shared resolver (filter matches plus manual
+        // members), the one broadcasts and counts use; a foreign segment is
+        // rejected before it can widen the scope.
+        const segment = input.segmentId ? await assertSegment(ctx, input.segmentId) : null;
+        if (segment) filters.push(savedSegmentPredicate(segment));
         // Topic filter reuses the ONE membership rule via a correlated EXISTS,
         // keeping the keyset query flat so the cursor still works.
         if (input.topicId) {
@@ -305,14 +302,48 @@ export const audienceRouter = router({
             else segmentsByContact.set(row.contactId, [row.name]);
           }
         }
+        // A manual segment records when each contact joined it; a filter
+        // segment has no join date, since a contact is in it while its
+        // properties match.
+        const joinedAt = new Map<string, Date>();
+        if (segment && segment.filter === null && page.items.length > 0) {
+          const m = schema.segmentMembers;
+          const joined = await ctx.db
+            .select({ contactId: m.contactId, createdAt: m.createdAt })
+            .from(m)
+            .where(
+              and(
+                eq(m.segmentId, segment.id),
+                inArray(
+                  m.contactId,
+                  page.items.map((r) => r.id),
+                ),
+              ),
+            );
+          for (const row of joined) joinedAt.set(row.contactId, row.createdAt);
+        }
         return {
-          items: page.items.map((r) => ({
-            ...r,
-            topics: topicsByContact.get(r.id) ?? [],
-            segments: segmentsByContact.get(r.id) ?? [],
-          })),
+          items: page.items.map((r) => {
+            const names = segmentsByContact.get(r.id) ?? [];
+            return {
+              ...r,
+              topics: topicsByContact.get(r.id) ?? [],
+              // Every row matches the selected segment; a filter segment is not
+              // a membership row, so name it first rather than leave it out.
+              segments:
+                segment && segment.filter !== null && !names.includes(segment.name)
+                  ? [segment.name, ...names]
+                  : names,
+              segmentJoinedAt: joinedAt.get(r.id) ?? null,
+            };
+          }),
           nextCursor: page.nextCursor,
           total,
+          segmentKind: segment
+            ? segment.filter === null
+              ? ("manual" as const)
+              : ("filter" as const)
+            : null,
         };
       }),
 

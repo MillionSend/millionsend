@@ -408,6 +408,41 @@ describe("audience.contacts.list filters", () => {
     expect(emails).toEqual(["ada@x.com", "bob@x.com"]);
   });
 
+  it("lists a manual segment's members with their join date, and names a filter segment", async () => {
+    const teamId = await createTeam(db, "team-a");
+    const caller = callerFor(teamId);
+    const { id: ada } = await caller.audience.contacts.add({ email: "ada@x.com" });
+    await caller.audience.contacts.add({ email: "bob@y.com" });
+    // A segment with no filter is a member list (as imports create them).
+    const [manual] = await db
+      .insert(schema.segments)
+      .values({ teamId, name: "Imported", filter: null })
+      .returning({ id: schema.segments.id });
+    if (!manual) throw new Error("expected a segment");
+    const joined = new Date("2026-01-02T03:04:05Z");
+    await db
+      .insert(schema.segmentMembers)
+      .values({ segmentId: manual.id, contactId: ada, createdAt: joined });
+
+    const byMembers = await caller.audience.contacts.list({ segmentId: manual.id });
+    expect(byMembers.segmentKind).toBe("manual");
+    expect(byMembers.items.map((c) => c.email)).toEqual(["ada@x.com"]);
+    expect(byMembers.items[0]?.segmentJoinedAt?.toISOString()).toBe(joined.toISOString());
+
+    const { id: filtered } = await caller.segments.create({
+      name: "X domain",
+      filter: { match: "all", conditions: [{ field: "email", op: "ends_with", value: "@x.com" }] },
+    });
+    const byFilter = await caller.audience.contacts.list({ segmentId: filtered });
+    expect(byFilter.segmentKind).toBe("filter");
+    expect(byFilter.items).toHaveLength(1);
+    expect(byFilter.items[0]?.segments).toEqual(["X domain", "Imported"]);
+    expect(byFilter.items[0]?.segmentJoinedAt).toBeNull();
+
+    const unscoped = await caller.audience.contacts.list({});
+    expect(unscoped.segmentKind).toBeNull();
+  });
+
   it("narrows to subscribed or unsubscribed contacts, counting the scope", async () => {
     const teamId = await createTeam(db, "team-a");
     const caller = callerFor(teamId);
