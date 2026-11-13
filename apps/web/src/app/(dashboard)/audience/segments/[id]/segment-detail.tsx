@@ -242,7 +242,17 @@ export function SegmentDetail({ id }: { id: string }) {
               rows={rows}
               onRows={(next) => setDraft({ match, rows: next })}
             />
-            <FilterCountPreview filter={currentFilter} />
+            <FilterCountPreview
+              filter={currentFilter}
+              action={
+                // The count follows unsaved edits; the contacts list shows the saved segment.
+                dirty ? null : (
+                  <Link href={`/audience?segment=${data.id}`} className="ms-link">
+                    {t("detail.viewContacts")}
+                  </Link>
+                )
+              }
+            />
             {updateMutation.isError ? (
               <p className="ms-field-error">{t("builder.saveError")}</p>
             ) : null}

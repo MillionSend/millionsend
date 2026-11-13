@@ -3,7 +3,7 @@
 import { SEGMENT_FILTER_MAX_DAYS } from "@millionsend/core/property-date";
 import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAnchoredPanel } from "@/components/anchored-panel";
 import { PlusGlyph } from "@/components/icons/nav-icons";
@@ -483,9 +483,12 @@ export function FilterConditions({
 export function FilterCountPreview({
   filter,
   enabled = true,
+  action,
 }: {
   filter: SegmentFilterDraft;
   enabled?: boolean;
+  /** Shown beside a loaded count, e.g. a link to the contacts it counts. */
+  action?: ReactNode;
 }) {
   const t = useTranslations("audience.segments");
   const trpc = useTRPC();
@@ -513,6 +516,11 @@ export function FilterCountPreview({
         borderRadius: "var(--ms-r-input)",
         background: "var(--ms-panel-raised)",
         fontSize: "var(--ms-fs-ui)",
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        gap: "4px 16px",
       }}
     >
       {countQuery.isPending ? (
@@ -520,7 +528,10 @@ export function FilterCountPreview({
       ) : countQuery.isError ? (
         <span style={{ color: "var(--ms-danger)" }}>{t("builder.countError")}</span>
       ) : (
-        t("builder.matchCount", { count: countQuery.data?.count ?? 0 })
+        <>
+          <span>{t("builder.matchCount", { count: countQuery.data?.count ?? 0 })}</span>
+          {action}
+        </>
       )}
     </div>
   );
