@@ -51,8 +51,27 @@ const BULK_BATCH = 100;
 // scroll the Table box.
 const TABLE_STYLE: React.CSSProperties = { tableLayout: "fixed", minWidth: 860 };
 
-function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
+type SegmentKind = "manual" | "filter" | null;
+
+function ContactsHead({
+  selectAll,
+  segmentKind = null,
+}: {
+  selectAll?: React.ReactNode;
+  segmentKind?: SegmentKind;
+}) {
   const t = useTranslations("audience");
+  const dateHeader =
+    segmentKind === "manual" ? (
+      t("contacts.addedToSegment")
+    ) : segmentKind === "filter" ? (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        {t("contacts.contactAdded")}
+        <Tooltip text={t("contacts.contactAddedHint")} />
+      </span>
+    ) : (
+      t("contacts.added")
+    );
   return (
     <thead>
       <tr>
@@ -60,7 +79,7 @@ function ContactsHead({ selectAll }: { selectAll?: React.ReactNode }) {
         <th>{t("contacts.email")}</th>
         <th style={{ width: "22%" }}>{t("contacts.segments")}</th>
         <th style={{ width: "15%" }}>{t("contacts.status")}</th>
-        <th className="right ms-col-date">{t("contacts.added")}</th>
+        <th className="right ms-col-date">{dateHeader}</th>
         <th className="right" style={{ width: 40 }} />
       </tr>
     </thead>
@@ -249,6 +268,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
   );
   const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data]);
   const total = query.data?.pages[0]?.total ?? 0;
+  const segmentKind: SegmentKind = query.data?.pages[0]?.segmentKind ?? null;
   const filtered = deferredSearch !== "" || status !== "" || segmentId !== "" || topicId !== "";
 
   // Selection tracks the visible list: rows that fall out (filter/search
@@ -642,6 +662,7 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
         <>
           <Table gutter={28} style={TABLE_STYLE}>
             <ContactsHead
+              segmentKind={segmentKind}
               selectAll={
                 <input
                   type="checkbox"
@@ -746,7 +767,27 @@ export function AudienceContactsView({ migrateToUrl }: { migrateToUrl: string | 
                       className="right"
                       style={{ color: "var(--ms-muted)", whiteSpace: "nowrap" }}
                     >
-                      <RelativeTime date={row.createdAt} />
+                      {row.segmentJoinedAt ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            flexDirection: "column",
+                            alignItems: "flex-end",
+                            gap: 2,
+                          }}
+                        >
+                          <RelativeTime date={row.segmentJoinedAt} />
+                          <span
+                            style={{ fontSize: "var(--ms-fs-micro)", color: "var(--ms-faint)" }}
+                          >
+                            {t.rich("contacts.contactSince", {
+                              time: () => <RelativeTime date={row.createdAt} />,
+                            })}
+                          </span>
+                        </span>
+                      ) : (
+                        <RelativeTime date={row.createdAt} />
+                      )}
                     </td>
                     {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only guard so a menu click does not also trigger the row navigation; keyboard users reach the menu button directly */}
                     <td

@@ -19,7 +19,7 @@ import { CONTACT_STATUSES, type ContactStatus } from "@/lib/contact-status";
 import { type CsvColumn, toCsv } from "@/lib/csv-export";
 import { manyOf } from "@/lib/list-param";
 import { escapeLike } from "@/lib/sql";
-import { assertSegment, segmentPredicate } from "./routers/segments";
+import { assertSegment, savedSegmentPredicate } from "./routers/segments";
 import { assertTopic, topicMembershipSql } from "./routers/topics";
 
 /**
@@ -64,13 +64,11 @@ export async function contactRowsForExport(
   }
   const ctx = { db, teamId };
   try {
-    // Segment filter AND's the ONE core translator's predicate; the shared guard
-    // rejects a foreign segment before it can widen the scope.
+    // Segment filter AND's the shared resolver (filter matches plus manual
+    // members); the guard rejects a foreign segment before it can widen the scope.
     if (filters.segmentId) {
       const segment = await assertSegment(ctx, filters.segmentId);
-      // undefined = empty filter (all contacts); nothing to AND in then.
-      const predicate = segmentPredicate(segment.filter);
-      if (predicate) conds.push(predicate);
+      conds.push(savedSegmentPredicate(segment));
     }
     // Topic filter reuses the ONE membership rule via a correlated EXISTS.
     if (filters.topicId) {
