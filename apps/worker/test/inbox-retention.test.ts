@@ -3,7 +3,12 @@ import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { purgeExpiredReceivedContent, purgeInboxData } from "../src/handlers/cron.js";
+import {
+  purgeExpiredEmailBodies,
+  purgeExpiredEmailMetadata,
+  purgeExpiredReceivedContent,
+  purgeInboxData,
+} from "../src/handlers/cron.js";
 
 let db: Db;
 let close: () => Promise<void>;
@@ -179,4 +184,41 @@ it("purges inbox data on its clocks: empty threads, drafts, activity, correspond
   expect((await db.select().from(schema.inboxCorrespondents)).map((c) => c.address)).toEqual([
     "new@x.example",
   ]);
+});
+
+it("keeps mail sent in an inbox thread on the received clock, the rest on the sent clocks", async () => {
+  const threadId = await thread();
+  const sent = (createdAt: Date, inThread: boolean) => ({
+    teamId,
+    from: "bot@in.retention.test",
+    to: ["r@example.com"],
+    subject: "s",
+    createdAt,
+    bodyCiphertext: Buffer.from("x"),
+    bodyIv: Buffer.from("y"),
+    bodyWrappedDek: Buffer.from("z"),
+    bodyKeyVersion: 1,
+    ...(inThread ? { inboxId, threadId } : {}),
+  });
+  const rows = await db
+    .insert(schema.emails)
+    .values([sent(ago(100), true), sent(ago(200), true), sent(ago(100), false)])
+    .returning({ id: schema.emails.id });
+  const reply = rows[0]?.id;
+
+  const days = { defaultRetentionDays: 30, threadRetentionDays: 180, now: NOW };
+  expect(await purgeExpiredEmailBodies(db, days)).toBe(2);
+  const bodies = await db
+    .select({ id: schema.emails.id, purged: schema.emails.bodyPurgedAt })
+    .from(schema.emails);
+  expect(bodies.find((b) => b.id === reply)?.purged).toBeNull();
+
+  const meta = await purgeExpiredEmailMetadata(db, {
+    retentionDays: 90,
+    threadRetentionDays: 180,
+    now: NOW,
+  });
+  expect(meta.emails).toBe(2);
+  const left = await db.select({ id: schema.emails.id }).from(schema.emails);
+  expect(left.map((r) => r.id)).toEqual([reply]);
 });

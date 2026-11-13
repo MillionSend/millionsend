@@ -219,7 +219,7 @@ worker cabem sem ajuste.
 | `SQS_POLL_CONCURRENCY` | Loops paralelos de long polling no SQS para eventos do SES (padrão `4`). |
 | `WEBHOOK_DELIVERY_RETENTION_DAYS` | Por quanto tempo as linhas e payloads de entrega de webhook ficam legíveis no log de entregas (padrão `30`); as mais antigas são apagadas. |
 | `EMAIL_METADATA_RETENTION_DAYS` | Dias que as linhas inteiras de e-mail (destinatários, assunto, status, eventos) são mantidas (padrão `30`, a norma do setor); os corpos saem antes pela configuração de retenção do painel, e contadores diários e resultados de transmissões são mantidos sempre. Versões anteriores à v0.6.30 usavam `365`: defina explicitamente antes de atualizar se esse histórico precisa ficar. |
-| `RECEIVED_RETENTION_DAYS` | Dias que os e-mails recebidos são mantidos, conteúdo, anexos e linhas inteiras, junto com rascunhos, atividade e correspondentes das caixas (padrão `180`). Separado dos e-mails enviados: a configuração de retenção do painel e `EMAIL_METADATA_RETENTION_DAYS` não se aplicam a ele. |
+| `RECEIVED_RETENTION_DAYS` | Dias que os e-mails recebidos são mantidos, conteúdo, anexos e linhas inteiras, junto com rascunhos, atividade e correspondentes das caixas e os e-mails enviados de uma caixa (padrão `180`). Separado dos demais e-mails enviados: a configuração de retenção do painel e `EMAIL_METADATA_RETENTION_DAYS` não se aplicam a ele. |
 | `OPEN_PREFETCH_WINDOW_SECONDS` | Uma busca do pixel de rastreamento até esta quantidade de segundos após a entrega (ou antes dela) é registrada como pré-carregada, não como abertura (padrão `10`); `0` mantém só as regras por user agent. Veja [precisão da taxa de abertura](/pt-BR/concepts/domains#precisão-da-taxa-de-abertura). |
 
 ### Armazenamento de objetos (uploads e backups)
@@ -2191,7 +2191,7 @@ docker build --secret id=SENTRY_AUTH_TOKEN,env=SENTRY_AUTH_TOKEN \
   **Configurações → Instância** (proprietário/administrador). Os padrões são 14/s e 30 dias
   até serem alterados lá; o worker aplica mudança de taxa em até um minuto, e
   a retenção na próxima limpeza. Essa retenção vale para os e-mails enviados;
-  os recebidos seguem `RECEIVED_RETENTION_DAYS` (padrão 180).
+  os recebidos e os enviados de uma caixa seguem `RECEIVED_RETENTION_DAYS` (padrão 180).
 - Dimensionamento do worker: `SEND_CONCURRENCY` envios em paralelo (padrão 16, cerca de 1,2 por mensagem/segundo da taxa do SES) e `WORKER_REPLICAS` (padrão 1). O limitador de taxa do SES vive em cada processo do worker, então cada worker divide a taxa da conta por `WORKER_REPLICAS`; defina-o como o número de contêineres de worker em execução.
 - Para rodar processos em contêineres separados, defina `PROCESS` como
   `api`, `worker`, `web`, `smtp`, `mx` ou `docs` por contêiner (padrão `all` =

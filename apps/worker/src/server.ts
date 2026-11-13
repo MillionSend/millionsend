@@ -441,6 +441,7 @@ await queue.scheduleCrons({
   "retention.purge": async () => {
     const purged = await purgeExpiredEmailBodies(db, {
       defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
+      threadRetentionDays: env.RECEIVED_RETENTION_DAYS,
     });
     const requests = await purgeExpiredApiRequests(db, {
       defaultRetentionDays: env.EMAIL_RETENTION_DAYS,
@@ -450,6 +451,7 @@ await queue.scheduleCrons({
     });
     const metadata = await purgeExpiredEmailMetadata(db, {
       retentionDays: metadataRetentionDays,
+      threadRetentionDays: env.RECEIVED_RETENTION_DAYS,
       deliveryRetentionDays: env.WEBHOOK_DELIVERY_RETENTION_DAYS,
     });
     const receivedPurged = await purgeExpiredReceivedContent(db, {
