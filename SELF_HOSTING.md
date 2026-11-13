@@ -1168,8 +1168,7 @@ on. Self-hosters can leave it off; the cloud runs it.
 safety when a team's risk crosses the flag line and the judge called at least
 one of its messages abuse from the flag score in the last 7 days (a risk that
 only clean verdicts carried over the line opens nothing; an open flag stays
-until the risk falls back under the line), emails the operator once a day per
-team past the alert line, and, for a team in the New tier only
+until the risk falls back under the line), counts the team in the operator's daily digest past the alert line (once a day per team), and, for a team in the New tier only
 (inside its first 1,000 sends or 72 hours, or under 10,000 sends within 7
 days), pauses broadcasts when the risk passes the pause line and a sampled
 message scored 90 or more within a day, or at once when a broadcast's own
@@ -1242,8 +1241,7 @@ verdict, while releasing mail parked for its media or a failing judge clears
 none. A link shortener is never cleared. For 7 days after a destination
 clears, every email to it is judged after it is sent, and a phishing-type
 verdict from 90 on one takes the clearance back: mail to it is judged before
-SES again, no verdict clears it again (an operator's release does), and the
-operator is mailed at most once a day per team. A platform nearly every
+SES again, no verdict clears it again (an operator's release does), and the operator's daily digest counts it. A platform nearly every
 sender links to (Facebook, Instagram, WhatsApp, YouTube, LinkedIn, X, TikTok,
 Google, Apple) or a mailbox provider is screened like any destination, but
 never loses its clearance. A message with more than 20
@@ -1260,8 +1258,7 @@ seconds or waits its turn, counts as young. For a New-tier team, such a
 verdict on a link domain registered under 7 days ago holds the team, and one
 of an age not known makes its mail wait 2 minutes. Past New, the mail is
 parked for the review list on a phishing-type verdict from 90, or from 80
-with a link domain under 7 days old or of an age not known, and the operator
-is mailed at most once a day per team; a team past New is never held
+with a link domain under 7 days old or of an age not known, and the operator's daily digest counts it; a team past New is never held
 automatically. A phishing-type verdict that rests only on a sign-in, reset,
 one-time-code or billing link to a product's own name on an app platform
 (`ref.supabase.co`, `app.up.railway.app`, `x.workers.dev`: the parents are
@@ -1271,7 +1268,7 @@ message judged before SES that is not a broadcast, poses as no other brand
 loopback address and it has no Reply-To: a framework's default template signs
 with the framework's name) and carries no payment instrument
 (a Pix code, changed bank details, a callback), spares a New-tier team the hold it would have met: the message
-parks for the review list instead, with the same operator mail, and the
+parks for the review list instead, counted in the same daily digest, and the
 team's other mail waiting on a phishing-type verdict from 80, queued or
 parked for quota, parks with it, as the hold would have parked it. Mail to a
 platform name new to the team is always judged before SES, but a loopback
@@ -1318,8 +1315,7 @@ repeat of a set already screened takes none of them; past them, mail that
 would be screened for a new destination is sent and judged after it goes
 out, every one, past the team's daily sample cap too, when its team is
 Established or Trusted and has had no flag opened, for any reason, in the
-last 30 days; any other team's is parked for the review list unjudged, and
-the operator is mailed at most once a day per team. Releasing such mail
+last 30 days; any other team's is parked for the review list unjudged, and the operator's daily digest counts it. Releasing such mail
 sends it without clearing its destinations. None of it waits for the next
 day.
 
@@ -1433,8 +1429,7 @@ file the policy flags, refuses or cannot open parks it at once; after the
 verdict, so does a QR code the image reader saw that no decoder read, or
 images the reader declined. Images Bedrock refuses (a `ValidationException`
 that the same request without the images does not get) park any team's
-unsent email, keep no preview, and the operator is mailed at most once a day
-per team. When a body image cannot be fetched or Bedrock does not
+unsent email, keep no preview, and the operator's daily digest counts it. When a body image cannot be fetched or Bedrock does not
 answer, a New-tier team's mail from a sending domain under 7 days old waits
 as for a judge outage; other mail is judged without those images, and Jev is
 told what was not read. Links in files and QR codes count as destinations at
@@ -1546,7 +1541,7 @@ as its `MONITOR_*` environment variable until it is; the console wins.
 | `MONITOR_TEAM_DAILY_CAP` | 600 | Draws after sending per team per UTC day; past it they stop silently. Mail judged before SES neither counts nor is capped |
 | `MONITOR_INSTANCE_DAILY_CAP` | 50000 | Instance-wide draws after sending; past it tier sampling stops, first sends and anomalies continue |
 | `MONITOR_FLAG_RISK` | 0.85 | The team samples four times as much, and gets the `monitor` flag with an abuse verdict from `MONITOR_FLAG_SCORE` in the last 7 days; the flag stays until the risk falls back under this |
-| `MONITOR_ALERT_RISK` | 0.9 | The operator is emailed, once per team per day |
+| `MONITOR_ALERT_RISK` | 0.9 | The team is counted in the operator's daily digest, once per team per day |
 | `MONITOR_PAUSE_RISK` | 0.95 | New teams only: broadcasts pause, with a verdict of 90 or more in the last day |
 | `MONITOR_AUTO_PAUSE` | true | Whether the pause policy applies |
 | `MONITOR_FLAG_SCORE` | 70 | A sample counts as flagged in the console from this score, and the `monitor` flag wants an abuse verdict from it in the last 7 days |
@@ -1562,6 +1557,15 @@ offers "Sample everything for 7 days". The Overview's Monitoring card
 charts the hourly sample count, and the operator is emailed, at most once
 every six hours, when more than 20% of an hour's samples (at least 20 of
 them) went unjudged, or as soon as TypeSafe rejects the API key.
+
+**Operator mail.** A review hold, a broadcast pause, a new team that matches
+a team suspended for phishing, and a judge that keeps failing are mailed at
+once. The rest waits for one daily digest at 09:00 UTC (`monitor.digest`):
+for each team, how many alerts, emails parked for a new destination,
+destinations whose clearance was taken back, and emails whose images
+Bedrock refused, with a link to its review page. It gives counts only, never
+a sender, subject, destination or verdict, and no digest goes out on a day
+with nothing to report.
 
 </details>
 
