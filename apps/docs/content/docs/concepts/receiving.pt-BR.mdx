@@ -196,7 +196,7 @@ um downgrade.
 | Limite | Valor |
 | --- | --- |
 | Tamanho da mensagem | 40 MB (41.943.040 bytes) para a mensagem inteira como foi enviada: cabeçalhos, texto, HTML e anexos codificados para e-mail. A codificação base64 deixa os anexos cerca de um terço maiores, então cabem uns 30 MB de arquivos. Uma mensagem maior é recusada com `552 5.3.4` enquanto ainda está chegando. |
-| Retenção | 30 dias na nuvem. Na auto-hospedagem, o conteúdo segue a retenção de e-mails da instância (**Configurações → Instância**, 30 dias por padrão), e remetente, destinatários e assunto seguem `EMAIL_METADATA_RETENTION_DAYS` (30 por padrão). |
+| Retenção | 180 dias na nuvem, tanto para o conteúdo e os anexos quanto para remetente, destinatários e assunto. Na auto-hospedagem, os e-mails recebidos seguem `RECEIVED_RETENTION_DAYS` (180 por padrão). Os e-mails enviados têm a sua própria retenção, mais curta. |
 | Filtro | E-mail infectado fica retido. Fora isso, o e-mail num endereço do pega-tudo é guardado do jeito que chegou: confira `authentication`, `screening` e `spam_verdict` antes de confiar num remetente. As caixas de entrada somam [as próprias regras](/pt-BR/concepts/agent-safety). |
 
 Quando a retenção do conteúdo termina, `html`, `text`, `headers` e `raw`

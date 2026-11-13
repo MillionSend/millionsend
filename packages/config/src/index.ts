@@ -38,6 +38,7 @@ export {
   parseCommaList,
   parseEmailFrom,
   parseSnsTopicArns,
+  RECEIVED_RETENTION_DAYS_DEFAULT,
   receivingEnabled,
   receivingMxHost,
   recipientDomainCheckEnabled,

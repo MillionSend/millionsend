@@ -1824,7 +1824,9 @@ without it.
   recipients, subject, status, events — outlive their bodies and are deleted after
   `EMAIL_METADATA_RETENTION_DAYS` (default 30, the industry norm; daily counters and broadcast results are kept regardless); webhook delivery rows (payload,
   response, attempts) stay readable for `WEBHOOK_DELIVERY_RETENTION_DAYS` (default
-  30) and are then purged. A tracking-pixel fetch within `OPEN_PREFETCH_WINDOW_SECONDS`
+  30) and are then purged. Received mail (content, attachments and whole rows) and
+  inbox data follow their own `RECEIVED_RETENTION_DAYS` (default 180) instead of
+  either email window. A tracking-pixel fetch within `OPEN_PREFETCH_WINDOW_SECONDS`
   of delivery (default 10; 0 keeps only the user-agent rules) is recorded as
   prefetched, not opened, so open rates count people.
   Deleting a contact tombstones its address across email history, event payloads and

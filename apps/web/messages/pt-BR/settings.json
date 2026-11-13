@@ -249,7 +249,7 @@
     "title": "Instância",
     "subtitle": "Vale para toda esta instalação, todas as equipes.",
     "rateLabel": "Taxa de envio SES (mensagens/segundo)",
-    "retentionLabel": "Retenção de corpos de e-mail (dias)",
+    "retentionLabel": "Retenção de corpos de e-mails enviados (dias)",
     "reserveLabel": "Reserva transacional (% da cota de envio)",
     "reserveNote": "A reserva transacional é definida em <link>Console → Regiões</link>.",
     "save": "Salvar",

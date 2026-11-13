@@ -184,7 +184,7 @@ on after a downgrade.
 | Limit | Value |
 | --- | --- |
 | Message size | 40 MB (41,943,040 bytes) for the whole message as sent: headers, text, HTML and attachments encoded for email. Base64 encoding makes attachments about a third larger, so roughly 30 MB of files fit. A larger message is refused with `552 5.3.4` while it streams in. |
-| Retention | 30 days on Cloud. Self-hosted, the content follows the instance's email retention (**Settings → Instance**, 30 days by default), and the sender, recipients and subject follow `EMAIL_METADATA_RETENTION_DAYS` (30 by default). |
+| Retention | 180 days on Cloud, for the content, attachments, sender, recipients and subject alike. Self-hosted, received mail follows `RECEIVED_RETENTION_DAYS` (180 by default). Sent mail keeps its own, shorter retention. |
 | Filtering | Infected mail is held. Mail at a catch-all address is otherwise stored as it came: check `authentication`, `screening` and `spam_verdict` before trusting a sender. Inboxes add [their own rules](/concepts/agent-safety). |
 
 When the content's retention ends, `html`, `text`, `headers` and `raw`
