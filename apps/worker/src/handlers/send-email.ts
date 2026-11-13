@@ -67,7 +67,7 @@ import { MediaPoolError } from "../media/pool.js";
 import { saveMediaReview } from "../media/read.js";
 import { type MediaDeps, scanAttachments, scanReview } from "../media/scan.js";
 import type { SystemMailer } from "../system-mail.js";
-import { notifyDestination } from "./abuse-judge.js";
+import { noteForDigest } from "./monitor-digest.js";
 import { isSesQuotaRefusal, isSesThrottle, type SendQuotaControls } from "./ses-quota.js";
 import { clearSharedTenant, isTenantNotAssociated } from "./tenants.js";
 
@@ -830,17 +830,7 @@ async function sendQueued(
     }
     if (gate.action === "park") {
       await parkQueued(db, email, `screening parked it (${gate.reason})`, gate.reason);
-      if (gate.unjudged) {
-        await notifyDestination(
-          db,
-          deps,
-          "monitor.destination_parked",
-          email.teamId,
-          null,
-          gate.unjudged,
-          new Date(),
-        );
-      }
+      if (gate.unjudged) await noteForDigest(db, email.teamId, "destination_parked");
       if (gate.reason === "media" && scan) {
         try {
           await saveMediaReview(db, deps.keyring, email, scanReview(scan), { keep: true });

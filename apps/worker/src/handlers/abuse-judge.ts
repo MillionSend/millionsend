@@ -4,11 +4,9 @@ import {
   accountMailPhrase,
   applyJudgedSample,
   buildJudgeBlock,
-  claimNotification,
   clearDestinations,
   clientIdentitySite,
   DESTINATION_REVOKE_SCORE,
-  DESTINATION_SCREENS_PER_DAY,
   decryptEmailBody,
   destinationVerdictParks,
   type EmailAttachment,
@@ -34,11 +32,9 @@ import {
   sendingDomainYoung,
   spareWaitingSamples,
   teamDestinationStanding,
-  teamMonitorOverview,
   teamMonitorRow,
   teamOwnDomains,
   UNNAMED_ATTACHMENT,
-  utcDay,
   type VerdictOutcome,
   verdictClearsDestinations,
 } from "@millionsend/core";
@@ -53,6 +49,7 @@ import {
   saveMediaReview,
 } from "../media/read.js";
 import { mailOperator, type SystemMailer } from "../system-mail.js";
+import { noteForDigest } from "./monitor-digest.js";
 
 export interface JudgeDeps {
   /** Null when the monitor is off: every sample is recorded unjudged. */
@@ -177,7 +174,7 @@ async function judgePending(
       { teamId: sample.teamId, ...loaded.sendingDomain, shared },
       now,
     )) === true;
-  if (issues.includes("vision_blocked")) await notifyMediaBlocked(db, deps, sample.teamId, now);
+  if (issues.includes("vision_blocked")) await noteForDigest(db, sample.teamId, "media_blocked");
   // Mail this verdict holds back keeps what screening read, for the person who decides on it.
   const waiting = sample.screening && loaded.waiting;
   let kept = false;
@@ -351,15 +348,7 @@ async function judgePending(
     await clearDestinations(db, sample.teamId, destinations, now);
   }
   if (outcome.revoked.length > 0) {
-    await notifyDestination(
-      db,
-      deps,
-      "monitor.destination_revoked",
-      sample.teamId,
-      verdict,
-      outcome.revoked,
-      now,
-    );
+    await noteForDigest(db, sample.teamId, "destination_revoked");
   }
   const spareParks = sample.screening && outcome.spared !== null && !vouched;
   const destinationParks =
@@ -370,19 +359,12 @@ async function judgePending(
         outcome.tier !== "new" &&
         destinationVerdictParks({ ...verdict, linkYoung }, settings)));
   if (destinationParks) {
-    await notifyDestination(
-      db,
-      deps,
-      "monitor.destination_parked",
-      sample.teamId,
-      verdict,
-      destinations.length > 0 ? destinations : standing.all,
-      now,
-    );
+    await noteForDigest(db, sample.teamId, "destination_parked");
   }
   if (waiting && (destinationParks || outcome.held)) await keepMedia();
-  if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
-    await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings, now);
+  if (outcome.alert) await noteForDigest(db, sample.teamId, "alert");
+  if ((outcome.paused || outcome.held) && deps.mailer) {
+    await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings);
   }
   if (outcome.held && deps.syncTenant) {
     // The hold already refuses every send; the tenant is a second lock, so a
@@ -441,63 +423,6 @@ async function resumeScreened(
     .where(eq(schema.emails.id, sample.emailId));
   if (email?.latestStatus !== "queued" || email.sentAt) return;
   await deps.enqueueSend?.(sample.emailId, emailSendPriority(email));
-}
-
-/**
- * The operator hears once a day per team, per kind, that mail to a new
- * destination was parked, or that a cleared destination drew a
- * phishing-type verdict and is new again; the review list holds every
- * parked email. A null verdict: the mail parked unjudged, past the team's
- * screenings of the day.
- */
-export async function notifyDestination(
-  db: Db,
-  deps: Pick<JudgeDeps, "mailer" | "appBaseUrl">,
-  kind: "monitor.destination_parked" | "monitor.destination_revoked",
-  teamId: string,
-  verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons"> | null,
-  destinations: readonly string[],
-  now: Date,
-): Promise<void> {
-  if (!deps.mailer) return;
-  try {
-    const claimed = await claimNotification(db, { teamId, kind, periodKey: utcDay(now) });
-    if (!claimed) return;
-    const [team] = await db
-      .select({ name: schema.teams.name })
-      .from(schema.teams)
-      .where(eq(schema.teams.id, teamId));
-    const judged = verdict
-      ? {
-          score: String(verdict.score),
-          verdict: [...verdict.categories, ...verdict.reasons].join(", "),
-        }
-      : null;
-    await mailOperator(
-      db,
-      deps.mailer,
-      kind,
-      "/console/safety",
-      (locale) => ({
-        team: team?.name ?? teamId,
-        domain: destinations.slice(0, 5).join(", "),
-        ...judged,
-        ...(kind === "monitor.destination_parked"
-          ? {
-              why: accountMailPhrase({
-                locale,
-                kind,
-                key: judged ? "judged" : "unjudged",
-                values: judged ?? { n: String(DESTINATION_SCREENS_PER_DAY) },
-              }),
-            }
-          : {}),
-      }),
-      deps.appBaseUrl,
-    );
-  } catch (err) {
-    console.error(`abuse.judge: destination mail for team ${teamId} failed`, err);
-  }
 }
 
 /**
@@ -613,37 +538,6 @@ async function loadBlockInput(
   };
 }
 
-/**
- * The operator hears once a day per team that the image reader's provider
- * refused an email's images themselves, as Bedrock's CSAM check does;
- * unsent mail of it waits on the review list.
- */
-async function notifyMediaBlocked(db: Db, deps: JudgeDeps, teamId: string, now: Date) {
-  if (!deps.mailer) return;
-  try {
-    const claimed = await claimNotification(db, {
-      teamId,
-      kind: "monitor.media_blocked",
-      periodKey: utcDay(now),
-    });
-    if (!claimed) return;
-    const [team] = await db
-      .select({ name: schema.teams.name })
-      .from(schema.teams)
-      .where(eq(schema.teams.id, teamId));
-    await mailOperator(
-      db,
-      deps.mailer,
-      "monitor.media_blocked",
-      "/console/safety",
-      { team: team?.name ?? teamId },
-      deps.appBaseUrl,
-    );
-  } catch (err) {
-    console.error(`abuse.judge: blocked-images mail for team ${teamId} failed`, err);
-  }
-}
-
 async function notifyOperator(
   db: Db,
   deps: JudgeDeps,
@@ -651,7 +545,6 @@ async function notifyOperator(
   verdict: Pick<JudgeVerdict, "score" | "categories" | "reasons">,
   outcome: VerdictOutcome,
   settings: MonitorSettings,
-  now: Date,
 ): Promise<void> {
   if (!deps.mailer) return;
   const [team] = await db
@@ -696,23 +589,6 @@ async function notifyOperator(
         "monitor.broadcasts_paused",
         path,
         { team: name, risk, score },
-        deps.appBaseUrl,
-      );
-    }
-    if (outcome.alert) {
-      const overview = await teamMonitorOverview(db, teamId, settings, now);
-      await mailOperator(
-        db,
-        deps.mailer,
-        "monitor.alert",
-        path,
-        (locale) => ({
-          team: name,
-          risk,
-          tier: accountMailPhrase({ locale, kind: "monitor.alert", key: outcome.tier }),
-          samples: String(overview.judged7d),
-          flagged: String(overview.flagged7d),
-        }),
         deps.appBaseUrl,
       );
     }

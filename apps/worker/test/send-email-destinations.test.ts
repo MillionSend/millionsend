@@ -10,7 +10,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, digestCounts } from "@millionsend/test-utils";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { judgeSample } from "../src/handlers/abuse-judge.js";
@@ -244,7 +244,7 @@ it("never clears a shortener: every mail through one is judged first", async () 
   expect(await sendEmail(db, sendDeps, { emailId: next })).toBe("deferred");
 });
 
-it("parks a team past new's mail to a new destination on 90, alerts once a day, and never holds the team", async () => {
+it("parks a team past new's mail to a new destination on 90, counts each for the digest, and never holds the team", async () => {
   const t = await team("hijacked", "established");
   const first = await email(t, "https://secure-login-update.com/x");
   await sendEmail(db, sendDeps, { emailId: first });
@@ -256,14 +256,14 @@ it("parks a team past new's mail to a new destination on 90, alerts once a day, 
   });
   const [team1] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
   expect(team1?.suspendedAt).toBeNull();
-  expect(mails.filter((m) => m.kind === "monitor.destination_parked")).toHaveLength(1);
-  expect(mails[0]?.text).toContain("secure-login-update");
+  expect(mails).toEqual([]);
+  expect(await digestCounts(db, t.teamId)).toEqual({ destination_parked: 1 });
 
   const second = await email(t, "https://secure-login-update.com/y");
   await sendEmail(db, sendDeps, { emailId: second });
   await judge((await sampleOf(second))?.id ?? "", verdict(95));
   expect(await sendEmail(db, sendDeps, { emailId: second })).toBe("parked");
-  expect(mails.filter((m) => m.kind === "monitor.destination_parked")).toHaveLength(1);
+  expect(await digestCounts(db, t.teamId)).toEqual({ destination_parked: 2 });
   expect(sesCalls).toEqual([]);
 
   // Released from the review list: sent unscreened, and the destination clears.
@@ -309,8 +309,7 @@ it("parks a new team's reset mail to its own name on an app platform instead of 
   expect(open?.suspendedAt).toBeNull();
   expect(await sendEmail(db, sendDeps, { emailId: reset })).toBe("parked");
   expect(await row(reset)).toMatchObject({ parkReason: "destination" });
-  expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
-  expect(mails[0]?.text).toContain("abcdefghijklmnop");
+  expect(await digestCounts(db, t.teamId)).toEqual({ destination_parked: 1 });
   expect(sesCalls).toEqual([]);
   expect(
     await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [reset], holdLine: 80 }),
@@ -451,7 +450,7 @@ it("parks a spared verdict's mail to the team's own people like any other", asyn
   const [open] = await db.select().from(schema.teams).where(eq(schema.teams.id, t.teamId));
   expect(open?.suspendedAt).toBeNull();
   expect(await sendEmail(db, sendDeps, { emailId: own })).toBe("parked");
-  expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
+  expect(await digestCounts(db, t.teamId)).toEqual({ destination_parked: 1 });
 });
 
 it("parks the burst a spared verdict belongs to, as the hold would have", async () => {
@@ -754,7 +753,7 @@ it("parks a new team's notice for a client business instead of holding it, and i
   });
   expect(await suspension(t.teamId)).toBeNull();
   expect(await sendEmail(db, sendDeps, { emailId: first })).toBe("parked");
-  expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
+  expect(await digestCounts(db, t.teamId)).toEqual({ destination_parked: 1 });
   expect(sesCalls).toEqual([]);
   await releaseWaitingEmails(db, { teamId: t.teamId, emailIds: [first], holdLine: 80 });
   expect(await cleared(t.teamId)).toEqual([CLIENT_SITE]);
@@ -766,7 +765,7 @@ it("parks a new team's notice for a client business instead of holding it, and i
   expect(await sampleOf(next)).toMatchObject({ sparedHold: "vouched" });
   expect(await sendEmail(db, sendDeps, { emailId: next })).toBe("sent");
   expect(await suspension(t.teamId)).toBeNull();
-  expect(mails.map((m) => m.kind)).toEqual(["monitor.destination_parked"]);
+  expect(await digestCounts(db, t.teamId)).toEqual({ destination_parked: 1 });
 
   // Another brand's name on the released site is no client notice: the hold stands.
   const other = await clientNotice(t, { name: "Banco Exemplo" });

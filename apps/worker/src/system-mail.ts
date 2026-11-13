@@ -108,7 +108,8 @@ export async function mailOwners(
 /**
  * One catalog notice to the instance operator, in their own language when
  * their contact row says which; nothing goes out when no operator exists.
- * It names no team, so no suspension mutes it.
+ * It names no team, so no suspension mutes it. `lines` are paragraphs
+ * after the catalog's body, one per item of a list.
  * Returns whether it was sent; a failing send is the caller's to log.
  */
 export async function mailOperator(
@@ -118,6 +119,7 @@ export async function mailOperator(
   path: string,
   values: Record<string, string> | ((locale: MailLocale) => Record<string, string>),
   appBaseUrl: string | undefined,
+  lines?: (locale: MailLocale) => string[],
 ): Promise<boolean> {
   const operator = await findInstanceOperator(db);
   if (!operator) return false;
@@ -128,6 +130,7 @@ export async function mailOperator(
       locale,
       url: `${appBaseUrl ?? ""}${path}`,
       values: typeof values === "function" ? values(locale) : values,
+      ...(lines ? { lines: lines(locale) } : {}),
     }),
     kind,
   });

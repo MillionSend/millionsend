@@ -54,14 +54,11 @@ export const ACCOUNT_MAIL_KINDS = [
   "team.suspended",
   "team.reinstated",
   "team.sending_pause_lifted",
-  "monitor.alert",
   "monitor.broadcasts_paused",
   "monitor.team_held",
   "monitor.team_linked",
   "monitor.degraded",
-  "monitor.destination_parked",
-  "monitor.media_blocked",
-  "monitor.destination_revoked",
+  "monitor.digest",
 ] as const;
 export type AccountMailKind = (typeof ACCOUNT_MAIL_KINDS)[number];
 
@@ -263,6 +260,8 @@ export function buildAccountMail(input: {
   locale: MailLocale;
   url: string;
   values?: Record<string, string>;
+  /** Paragraphs after the body, already filled: one per item of a list. */
+  lines?: string[];
 }): MailContent {
   const entry: AccountMailEntry = CATALOGS[input.locale][input.kind];
   const fill = (template: string) => fillMailTemplate(template, input.values ?? {});
@@ -270,7 +269,7 @@ export function buildAccountMail(input: {
     subject: fill(entry.subject),
     ...accountMailCard({
       ...(entry.heading ? { heading: fill(entry.heading) } : {}),
-      paragraphs: entry.body.map(fill).filter((p) => p.trim() !== ""),
+      paragraphs: [...entry.body.map(fill), ...(input.lines ?? [])].filter((p) => p.trim() !== ""),
       button: fill(entry.button),
       url: input.url,
       muted: (entry.muted ?? []).map(fill),

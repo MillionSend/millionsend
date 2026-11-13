@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { LinkifyIt } from "linkify-it";
 import { find } from "linkifyjs";
@@ -55,6 +56,15 @@ export async function createTeam(
       .values({ teamId: team.id, name: `${slug}.${opts.sharedInboxDomain}` });
   }
   return team.id;
+}
+
+/** The monitor notices waiting for a team's next operator digest, kind → count. */
+export async function digestCounts(db: Db, teamId: string): Promise<Record<string, number>> {
+  const rows = await db
+    .select()
+    .from(schema.monitorDigest)
+    .where(eq(schema.monitorDigest.teamId, teamId));
+  return Object.fromEntries(rows.map((row) => [row.kind, row.count]));
 }
 
 /**

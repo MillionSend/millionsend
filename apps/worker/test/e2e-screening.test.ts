@@ -10,7 +10,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, digestCounts } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
 import { Resend } from "resend";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -267,7 +267,7 @@ it("screens an established team's mail to a never-seen domain: parked on a 92, s
   await judgeAll(92);
   expect(await sendAll()).toEqual({ [first]: "parked" });
   expect(await row(first)).toMatchObject({ parkReason: "destination" });
-  expect(mails).toContain("monitor.destination_parked");
+  expect(await digestCounts(db, agency.teamId)).toEqual({ destination_parked: 1 });
   expect((await team(agency.teamId))?.suspendedAt).toBeNull();
   expect(sesSends.length).toBe(before);
 

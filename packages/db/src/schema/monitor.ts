@@ -209,3 +209,21 @@ export const monitorSettingColumns = {
   sharedInboxTenants: boolean("shared_inbox_tenants"),
   sharedInboxTeamDailyCap: integer("shared_inbox_team_daily_cap"),
 } as const;
+
+/**
+ * What the operator's daily digest will report: one row per team and kind
+ * of monitor notice, counting the events since the last digest. The digest
+ * deletes the rows it reports in the same statement that reads them, so two
+ * workers never both mail one.
+ */
+export const monitorDigest = pgTable(
+  "monitor_digest",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    count: integer("count").notNull().default(1),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.kind] })],
+);

@@ -11,7 +11,7 @@ import {
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { createTeam, createTestDb } from "@millionsend/test-utils";
+import { createTeam, createTestDb, digestCounts } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
@@ -246,7 +246,7 @@ it("gives up on a purged or missing body, and skips a sample already judged", as
   expect(judge.blocks).toEqual([]);
 });
 
-it("emails the operator on the alert and on the pause, in that team's review link", async () => {
+it("emails the operator on the pause in that team's review link, and keeps the alert for the digest", async () => {
   // Fresh new-tier team so the risk starts at the prior.
   const fresh = await createTeam(db, "fresh-team");
   await db
@@ -271,13 +271,10 @@ it("emails the operator on the alert and on the pause, in that team's review lin
       sampleId: id,
     });
   }
-  const kinds = sends.map((s) => s.kind);
-  expect(kinds.filter((k) => k === "monitor.alert")).toHaveLength(1);
-  expect(kinds.filter((k) => k === "monitor.broadcasts_paused")).toHaveLength(1);
+  expect(sends.map((s) => s.kind)).toEqual(["monitor.broadcasts_paused"]);
   expect(sends[0]).toMatchObject({ to: "op@example.com" });
-  expect(sends.find((s) => s.kind === "monitor.alert")?.text).toContain(
-    `https://app.example.test/console/safety/${fresh}`,
-  );
+  expect(sends[0]?.text).toContain(`https://app.example.test/console/safety/${fresh}`);
+  expect(await digestCounts(db, fresh)).toEqual({ alert: 1 });
   expect(sends.find((s) => s.kind === "monitor.broadcasts_paused")?.subject).toBe(
     "Content monitor paused a team's broadcasts",
   );
@@ -290,37 +287,6 @@ it("emails the operator on the alert and on the pause, in that team's review lin
     .where(eq(schema.auditLog.teamId, fresh))
     .orderBy(desc(schema.auditLog.createdAt));
   expect(audit).toMatchObject({ action: "monitor.broadcasts_paused", actorId: "system" });
-});
-
-it("names the team's tier in the operator's language, never by its key", async () => {
-  await db.update(schema.user).set({ locale: "pt-BR" }).where(eq(schema.user.id, "op"));
-  try {
-    // On probation: past its first window and ramp, inside its first 30 days.
-    const settled = await createTeam(db, "settled-team");
-    await db.insert(schema.teamMonitor).values({
-      teamId: settled,
-      sentTotal: 5_000,
-      firstSendAt: new Date(NOW.getTime() - 10 * 86_400_000),
-    });
-    const judge = fakeJudge(async () => ({ score: 100 }));
-    for (let i = 0; i < 30; i += 1) {
-      const [row] = await db
-        .insert(schema.monitorSamples)
-        .values({
-          teamId: settled,
-          emailId: await insertEmail("<p>pay here</p>", { team: settled }),
-          kind: "tier",
-          createdAt: NOW,
-        })
-        .returning({ id: schema.monitorSamples.id });
-      await judgeSample(db, deps(judge), { sampleId: row?.id ?? "" });
-    }
-    const alert = sends.find((s) => s.kind === "monitor.alert" && s.text.includes(settled));
-    expect(alert?.text).toContain("(nível em observação,");
-    expect(alert?.text).not.toContain("probation");
-  } finally {
-    await db.update(schema.user).set({ locale: null }).where(eq(schema.user.id, "op"));
-  }
 });
 
 it("still emails the operator about a suspended team, through the system mailer", async () => {
@@ -362,13 +328,9 @@ it("still emails the operator about a suspended team, through the system mailer"
       .select({ to: schema.emails.to, tags: schema.emails.tags })
       .from(schema.emails)
       .where(eq(schema.emails.teamId, system));
-    expect(mailed).toHaveLength(2);
-    expect(mailed).toEqual(
-      expect.arrayContaining([
-        { to: ["op@example.com"], tags: { millionsend_system: "monitor.alert" } },
-        { to: ["op@example.com"], tags: { millionsend_system: "monitor.broadcasts_paused" } },
-      ]),
-    );
+    expect(mailed).toEqual([
+      { to: ["op@example.com"], tags: { millionsend_system: "monitor.broadcasts_paused" } },
+    ]);
   } finally {
     vi.unstubAllEnvs();
   }
