@@ -1334,6 +1334,29 @@ A held team's mail is released with its hold, and a suspension for anything
 else cancels it, so no later reinstatement sends it. The team's review page also lists its held unsent emails among the
 flagged ones, so a content access can name them.
 
+**Vouching for a team.** A team whose legitimate mail the monitor reads as
+abuse (a white-label platform that sends account mail under its client
+businesses' names, say) can be vouched for from its review page once a
+person checked it by hand: **Vouch for team** asks for a reason and a length
+(30 days, 90 days, or until revoked). While vouched, the monitor never
+interrupts the team's mail: nothing waits on the judge before SES (it is
+sent, and drawn after at the tier's rate), nothing parks for content, and no
+review hold, broadcast pause, clearance taken back or campaign-linkage hold
+applies; no automatic `monitor` flag opens (an open one clears on the next
+run), and the monitor's risk does not block lifting a bounce pause. Its
+verdicts still move the risk, and the alert mail and the digest go out as
+usual; a phishing-type verdict that carries a Pix code or asks to redirect a
+payment is mailed to the operator at once, every one. Bounce and complaint
+guardrails, quotas, caps and the warm-up, suspension, the operator's
+broadcast hold, manual flags and campaign-linkage records all still apply,
+and mail from the shared inbox domain is screened as before: that domain is
+the platform's own. **Revoke vouch** ends it at once; a vouch with an end
+lapses on its own, and the digest names it in its last 3 days. Once it
+ends, only verdicts judged after it count toward the repeat hold and the
+pause, and the `monitor` flag can open again even where an operator had
+cleared one. The vouch, its reason and its revocation go on the instance's
+audit log; the team's own log never shows them.
+
 **Turning it on** (in the instance's `.env`, read by the worker and the
 app; a restart applies it):
 
@@ -1568,10 +1591,10 @@ suspended for phishing, and a judge that keeps failing are mailed at once.
 The rest waits for one daily digest at 09:00 UTC (`monitor.digest`): for
 each team, how many times mail was parked for a new destination,
 destinations whose clearance was taken back, and unsent emails whose images
-Bedrock refused, with a link to its review page. It gives counts only, never
-a sender, subject, destination or verdict, and no digest goes out on a day
-with nothing to report. When the digest cannot be sent, its counts wait for
-the next one.
+Bedrock refused, with a link to its review page, and every vouch that ends
+within 3 days. It gives counts only, never a sender, subject, destination or
+verdict, and no digest goes out on a day with nothing to report. When the
+digest cannot be sent, its counts wait for the next one.
 
 </details>
 
