@@ -77,9 +77,7 @@ describe("replyFromChoices", () => {
         { value: "teammate", name: "Ada" },
       ],
     });
-    expect(
-      replyFromChoices(inbox({ fromName: null, replyFromName: "teammate" }), "Ada"),
-    ).toEqual({
+    expect(replyFromChoices(inbox({ fromName: null, replyFromName: "teammate" }), "Ada")).toEqual({
       default: "teammate",
       teammate: "Ada",
       options: [

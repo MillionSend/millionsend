@@ -959,8 +959,6 @@ describe("the From name of a person's send", () => {
       .update(schema.inboxes)
       .set({ replyFromName: "teammate_inbox" })
       .where(eq(schema.inboxes.id, shared.id));
-    expect(fromOf(await replyAs(shared, ADA, "teammate"))).toBe(
-      `Legal <${shared.emailAddress}>`,
-    );
+    expect(fromOf(await replyAs(shared, ADA, "teammate"))).toBe(`Legal <${shared.emailAddress}>`);
   });
 });

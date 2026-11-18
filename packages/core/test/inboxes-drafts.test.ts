@@ -460,9 +460,7 @@ describe("sendDraft's From name", () => {
       .update(schema.inboxDrafts)
       .set({ replyFromName: "teammate" })
       .where(eq(schema.inboxDrafts.id, picked.draft.id));
-    expect(fromOf(await send(inbox, picked.draft, TEAM_KEY))).toBe(
-      `Ada <${inbox.emailAddress}>`,
-    );
+    expect(fromOf(await send(inbox, picked.draft, TEAM_KEY))).toBe(`Ada <${inbox.emailAddress}>`);
 
     const direct = await sendNewFromInbox(db, w.deps, {
       teamId: w.teamId,
