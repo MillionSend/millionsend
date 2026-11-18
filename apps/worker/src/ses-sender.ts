@@ -1,6 +1,6 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { parseMailbox } from "@millionsend/core";
-import { SES_EMAIL_ID_TAG, SES_POOL_TAG, SES_TAG_VALUE } from "@millionsend/ses";
+import { FEEDBACK_ID_TAGS, SES_EMAIL_ID_TAG, SES_POOL_TAG, SES_TAG_VALUE } from "@millionsend/ses";
 import type { SesSender } from "./handlers/send-email.js";
 
 /**
@@ -51,6 +51,7 @@ export function createSesSender(defaultRegion: string, deadlineMs = SEND_DEADLIN
       bcc,
       tenantName,
       poolOwnerId,
+      tags,
     }) {
       const ToAddresses = toAddrSpecs(to);
       if (!ToAddresses) throw new Error("no envelope recipients; refusing to send");
@@ -73,6 +74,12 @@ export function createSesSender(defaultRegion: string, deadlineMs = SEND_DEADLIN
               ...(poolOwnerId && SES_TAG_VALUE.test(poolOwnerId)
                 ? [{ Name: SES_POOL_TAG, Value: poolOwnerId }]
                 : []),
+              ...Object.entries(FEEDBACK_ID_TAGS).flatMap(([name, sesName]) => {
+                const value = tags?.[name];
+                return value !== undefined && SES_TAG_VALUE.test(value)
+                  ? [{ Name: sesName, Value: value }]
+                  : [];
+              }),
             ],
             ...(configurationSetName ? { ConfigurationSetName: configurationSetName } : {}),
             ...(tenantName ? { TenantName: tenantName } : {}),

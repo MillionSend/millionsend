@@ -75,6 +75,7 @@ export {
   sendSimpleEmail,
 } from "./send.js";
 export {
+  FEEDBACK_ID_TAGS,
   type ParsedSesEvent,
   parseSesEvent,
   SES_EMAIL_ID_TAG,

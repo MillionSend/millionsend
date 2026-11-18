@@ -7,14 +7,24 @@
 
 /**
  * The SES message tags the worker writes on its sends, which each event
- * carries back. No customer can set one: their tags never reach SES, and
- * X-SES-* headers are refused at accept.
+ * carries back. No customer can set one: the millionsend_ tag prefix is
+ * reserved at accept, only FEEDBACK_ID_TAGS ever reach SES, and X-SES-*
+ * headers are refused at accept.
  */
 export const SES_EMAIL_ID_TAG = "millionsend_email_id";
 /** The Free pool the sending team counted in, so feedback that outlives the email row still reaches it. */
 export const SES_POOL_TAG = "millionsend_pool";
 /** What SES takes as a message tag value; it refuses the whole send over any other. */
 export const SES_TAG_VALUE = /^[A-Za-z0-9_-]{1,256}$/;
+/**
+ * Customer tags copied to the SES tags that SES writes into the Feedback-ID
+ * header (`a:b:<SES id>:AmazonSES`) for Gmail's feedback loop. A value SES
+ * cannot carry is left out rather than failing the send.
+ */
+export const FEEDBACK_ID_TAGS = {
+  feedback_id_a: "ses:feedback-id-a",
+  feedback_id_b: "ses:feedback-id-b",
+} as const;
 
 export type SesEventType =
   | "Send"
