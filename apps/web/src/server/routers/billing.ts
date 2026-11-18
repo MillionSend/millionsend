@@ -25,7 +25,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { OVERAGE_IN_FLIGHT, UPGRADES_HELD } from "@/lib/trpc-error";
 import { recordAudit } from "../audit";
@@ -60,6 +60,23 @@ async function loadTeam(db: Db, teamId: string) {
     .where(eq(schema.teams.id, teamId));
   if (!team) throw new TRPCError({ code: "NOT_FOUND" });
   return team;
+}
+
+/**
+ * Invoices and receipts go to the Stripe customer's email, set once when the
+ * customer is created. It is the team's first owner, not whichever admin
+ * clicked first: an admin who abandons a checkout would otherwise receive the
+ * owner's invoices for good.
+ */
+async function billingEmail(db: Db, teamId: string, fallback: string): Promise<string> {
+  const [owner] = await db
+    .select({ email: schema.user.email })
+    .from(schema.teamMembers)
+    .innerJoin(schema.user, eq(schema.user.id, schema.teamMembers.userId))
+    .where(and(eq(schema.teamMembers.teamId, teamId), eq(schema.teamMembers.role, "owner")))
+    .orderBy(asc(schema.teamMembers.createdAt))
+    .limit(1);
+  return owner?.email ?? fallback;
 }
 
 /** The instance's own team has no subscription to start, move or manage. */
@@ -155,7 +172,7 @@ export function createBillingRouter(deps: BillingDeps = { stripe: getStripe }) {
           {
             team,
             rung: input.rung,
-            email: ctx.session.user.email,
+            email: await billingEmail(ctx.db, ctx.teamId, ctx.session.user.email),
             successUrl: `${billingPageUrl()}?checkout=success`,
             cancelUrl: billingPageUrl(),
           },

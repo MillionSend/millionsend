@@ -470,6 +470,22 @@ describe("billing router", () => {
     expect(calls.checkouts[2]?.line_items).toEqual([{ price: "price_starter", quantity: 1 }]);
   });
 
+  it("checkout names the customer after the team's first owner, not the admin who clicked", async () => {
+    const teamId = await createTeam(db, "acme");
+    await db.insert(schema.user).values([
+      { id: "owner-1", name: "Owner", email: "owner@example.com" },
+      { id: "owner-2", name: "Later owner", email: "later@example.com" },
+    ]);
+    await db.insert(schema.teamMembers).values([
+      { teamId, userId: "owner-2", role: "owner", createdAt: new Date(2) },
+      { teamId, userId: "owner-1", role: "owner", createdAt: new Date(1) },
+    ]);
+    await callerFor(teamId, "admin").billing.checkout({ rung: "pro_100k" });
+    expect(calls.customers).toEqual([
+      { name: "acme", email: "owner@example.com", metadata: { team_id: teamId } },
+    ]);
+  });
+
   it("checkout refuses the free rung: Free is reached by cancelling", async () => {
     const teamId = await createTeam(db);
     await expect(callerFor(teamId, "owner").billing.checkout({ rung: "free" })).rejects.toThrow();
