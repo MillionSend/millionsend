@@ -402,7 +402,7 @@ describe("the gate's read of the team", () => {
       },
       body: { html: "<p>Hello</p>", text: null },
       // The database would read this team as new; the caller read it exempt.
-      team: { tier: "exempt", firstWindow: false, holdSpent: false },
+      team: { tier: "exempt", firstWindow: false, holdSpent: false, vouched: false },
       now: NOW,
     });
     expect(decision).toEqual({ action: "send", sample: null, probation: false });
@@ -535,7 +535,12 @@ describe("mail that reaches only its own team", () => {
     slug: string,
     opts: {
       own: boolean;
-      team: { tier: "new" | "established"; firstWindow: boolean; holdSpent: boolean };
+      team: {
+        tier: "new" | "established";
+        firstWindow: boolean;
+        holdSpent: boolean;
+        vouched: boolean;
+      };
       sample: Partial<typeof schema.monitorSamples.$inferInsert>;
     },
   ) {
@@ -575,8 +580,13 @@ describe("mail that reaches only its own team", () => {
       now: new Date(NOW.getTime() + 1000),
     });
   }
-  const NEW = { tier: "new", firstWindow: true, holdSpent: false } as const;
-  const SETTLED = { tier: "established", firstWindow: false, holdSpent: false } as const;
+  const NEW = { tier: "new", firstWindow: true, holdSpent: false, vouched: false } as const;
+  const SETTLED = {
+    tier: "established",
+    firstWindow: false,
+    holdSpent: false,
+    vouched: false,
+  } as const;
 
   it("never waits on a verdict, though it parks as any mail does", async () => {
     // A key taken from the team could aim a lure at the team's own people.
@@ -601,7 +611,7 @@ describe("mail that reaches only its own team", () => {
   });
 
   it("makes nothing wait for a hold once the team's one hold is spent", async () => {
-    const spent = { tier: "new", firstWindow: true, holdSpent: true } as const;
+    const spent = { tier: "new", firstWindow: true, holdSpent: true, vouched: false } as const;
     expect(
       await screened("spent-no-wait", { own: false, team: spent, sample: { score: 85 } }),
     ).toMatchObject({ action: "send" });

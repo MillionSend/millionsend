@@ -481,6 +481,8 @@
       "instance_reserve_updated": "Alterou a reserva transacional",
       "monitor_override_set": "Ativou a amostragem total do monitor",
       "monitor_override_cleared": "Desativou a amostragem total do monitor",
+      "monitor_vouched": "Avalizou a equipe",
+      "monitor_vouch_revoked": "Revogou o aval",
       "monitor_broadcasts_paused": "O monitor de conteúdo pausou transmissões",
       "monitor_broadcasts_resumed": "Retomou transmissões após pausa do monitor",
       "warmup_trust_granted": "Dispensou o aquecimento de domínio novo",

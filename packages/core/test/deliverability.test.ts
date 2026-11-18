@@ -232,6 +232,15 @@ describe("pauseLiftRefusal", () => {
     expect(refusal({ openFlag: { reason: "brand", openedBy: null } })).toBe("flagged");
     expect(refusal({ monitorRisk: 0.5 })).toBe("monitor");
     expect(refusal({ monitorRisk: 0.9, monitorFlagRisk: Number.POSITIVE_INFINITY })).toBeNull();
+    // An operator's vouch takes the monitor out of the lift; a manual flag still waits.
+    expect(refusal({ monitorRisk: 0.9, monitorVouched: true })).toBeNull();
+    expect(
+      refusal({
+        monitorRisk: 0.9,
+        monitorVouched: true,
+        openFlag: { reason: "manual", openedBy: "op-1" },
+      }),
+    ).toBe("flagged");
     expect(refusal({ lastLiftAt: daysAgo(29) })).toBe("cooldown");
     // The cooldown runs to the UTC midnight after 30 days, the day its refusal names.
     expect(refusal({ lastLiftAt: daysAgo(30) })).toBe("cooldown");

@@ -206,6 +206,17 @@ describe("cold shared-domain mail", () => {
     );
   });
 
+  it("still screens a vouched team's cold mail: the shared domain is the platform's own", async () => {
+    const { w, inbox } = await sharedInbox("cold-team-vouched");
+    await db
+      .update(schema.teamMonitor)
+      .set({ vouchedAt: new Date(), vouchedBy: "op", vouchReason: "checked" })
+      .where(eq(schema.teamMonitor.teamId, w.teamId));
+    const row = await email(w, inbox, "stranger@example.com");
+    expect(await gate(w, row)).toEqual({ action: "wait", until: null });
+    expect(await sampleOf(row.id)).toMatchObject({ screening: true, status: "pending" });
+  });
+
   it("parks an established team's cold mail on a phishing verdict with no link", async () => {
     const { w, inbox } = await sharedInbox("cold-phishing");
     const row = await email(w, inbox, "stranger@example.com");
@@ -340,5 +351,60 @@ describe("the review list", () => {
       screenReleasedAt: NOW,
     });
     expect(rows.find((r) => r.id === held)).toMatchObject({ parkReason: "review" });
+  });
+});
+
+describe("a vouched team", () => {
+  const monitor: MonitorDeps = {
+    samplingKey: Buffer.alloc(32),
+    settings: async () => S,
+    enqueueJudge: async () => {},
+  };
+  const at = new Date(NOW.getTime() + 1000);
+  async function queued(teamId: string) {
+    const [row] = await db
+      .insert(schema.emails)
+      .values({ teamId, from: "Shop <hi@shop.example>", to: ["buyer@example.org"], subject: "s" })
+      .returning();
+    if (!row) throw new Error("email insert failed");
+    return row;
+  }
+  const gate = (row: typeof schema.emails.$inferSelect) =>
+    screenBeforeSend(db, monitor, {
+      email: row,
+      body: { html: '<p>Pay <a href="https://bill.example/x">here</a></p>', text: null },
+      sharedInboxDomain: null,
+      now: at,
+    });
+  const samplesOf = (emailId: string) =>
+    db.select().from(schema.monitorSamples).where(eq(schema.monitorSamples.emailId, emailId));
+
+  it("sends unscreened in its first window, and mail waiting on a verdict goes out to be judged after", async () => {
+    const teamId = await newTeam("vouched-send");
+    const waiting = await queued(teamId);
+    expect(await gate(waiting)).toEqual({ action: "wait", until: null });
+    const [pending] = await samplesOf(waiting.id);
+    expect(pending).toMatchObject({ screening: true, status: "pending" });
+
+    await db
+      .update(schema.teamMonitor)
+      .set({ vouchedAt: NOW, vouchedBy: "op", vouchReason: "checked" })
+      .where(eq(schema.teamMonitor.teamId, teamId));
+    const fresh = await queued(teamId);
+    expect(await gate(fresh)).toEqual({ action: "send", sample: null });
+    expect(await samplesOf(fresh.id)).toEqual([]);
+    expect(await gate(waiting)).toEqual({
+      action: "send",
+      sample: { id: pending?.id, unjudged: true },
+    });
+  });
+
+  it("is screened again once the vouch ended", async () => {
+    const teamId = await newTeam("vouched-ended");
+    await db
+      .update(schema.teamMonitor)
+      .set({ vouchedAt: NOW, vouchedBy: "op", vouchReason: "checked", vouchUntil: NOW })
+      .where(eq(schema.teamMonitor.teamId, teamId));
+    expect(await gate(await queued(teamId))).toEqual({ action: "wait", until: null });
   });
 });

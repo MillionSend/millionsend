@@ -402,3 +402,58 @@ it("holds a new team on one phishing verdict from 80 on its shared-domain mail, 
     .where(eq(schema.teams.id, team));
   expect(held?.reason).toBe("review");
 });
+
+it("keeps a vouched team's clearances, and alerts on each payment lure past the day's alert", async () => {
+  const team = await createTeam(db, "vouched-team");
+  await db.insert(schema.teamMonitor).values({
+    teamId: team,
+    sentTotal: 20_000,
+    firstSendAt: new Date(NOW.getTime() - 60 * 86_400_000),
+    alertedAt: NOW,
+    vouchedAt: NOW,
+    vouchedBy: "op",
+    vouchReason: "checked by hand",
+  });
+  await db.insert(schema.teamDestinations).values({
+    teamId: team,
+    domain: "bill-host.example",
+    clearedAt: new Date(NOW.getTime() - 86_400_000),
+  });
+  const verdict = (categories: string[], score = 95): AbuseJudge => ({
+    provider: "typesafe",
+    model: "fake-model",
+    judge: async () => ({
+      score,
+      verdict: "abuse",
+      categories,
+      reasons: ["harvests_secrets"],
+      impersonatedBrand: null,
+      language: "en",
+    }),
+  });
+  const PAY = '<p>Pay <a href="https://bill-host.example/pay">here</a></p>';
+  const judgeOne = async (judge: AbuseJudge, html = PAY, screening = false) => {
+    const emailId = await insertEmail(html, { team });
+    const id = await insertSample({ teamId: team, emailId, kind: "tier", screening });
+    expect(await judgeSample(db, deps(judge), { sampleId: id })).toBe("judged");
+  };
+  const alerts = () => sends.filter((s) => s.kind === "monitor.alert" && s.text.includes(team));
+
+  // A screening sample left waiting when the vouch began: its mail already went, nothing parks.
+  await judgeOne(verdict(["brand_impersonation"]), PAY, true);
+  await judgeOne(verdict(["payment_redirect"], 70));
+  expect(alerts()).toHaveLength(0);
+  await judgeOne(verdict(["payment_redirect"]));
+  await judgeOne(verdict(["payment_redirect"]));
+  await judgeOne(
+    verdict(["brand_impersonation"]),
+    `${PAY}<p>00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D</p>`,
+  );
+  expect(alerts()).toHaveLength(3);
+  const [kept] = await db
+    .select()
+    .from(schema.teamDestinations)
+    .where(eq(schema.teamDestinations.teamId, team));
+  expect(kept?.revokedAt).toBeNull();
+  expect(await digestCounts(db, team)).toEqual({});
+});

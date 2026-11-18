@@ -481,6 +481,8 @@
       "instance_reserve_updated": "Changed the transactional reserve",
       "monitor_override_set": "Set monitor sampling override",
       "monitor_override_cleared": "Cleared monitor sampling override",
+      "monitor_vouched": "Vouched for team",
+      "monitor_vouch_revoked": "Revoked vouch",
       "monitor_broadcasts_paused": "Content monitor paused broadcasts",
       "monitor_broadcasts_resumed": "Resumed broadcasts after monitor pause",
       "warmup_trust_granted": "Lifted new-domain warm-up",

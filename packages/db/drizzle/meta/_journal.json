@@ -498,6 +498,13 @@
       "when": 1795040635801,
       "tag": "0070_reply_from_name",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1795044434951,
+      "tag": "0071_team_vouch",
+      "breakpoints": true
     }
   ]
 }

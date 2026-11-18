@@ -36,6 +36,7 @@ import {
   TEAM_FLAG_REASONS,
   teamMonitorOverview,
   teamWarmupOverview,
+  vouchActive,
 } from "@millionsend/core";
 import { counterComplaintSent, GUARDRAIL_WINDOW_DAYS } from "@millionsend/core/deliverability";
 import type { Db } from "@millionsend/db";
@@ -523,6 +524,7 @@ export const consoleSafetyRouter = router({
             sent7d: st.sent7d,
             complaintSends7d,
             monitorRisk: st.monitorRisk,
+            vouched: sql<boolean>`exists (select 1 from ${schema.teamMonitor} m where m.team_id = ${t}."id" and m.vouched_at is not null and (m.vouch_until is null or m.vouch_until > now()))`,
           })
           .from(f)
           .innerJoin(t, eq(t.id, f.teamId))
@@ -653,6 +655,17 @@ export const consoleSafetyRouter = router({
       listLimitRequests(ctx.db, { status: "open", teamId: team.id, limit: 500 }),
     ]);
     const { health } = pauseLift;
+    const [vouch] = await ctx.db
+      .select({
+        at: schema.teamMonitor.vouchedAt,
+        until: schema.teamMonitor.vouchUntil,
+        reason: schema.teamMonitor.vouchReason,
+        byName: schema.user.name,
+        byEmail: schema.user.email,
+      })
+      .from(schema.teamMonitor)
+      .leftJoin(schema.user, eq(schema.user.id, schema.teamMonitor.vouchedBy))
+      .where(and(eq(schema.teamMonitor.teamId, team.id), isNotNull(schema.teamMonitor.vouchedAt)));
     // The judge's answer for each flagged email, when it was drawn; the verdict fields only.
     const ms = schema.monitorSamples;
     const flaggedIds = flagged.map((row) => row.id);
@@ -762,6 +775,16 @@ export const consoleSafetyRouter = router({
       }),
       contentReveal: contentRevealOn(),
       grants,
+      vouch:
+        vouch?.at != null
+          ? {
+              by: vouch.byName || vouch.byEmail,
+              at: vouch.at,
+              until: vouch.until,
+              reason: vouch.reason,
+              active: vouchActive({ vouchedAt: vouch.at, vouchUntil: vouch.until }, now),
+            }
+          : null,
       monitor: {
         ...monitor,
         samples,

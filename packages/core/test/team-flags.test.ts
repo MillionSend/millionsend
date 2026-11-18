@@ -489,3 +489,61 @@ describe("the monitor flag's evidence", () => {
     ).toBe(2);
   });
 });
+
+describe("a vouched team", () => {
+  it("never fires the monitor trigger, and still fires the rate triggers", () => {
+    const risky = { teamId: "v", monitorRisk: 0.95, monitorVouched: true };
+    expect(flagTrigger(standing(risky))).toBeNull();
+    expect(flagTrigger(standing({ ...risky, guardrail: "warning" }))?.reason).toBe("guardrail");
+    expect(
+      flagTrigger(standing({ ...risky, complaintRate7d: 0.002, complaintSent7d: 600 }))?.reason,
+    ).toBe("complaints");
+  });
+
+  it("clears its open monitor flag, and reopens one an operator cleared once the vouch ends", async () => {
+    const teamId = await createTeam(db, "vouched-flags");
+    const open = async () =>
+      (await flagsOf(teamId)).filter((f) => f.status === "open").map((f) => f.reason);
+    const risky = standing({ teamId, monitorRisk: 0.95 });
+    await syncTeamFlags(db, [risky], new Date(), []);
+    expect(await open()).toEqual(["monitor"]);
+    expect(
+      await syncTeamFlags(db, [{ ...risky, monitorVouched: true }], new Date(), [risky]),
+    ).toEqual({ opened: 0, cleared: 1 });
+    expect(await open()).toEqual([]);
+
+    // An operator's clear before the vouch, the stored standing over the line throughout.
+    await db
+      .update(schema.teamFlags)
+      .set({ clearedBy: "op" })
+      .where(eq(schema.teamFlags.teamId, teamId));
+    const ended = { ...risky, monitorVouchEndedAt: new Date(Date.now() + 1000) };
+    expect(await syncTeamFlags(db, [ended], new Date(), [risky])).toEqual({
+      opened: 1,
+      cleared: 0,
+    });
+    expect(await open()).toEqual(["monitor"]);
+  });
+});
+
+describe("a vouched team's standing", () => {
+  it("carries the vouch from team_monitor, and its end once over", async () => {
+    const teamId = await createTeam(db, "vouched-standing");
+    const now = new Date();
+    await db.insert(schema.usageCounters).values({ teamId, day: utcDay(now), sent: 10 });
+    await db
+      .insert(schema.teamMonitor)
+      .values({ teamId, vouchedAt: new Date(now.getTime() - 60_000), vouchUntil: null });
+    const vouch = async () => {
+      const row = (await computeTeamStandings(db, now)).find((r) => r.teamId === teamId);
+      return [row?.monitorVouched, row?.monitorVouchEndedAt];
+    };
+    expect(await vouch()).toEqual([true, null]);
+    const ended = new Date(now.getTime() - 1000);
+    await db
+      .update(schema.teamMonitor)
+      .set({ vouchUntil: ended })
+      .where(eq(schema.teamMonitor.teamId, teamId));
+    expect(await vouch()).toEqual([false, ended]);
+  });
+});

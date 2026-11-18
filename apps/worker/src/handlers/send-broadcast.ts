@@ -52,7 +52,9 @@ import {
   segmentContactsWhere,
   substituteUnsubscribeUrl,
   teamDestinationStanding,
+  teamMonitorRow,
   utcDay,
+  vouchActive,
   warmupCap,
   warmupSendOrder,
 } from "@millionsend/core";
@@ -377,7 +379,10 @@ export async function sendBroadcast(
       ignore: deps.platformDomains,
       now: new Date(),
     });
-    if (standing.novel.length > NOVEL_DESTINATIONS_MAX) {
+    if (
+      standing.novel.length > NOVEL_DESTINATIONS_MAX &&
+      !vouchActive(await teamMonitorRow(db, broadcast.teamId), new Date())
+    ) {
       screenParked = "destination";
     } else {
       const plan = await planBroadcastSamples(db, deps.monitor, {

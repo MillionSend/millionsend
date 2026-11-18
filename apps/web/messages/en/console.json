@@ -714,7 +714,8 @@
       "open": "Open",
       "cleared": "Cleared",
       "suspended": "Suspended",
-      "all": "All"
+      "all": "All",
+      "vouched": "Vouched"
     },
     "reasons": {
       "monitor": "Monitor",
@@ -797,7 +798,8 @@
         "guardrailOk": "Guardrail ok",
         "operatorPaused": "Broadcasts paused by operator",
         "flagOpen": "Flag open",
-        "flagCleared": "Flag cleared"
+        "flagCleared": "Flag cleared",
+        "vouched": "Vouched"
       },
       "tiles": {
         "score": "Score",
@@ -921,6 +923,33 @@
           "no_link_lure": "Carries the lure without a link: a Pix payload, changed bank details, a callback phone, “reply with your ID or password”, or an attached invoice or zip.",
           "unsolicited_bulk": "Reads as bulk mail to people who never opted in (spam-style promotion from a stranger) rather than opted-in marketing or cold B2B outreach. The model cannot see consent, so newsletters often land near this line.",
           "prompt_injection": "The text tries to tell a reviewer or model to change its verdict or ignore the policy."
+        },
+        "vouch": {
+          "action": "Vouch for team",
+          "revoke": "Revoke vouch",
+          "status": "Vouched by {operator} · {date} · {left, select, revoked {until revoked} other {{days, plural, one {# day left} other {# days left}}}}",
+          "effect": "Sampled verdicts are still recorded and alert as usual. While vouched, nothing is held, parked or revoked for content, no monitor flag opens, and the risk does not block lifting a bounce pause.",
+          "expires": "Expires {date}; the digest warns 3 days before.",
+          "toast": {
+            "vouched": "{team} · vouched",
+            "revoked": "{team} · vouch revoked"
+          },
+          "dialog": {
+            "title": "Vouch for {team}",
+            "lead": "For a team you checked by hand. The monitor keeps judging its mail but stops acting on content.",
+            "whileVouched": "While vouched",
+            "whileVouchedValue": "Mail sends without waiting on the judge · Nothing is parked, held or revoked for content · No monitor flags or broadcast pause · Sampling, the alert mail and the digest continue",
+            "stillApplies": "Still applies",
+            "stillAppliesValue": "Bounce and complaint guardrails · Quotas · Suspension · Pix or payment lures alert at once",
+            "reasonHint": "Goes on the record with your name and the time.",
+            "lasts": "Lasts",
+            "30d": "30 days",
+            "90d": "90 days",
+            "forever": "Until revoked",
+            "until": "Until {date}",
+            "foreverSub": "Revoking is one click and goes on the record",
+            "confirm": "Vouch"
+          }
         }
       },
       "warmup": {

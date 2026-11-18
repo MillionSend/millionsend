@@ -69,6 +69,15 @@ export const teamMonitor = pgTable("team_monitor", {
   // a person released it, the drained campaign's next verdicts only alert.
   heldAt: timestamp("held_at", { withTimezone: true }),
   alertedAt: timestamp("alerted_at", { withTimezone: true }),
+  // An operator who checked the team by hand vouches for its content: while
+  // active (vouch_until null or ahead) the monitor samples and alerts but
+  // never interrupts its mail. Revoking stamps vouch_until with the revoke
+  // instant, so the end of the vouch stays readable as the start of the
+  // window whose verdicts count again.
+  vouchedAt: timestamp("vouched_at", { withTimezone: true }),
+  vouchedBy: text("vouched_by"),
+  vouchReason: text("vouch_reason"),
+  vouchUntil: timestamp("vouch_until", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

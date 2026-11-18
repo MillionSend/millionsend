@@ -744,6 +744,76 @@ describe("console.monitor", () => {
   });
 });
 
+describe("console.monitor.vouch", () => {
+  it("vouches for a set time or until revoked, audited on the instance's log, operator only", async () => {
+    const vouched = await createTeam(db, "vouched-team");
+    await db.insert(schema.teamMembers).values({ teamId: vouched, userId: MEMBER, role: "owner" });
+    const vouch = (input: { reason: string; lasts: "30d" | "90d" | "forever" }) =>
+      operator().console.monitor.vouch({ teamId: vouched, ...input });
+    await expect(vouch({ reason: "   ", lasts: "90d" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    await expect(vouch({ reason: "x".repeat(501), lasts: "90d" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    await expect(vouch({ reason: "checked", lasts: "7d" as "30d" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    await expect(
+      callerFor(MEMBER, vouched, "owner").console.monitor.vouch({
+        teamId: vouched,
+        reason: "checked",
+        lasts: "90d",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    const { until } = await vouch({ reason: "  checked the sites by hand ", lasts: "30d" });
+    expect(until?.getTime()).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+    expect((await auditRows("monitor.vouched"))[0]).toMatchObject({
+      teamId: null,
+      target: `team:${vouched}`,
+      actorId: `user:${OPERATOR}`,
+      data: { team: "vouched-team", reason: "checked the sites by hand" },
+    });
+    expect((await vouch({ reason: "for good", lasts: "forever" })).until).toBeNull();
+    const [row] = await db
+      .select()
+      .from(schema.teamMonitor)
+      .where(eq(schema.teamMonitor.teamId, vouched));
+    expect(row).toMatchObject({ vouchedBy: OPERATOR, vouchReason: "for good", vouchUntil: null });
+
+    const review = await operator().console.safety.review({ teamId: vouched });
+    expect(review.vouch).toMatchObject({
+      by: "Operator",
+      reason: "for good",
+      until: null,
+      active: true,
+    });
+    await db
+      .insert(schema.teamFlags)
+      .values({ teamId: vouched, reason: "brand", detail: { brand: "Example" } });
+    const listed = async () =>
+      (await operator().console.safety.list({ status: "all" })).items.find(
+        (r) => r.teamId === vouched,
+      )?.vouched;
+    expect(await listed()).toBe(true);
+
+    expect(await operator().console.monitor.revokeVouch({ teamId: vouched })).toEqual({
+      revoked: true,
+    });
+    expect((await auditRows("monitor.vouch_revoked"))[0]).toMatchObject({
+      teamId: null,
+      target: `team:${vouched}`,
+      data: { team: "vouched-team", reason: "for good" },
+    });
+    expect((await operator().console.safety.review({ teamId: vouched })).vouch?.active).toBe(false);
+    expect(await listed()).toBe(false);
+    expect(await operator().console.monitor.revokeVouch({ teamId: vouched })).toEqual({
+      revoked: false,
+    });
+  });
+});
+
 describe("console.safety.setWarmupTrust", () => {
   it("trusts one domain or the whole team, audited on the instance's log, operator only", async () => {
     const warm = await createTeam(db, "warm-trust");

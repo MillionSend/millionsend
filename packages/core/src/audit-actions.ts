@@ -65,6 +65,9 @@ export const AUDIT_ACTIONS = [
   "instance.reserve_updated",
   "monitor.override_set",
   "monitor.override_cleared",
+  // An operator's vouch for a team's content; the instance's rows, never the team's.
+  "monitor.vouched",
+  "monitor.vouch_revoked",
   "monitor.broadcasts_paused",
   "monitor.broadcasts_resumed",
   "warmup.trust_granted",

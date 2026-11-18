@@ -2,7 +2,12 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
-import { MONITOR_FLAG_RISK_DEFAULT, monitorStandingCounts, riskAt } from "./abuse-monitor.js";
+import {
+  MONITOR_FLAG_RISK_DEFAULT,
+  monitorStandingCounts,
+  riskAt,
+  vouchActive,
+} from "./abuse-monitor.js";
 import { fetchAccountScore } from "./account-score.js";
 import {
   type DeliverabilityHealth,
@@ -50,6 +55,10 @@ export interface TeamStandingRow {
   monitorSamples: number;
   /** The week's verdicts the judge called abuse from the flag score; kept in memory only, like monitorSamples. */
   monitorAbuse: number;
+  /** An operator's vouch is in force: the monitor opens no flag. In memory only; absent reads as not vouched. */
+  monitorVouched?: boolean;
+  /** When the team's last vouch ended, if it has; in memory only. */
+  monitorVouchEndedAt?: Date | null;
 }
 
 /**
@@ -75,7 +84,7 @@ export async function computeTeamStandings(
   const teamIds = active.map((t) => t.teamId);
   // The risk as of this run, decayed since the last verdict, so a team the
   // judge stopped sampling drifts back under the line on its own.
-  const risks = new Map(
+  const monitors = new Map(
     teamIds.length === 0
       ? []
       : (
@@ -86,10 +95,22 @@ export async function computeTeamStandings(
               riskDen: schema.teamMonitor.riskDen,
               riskUpdatedAt: schema.teamMonitor.riskUpdatedAt,
               firstSendAt: schema.teamMonitor.firstSendAt,
+              vouchedAt: schema.teamMonitor.vouchedAt,
+              vouchUntil: schema.teamMonitor.vouchUntil,
             })
             .from(schema.teamMonitor)
             .where(inArray(schema.teamMonitor.teamId, teamIds))
-        ).map((r) => [r.teamId, riskAt(r, now)]),
+        ).map((r) => {
+          const vouched = vouchActive(r, now);
+          return [
+            r.teamId,
+            {
+              risk: riskAt(r, now),
+              vouched,
+              vouchEndedAt: r.vouchedAt !== null && !vouched ? r.vouchUntil : null,
+            },
+          ];
+        }),
   );
   const samples = await monitorStandingCounts(
     db,
@@ -113,9 +134,11 @@ export async function computeTeamStandings(
       sent7d: health.sent,
       complaintSent7d: health.complaintSent,
       sent30d: team.sent30d,
-      monitorRisk: risks.get(team.teamId) ?? null,
+      monitorRisk: monitors.get(team.teamId)?.risk ?? null,
       monitorSamples: samples.get(team.teamId)?.samples ?? 0,
       monitorAbuse: samples.get(team.teamId)?.abuse ?? 0,
+      monitorVouched: monitors.get(team.teamId)?.vouched ?? false,
+      monitorVouchEndedAt: monitors.get(team.teamId)?.vouchEndedAt ?? null,
     });
   }
   return rows;
@@ -144,6 +167,8 @@ export async function saveTeamStandings(
           monitorSamples: _samples,
           monitorAbuse: _abuse,
           complaintSent7d: _complaintSent,
+          monitorVouched: _vouched,
+          monitorVouchEndedAt: _vouchEnded,
           ...r
         }) => ({ ...r, computedAt: now }),
       ),
@@ -209,6 +234,7 @@ export function flagTrigger(s: TeamStandingRow, opts: FlagTriggerOptions = {}): 
   }
   // A risk that only clean verdicts carried over the line says nothing the judge called abuse.
   if (
+    !s.monitorVouched &&
     s.monitorRisk !== null &&
     s.monitorRisk >= (opts.monitorFlagRisk ?? MONITOR_FLAG_RISK_DEFAULT) &&
     s.monitorAbuse > 0
@@ -283,6 +309,7 @@ export async function syncTeamFlags(
       return trigger ? [[s.teamId, trigger] as const] : [];
     }),
   );
+  const vouchEnds = new Map(standings.map((s) => [s.teamId, s.monitorVouchEndedAt]));
   let opened = 0;
   let cleared = 0;
   for (const [teamId, trigger] of triggered) {
@@ -310,9 +337,19 @@ export async function syncTeamFlags(
     const prior = before.get(teamId);
     // A flag opened since the last run (the review hold's) was never weighed
     // by one, so an operator's clear of it stands as if the trigger had held.
+    // A vouch lapses the monitor trigger for its whole length, though the
+    // stored standings never saw it: a monitor flag opened before the vouch
+    // ended is not one the trigger held since.
+    const vouchEnded = vouchEnds.get(teamId) ?? null;
+    const lapsedByVouch =
+      trigger.reason === "monitor" &&
+      vouchEnded !== null &&
+      latest !== undefined &&
+      latest.openedAt < vouchEnded;
     const held =
-      (prior !== undefined && flagTrigger(prior, opts)?.reason === trigger.reason) ||
-      (lastRunAt > 0 && latest !== undefined && latest.openedAt.getTime() > lastRunAt);
+      !lapsedByVouch &&
+      ((prior !== undefined && flagTrigger(prior, opts)?.reason === trigger.reason) ||
+        (lastRunAt > 0 && latest !== undefined && latest.openedAt.getTime() > lastRunAt));
     if (held && latest?.clearedBy && latest.reason === trigger.reason) continue;
     await db.insert(f).values({
       teamId,

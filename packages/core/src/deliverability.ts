@@ -340,6 +340,8 @@ export function pauseLiftRefusal(f: {
   openFlag: { reason: string; openedBy: string | null } | null;
   monitorRisk: number | null;
   monitorFlagRisk: number;
+  /** An operator vouched for the team's content: its monitor risk blocks nothing. */
+  monitorVouched?: boolean;
   lastLiftAt: Date | null;
   now: Date;
 }): PauseLiftRefusal | null {
@@ -354,7 +356,9 @@ export function pauseLiftRefusal(f: {
   }
   // While paused, syncTeamFlags relabels an automatic monitor flag "guardrail",
   // so read the risk itself.
-  if (f.monitorRisk !== null && f.monitorRisk >= f.monitorFlagRisk) return "monitor";
+  if (!f.monitorVouched && f.monitorRisk !== null && f.monitorRisk >= f.monitorFlagRisk) {
+    return "monitor";
+  }
   if (f.lastLiftAt && f.now.getTime() < pauseLiftCooldownEnd(f.lastLiftAt).getTime()) {
     return "cooldown";
   }

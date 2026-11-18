@@ -14,6 +14,7 @@ import {
   isLocalOnlyMail,
   isPlatformLinkVerdict,
   isPlatformTenantName,
+  loadMonitorState,
   MONITOR_PRIOR_NEW,
   MONITOR_PRIOR_SETTLED,
   MONITOR_PRIOR_WEIGHT,
@@ -28,11 +29,15 @@ import {
   planBroadcastSamples,
   pruneMonitorSamples,
   resumeMonitorPause,
+  revokeTeamVouch,
   riskAt,
   sampleAcceptedEmail,
   samplingFraction,
   setMonitorOverride,
+  setTeamVouch,
   teamMonitorOverview,
+  teamMonitorRow,
+  vouchActive,
 } from "../src/abuse-monitor.js";
 import { MONITOR_SETTING_DEFAULTS, type MonitorSettings } from "../src/monitor-settings.js";
 import { DAY_MS } from "../src/utc-day.js";
@@ -1271,5 +1276,171 @@ describe("the review hold", () => {
     expect(await fifth("released-spares-local", { destinations: [SITE, "localhost"] })).toEqual(
       held,
     );
+  });
+});
+
+describe("an operator's vouch", () => {
+  let db: Db;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+  });
+  afterAll(() => close());
+
+  const PHISHING = {
+    verdict: "abuse" as const,
+    categories: ["brand_impersonation"],
+    reasons: ["impersonation", "off_domain_lure"],
+  };
+  const minute = (n: number) => new Date(NOW.getTime() + n * 60_000);
+  async function newTeam(slug: string) {
+    const teamId = await createTeam(db, slug);
+    await db
+      .insert(schema.teamMonitor)
+      .values({ teamId, sentTotal: 1, firstSendAt: new Date(NOW.getTime() - 3 * 60_000) });
+    return teamId;
+  }
+  async function stored(teamId: string, score: number, at: Date) {
+    await db.insert(schema.monitorSamples).values({
+      teamId,
+      kind: "first_sends",
+      status: "judged",
+      score,
+      ...PHISHING,
+      createdAt: at,
+      judgedAt: at,
+    });
+  }
+  async function judge(teamId: string, score: number, at: Date) {
+    await stored(teamId, score, at);
+    return applyJudgedSample(db, S, { teamId, score, verdict: PHISHING, now: at });
+  }
+
+  it("is in force from the vouch until its end, or until revoked", () => {
+    const at = minute(0);
+    expect(vouchActive({ vouchedAt: null, vouchUntil: null }, at)).toBe(false);
+    expect(vouchActive({ vouchedAt: at, vouchUntil: null }, minute(60 * 24 * 365))).toBe(true);
+    expect(vouchActive({ vouchedAt: at, vouchUntil: minute(5) }, minute(4))).toBe(true);
+    expect(vouchActive({ vouchedAt: at, vouchUntil: minute(5) }, minute(5))).toBe(false);
+  });
+
+  it("sets, replaces and revokes, ending a vouch until revoked at the revoke", async () => {
+    const teamId = await newTeam("vouch-set");
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: minute(5), now: NOW });
+    await setTeamVouch(db, { teamId, by: "op2", reason: "rechecked", until: null, now: minute(1) });
+    expect(await teamMonitorRow(db, teamId)).toMatchObject({
+      vouchedAt: minute(1),
+      vouchedBy: "op2",
+      vouchReason: "rechecked",
+      vouchUntil: null,
+    });
+    expect(await revokeTeamVouch(db, { teamId, now: minute(10) })).toEqual({
+      vouchedAt: minute(1),
+      reason: "rechecked",
+    });
+    const row = await teamMonitorRow(db, teamId);
+    expect(row.vouchUntil).toEqual(minute(10));
+    expect(vouchActive(row, minute(10))).toBe(false);
+    expect(await revokeTeamVouch(db, { teamId, now: minute(11) })).toBeNull();
+    // A new team never vouched has nothing to revoke.
+    expect(await revokeTeamVouch(db, { teamId: await newTeam("vouch-none"), now: NOW })).toBeNull();
+  });
+
+  it("holds, pauses and flags nothing for a vouched new team, and still folds the risk", async () => {
+    const teamId = await newTeam("vouch-quiet");
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: null, now: NOW });
+    await stored(teamId, 95, minute(1));
+    const out = await applyJudgedSample(db, S, {
+      teamId,
+      score: 95,
+      verdict: PHISHING,
+      kind: "broadcast_skeleton",
+      broadcast: true,
+      youngSendingDomain: true,
+      now: minute(1),
+    });
+    expect(out).toMatchObject({ tier: "new", held: null, spared: null, paused: false });
+    const row = await teamMonitorRow(db, teamId);
+    expect(row).toMatchObject({ heldAt: null, broadcastsPausedAt: null });
+    expect(row.risk).toBeGreaterThan(0.35);
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, teamId));
+    expect(team).toMatchObject({ suspendedAt: null, broadcastsPausedByOperatorAt: null });
+    expect(
+      await db.select().from(schema.teamFlags).where(eq(schema.teamFlags.teamId, teamId)),
+    ).toEqual([]);
+  });
+
+  it("counts only the verdicts judged after the vouch ended toward the repeat hold", async () => {
+    const teamId = await newTeam("vouch-since");
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: minute(10), now: NOW });
+    for (let i = 1; i <= 4; i += 1) expect((await judge(teamId, 85, minute(i))).held).toBeNull();
+    // Five within the week, four of them vouched for: not a fifth.
+    expect((await judge(teamId, 85, minute(11))).held).toBeNull();
+    for (let i = 12; i <= 14; i += 1) expect((await judge(teamId, 85, minute(i))).held).toBeNull();
+    expect((await judge(teamId, 85, minute(15))).held).toEqual({ rule: "repeat", verdicts: 5 });
+  });
+
+  it("counts only the verdicts judged after the vouch ended toward the broadcast pause", async () => {
+    const teamId = await newTeam("vouch-pause-since");
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: minute(10), now: NOW });
+    for (let i = 0; i < 60; i += 1) {
+      await stored(teamId, 100, minute(1 + (i % 9)));
+      expect(
+        (await applyJudgedSample(db, S, { teamId, score: 100, now: minute(1 + (i % 9)) })).paused,
+      ).toBe(false);
+    }
+    // Past the pause line, but the strong verdicts in the day were all vouched for.
+    await stored(teamId, 85, minute(11));
+    const weak = await applyJudgedSample(db, S, { teamId, score: 85, now: minute(11) });
+    expect(weak.risk).toBeGreaterThan(S.pauseRisk);
+    expect(weak.paused).toBe(false);
+    await stored(teamId, 95, minute(12));
+    expect((await applyJudgedSample(db, S, { teamId, score: 95, now: minute(12) })).paused).toBe(
+      true,
+    );
+  });
+
+  it("keeps a vouched team out of Trusted, whose flags the vouch stops", async () => {
+    const teamId = await createTeam(db, "vouch-trusted");
+    await db.insert(schema.teamMonitor).values({
+      teamId,
+      sentTotal: 60_000,
+      firstSendAt: new Date(NOW.getTime() - 200 * DAY_MS),
+    });
+    const tier = async () =>
+      monitorTier(await loadMonitorState(db, await teamMonitorRow(db, teamId), NOW), S, NOW);
+    expect(await tier()).toBe("trusted");
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: null, now: NOW });
+    expect(await tier()).toBe("established");
+  });
+
+  it("screens no vouched new team's broadcast before it fans out", async () => {
+    const teamId = await newTeam("vouch-broadcast");
+    const deps = {
+      samplingKey: KEY,
+      settings: async () => S,
+      enqueueJudge: async () => {},
+    };
+    const broadcast = async () =>
+      (
+        await db
+          .insert(schema.broadcasts)
+          .values({ teamId, from: "a@acme.dev", subject: "news", html: "<p>hi</p>" })
+          .returning({ id: schema.broadcasts.id })
+      )[0]?.id ?? "";
+    expect(
+      (await planBroadcastSamples(db, deps, { teamId, broadcastId: await broadcast(), now: NOW }))
+        .screen,
+    ).toBe(true);
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: null, now: NOW });
+    const plan = await planBroadcastSamples(db, deps, {
+      teamId,
+      broadcastId: await broadcast(),
+      novel: true,
+      now: NOW,
+    });
+    expect(plan.screen).toBe(false);
+    expect(plan.skeletonSampleId).not.toBeNull();
   });
 });

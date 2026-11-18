@@ -1,7 +1,7 @@
 import { createHmac, hkdfSync } from "node:crypto";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { JudgeBlockInput } from "./abuse-judge/block.js";
 import { opaqueFacts } from "./abuse-judge/body.js";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
@@ -145,6 +145,34 @@ export function activeOverride(state: MonitorTeamState, now: Date): number | nul
   return state.overrideRate !== null && state.overrideUntil !== null && state.overrideUntil > now
     ? state.overrideRate
     : null;
+}
+
+/**
+ * An operator's vouch for the team's content is in force: vouched and not
+ * yet lapsed or revoked (a revoke stamps vouch_until with its instant).
+ */
+export function vouchActive(
+  row: { vouchedAt: Date | null; vouchUntil: Date | null },
+  now: Date,
+): boolean {
+  return row.vouchedAt !== null && (row.vouchUntil === null || row.vouchUntil > now);
+}
+
+/**
+ * The start of the window whose verdicts count against the team: the
+ * window's own start, or the end of a vouch that ended inside it, since
+ * verdicts judged while vouched never count once it ends.
+ */
+function countsSince(
+  row: { vouchedAt: Date | null; vouchUntil: Date | null },
+  windowStart: number,
+  now: Date,
+): number {
+  const ended =
+    row.vouchedAt !== null && row.vouchUntil !== null && row.vouchUntil <= now
+      ? row.vouchUntil.getTime()
+      : 0;
+  return Math.max(windowStart, ended);
 }
 
 export interface RateDecision {
@@ -376,6 +404,10 @@ const EMPTY_ROW = (teamId: string): TeamMonitorRow => ({
   broadcastsResumedAt: null,
   heldAt: null,
   alertedAt: null,
+  vouchedAt: null,
+  vouchedBy: null,
+  vouchReason: null,
+  vouchUntil: null,
   updatedAt: new Date(0),
 });
 
@@ -397,8 +429,10 @@ export async function loadMonitorState(
   const couldBeTrusted =
     row.sentTotal >= MONITOR_TRUSTED_SENDS &&
     daysSince(row.firstSendAt, now) >= MONITOR_TRUSTED_DAYS;
-  let flaggedRecently = false;
-  if (couldBeTrusted) {
+  // A vouch stops monitor flags from opening, so a vouched team would turn
+  // Trusted by default and be sampled at a fraction of its rate.
+  let flaggedRecently = vouchActive(row, now);
+  if (couldBeTrusted && !flaggedRecently) {
     const f = schema.teamFlags;
     const [flag] = await db
       .select({ id: f.id })
@@ -565,10 +599,11 @@ export async function planBroadcastSamples(
 }> {
   const now = input.now ?? new Date();
   const s = await deps.settings();
-  const state = await loadMonitorState(db, await monitorRowWithHistory(db, input.teamId, now), now);
+  const row = await monitorRowWithHistory(db, input.teamId, now);
+  const state = await loadMonitorState(db, row, now);
   const tier = monitorTier(state, s, now);
   if (tier === "exempt") return { skeletonSampleId: null, copies: 0, screen: false, tier };
-  const screen = s.autoHold && (tier === "new" || input.novel === true);
+  const screen = s.autoHold && !vouchActive(row, now) && (tier === "new" || input.novel === true);
   // A resumed fan-out plans again; the skeleton was judged the first time.
   const [existing] = await db
     .select({ id: ms.id })
@@ -888,7 +923,7 @@ export function clientIdentitySite(
 async function repeatHold(
   db: Db,
   s: MonitorSettings,
-  row: Pick<TeamMonitorRow, "teamId">,
+  row: Pick<TeamMonitorRow, "teamId" | "vouchedAt" | "vouchUntil">,
   verdict: HoldVerdictFields,
   now: Date,
 ): Promise<HoldRule | null> {
@@ -909,7 +944,10 @@ async function repeatHold(
         eq(ms.teamId, row.teamId),
         eq(ms.status, "judged"),
         gte(ms.score, s.holdRepeatScore),
-        gte(ms.judgedAt, new Date(now.getTime() - MONITOR_HOLD_REPEAT_DAYS * DAY_MS)),
+        gte(
+          ms.judgedAt,
+          new Date(countsSince(row, now.getTime() - MONITOR_HOLD_REPEAT_DAYS * DAY_MS, now)),
+        ),
         lte(ms.judgedAt, now),
       ),
     );
@@ -1038,8 +1076,9 @@ export async function applyJudgedSample(
     let held: HoldRule | null = null;
     let spared: HoldRule | null = null;
     const verdict = input.verdict && { ...input.verdict, score: input.score };
+    const vouched = vouchActive(row, now);
     const rule =
-      s.autoHold && tier === "new" && row.heldAt === null && verdict
+      s.autoHold && tier === "new" && row.heldAt === null && !vouched && verdict
         ? isHoldVerdict(verdict, s.holdScore)
           ? ({ rule: "score" } as const)
           : input.youngSendingDomain && isHoldVerdict(verdict, s.holdRepeatScore)
@@ -1108,6 +1147,7 @@ export async function applyJudgedSample(
     // release and park the broadcasts the release let go.
     if (
       s.autoPause &&
+      !vouched &&
       tier === "new" &&
       (broadcastLure || next.risk >= s.pauseRisk) &&
       row.broadcastsPausedAt === null &&
@@ -1119,7 +1159,7 @@ export async function applyJudgedSample(
       // episode's evidence must not pause the team again on its own.
       const since = new Date(
         Math.max(
-          now.getTime() - MONITOR_PAUSE_VERDICT_WINDOW_MS,
+          countsSince(row, now.getTime() - MONITOR_PAUSE_VERDICT_WINDOW_MS, now),
           row.broadcastsResumedAt?.getTime() ?? 0,
         ),
       );
@@ -1239,6 +1279,49 @@ export async function clearMonitorOverride(
     action: "monitor.override_cleared",
     target: { type: "team", id: input.teamId },
   });
+}
+
+/**
+ * An operator vouches for the team's content until `until`, or until revoked
+ * when null; a new vouch replaces the last. The caller audits it.
+ */
+export async function setTeamVouch(
+  db: Db,
+  input: { teamId: string; by: string; reason: string; until: Date | null; now: Date },
+): Promise<void> {
+  const vouch = {
+    vouchedAt: input.now,
+    vouchedBy: input.by,
+    vouchReason: input.reason,
+    vouchUntil: input.until,
+    updatedAt: input.now,
+  };
+  await db
+    .insert(tm)
+    .values({ teamId: input.teamId, ...vouch })
+    .onConflictDoUpdate({ target: tm.teamId, set: vouch });
+}
+
+/**
+ * Ends the team's vouch now, if one is in force; the vouch it ended, else
+ * null. The caller audits it.
+ */
+export async function revokeTeamVouch(
+  db: Db,
+  input: { teamId: string; now: Date },
+): Promise<{ vouchedAt: Date; reason: string | null } | null> {
+  const [row] = await db
+    .update(tm)
+    .set({ vouchUntil: input.now, updatedAt: input.now })
+    .where(
+      and(
+        eq(tm.teamId, input.teamId),
+        isNotNull(tm.vouchedAt),
+        or(isNull(tm.vouchUntil), gt(tm.vouchUntil, input.now)),
+      ),
+    )
+    .returning({ vouchedAt: tm.vouchedAt, reason: tm.vouchReason });
+  return row?.vouchedAt ? { vouchedAt: row.vouchedAt, reason: row.reason } : null;
 }
 
 /** The last hour's samples and how many the judge could not answer. */
