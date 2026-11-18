@@ -254,6 +254,13 @@ deliberadas e explícitas:
 - Nomes de tag que começam com `millionsend_`, com qualquer caixa de letras,
   são do próprio MillionSend: uma entrada de `tags` com um deles em
   `POST /emails` ou `POST /emails/batch` é recusada com `422 validation_error`.
+- As tags `feedback_id_a` e `feedback_id_b` também entram no cabeçalho
+  `Feedback-ID` do e-mail, como `<a>:<b>:<id do SES>:AmazonSES`, para o
+  feedback loop do Gmail no Postmaster Tools. Use valores estáveis, como o id
+  da campanha ou da loja, nunca um por mensagem ou por destinatário. Um valor
+  com algo além de letras, dígitos, `_` e `-`, ou com mais de 256 caracteres,
+  continua como tag mas fica fora do cabeçalho. O SES adiciona o cabeçalho e o
+  assina com a própria chave DKIM `amazonses.com`, não com a do seu domínio.
 - Qualquer coisa não suportada é rejeitada com `422` em vez de descartada em
   silêncio (ex.: `tls` na atualização de domínio).
 

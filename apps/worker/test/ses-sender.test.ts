@@ -53,6 +53,25 @@ describe("createSesSender", () => {
     ]);
   });
 
+  it("copies only the feedback-id tags to SES, leaving out a value SES could not carry", async () => {
+    const sender = createSesSender("us-east-1");
+    const send = (tags: Record<string, string> | null) =>
+      sender.sendRaw({ raw: Buffer.from(""), emailId: "e4", to: ["ok@example.com"], tags });
+    await send({ feedback_id_a: "campaign-42", feedback_id_b: "store_7", plan: "pro" });
+    await send({ feedback_id_a: "has:colon", feedback_id_b: "ok" });
+    await send(null);
+    const emailIdTag = { Name: "millionsend_email_id", Value: "e4" };
+    expect(sent.map((input) => (input as { EmailTags: unknown }).EmailTags)).toEqual([
+      [
+        emailIdTag,
+        { Name: "ses:feedback-id-a", Value: "campaign-42" },
+        { Name: "ses:feedback-id-b", Value: "store_7" },
+      ],
+      [emailIdTag, { Name: "ses:feedback-id-b", Value: "ok" }],
+      [emailIdTag],
+    ]);
+  });
+
   it("refuses to send a stored recipient the strict parser rejects", async () => {
     await expect(
       createSesSender("us-east-1").sendRaw({

@@ -234,6 +234,13 @@ remaining deltas are deliberate and loud:
 - Tag names starting with `millionsend_`, in any letter case, are
   MillionSend's own: a `tags` entry with one on `POST /emails` or
   `POST /emails/batch` is refused with `422 validation_error`.
+- The tags `feedback_id_a` and `feedback_id_b` also go into the email's
+  `Feedback-ID` header, as `<a>:<b>:<SES id>:AmazonSES`, for Gmail's feedback
+  loop in Postmaster Tools. Use stable values such as a campaign or store id,
+  never one per message or per recipient. A value with anything other than
+  letters, digits, `_` and `-`, or longer than 256 characters, stays a tag but
+  is left out of the header. SES adds the header and signs it with its own
+  `amazonses.com` DKIM key, not your domain's.
 - Anything unsupported is rejected with `422` rather than silently dropped
   (e.g. `tls` on domain update).
 

@@ -102,6 +102,8 @@ export interface SesSender {
      * outlives the email row still reaches the pool.
      */
     poolOwnerId?: string;
+    /** The email's own tags; only FEEDBACK_ID_TAGS reach SES. */
+    tags?: Readonly<Record<string, string>> | null;
   }): Promise<{ messageId: string }>;
 }
 
@@ -1088,6 +1090,7 @@ async function sendQueued(
       ...(domain?.region ? { region: domain.region } : {}),
       ...(tenant ? { tenantName: tenant } : {}),
       ...(poolOwnerId ? { poolOwnerId } : {}),
+      tags: email.tags,
     });
   let messageId: string;
   try {
