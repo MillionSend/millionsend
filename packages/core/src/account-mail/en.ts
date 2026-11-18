@@ -586,6 +586,7 @@ export const en = {
       "destination_revoked.other": "{n} emails that took destinations' clearance back",
       "media_blocked.one": "{n} email whose images the image reader refused",
       "media_blocked.other": "{n} emails whose images the image reader refused",
+      vouch_ending: "{team}: the vouch for its content ends on {date} (UTC). {page}",
     },
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;

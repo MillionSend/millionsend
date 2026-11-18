@@ -27,6 +27,7 @@ import {
   monitorRowWithHistory,
   monitorTier,
   recordMonitorSample,
+  vouchActive,
   YOUNG_DOMAIN_DAYS,
 } from "./abuse-monitor.js";
 import { countDistinctRecipients } from "./accept-email.js";
@@ -736,11 +737,13 @@ export async function linkDomainsAged(
  * whether it is in its first window, both with the usage history so a quiet
  * old team is not new. An exempt team never has a first window. `holdSpent`:
  * the review hold already held the team once, so none can follow.
+ * `vouched`: an operator's vouch is in force (vouchActive).
  */
 export interface ScreeningTeam {
   tier: MonitorTier;
   firstWindow: boolean;
   holdSpent: boolean;
+  vouched: boolean;
 }
 
 export async function screeningTeam(
@@ -756,6 +759,7 @@ export async function screeningTeam(
     tier,
     firstWindow: tier !== "exempt" && inFirstWindow(state, s, now),
     holdSpent: row.heldAt !== null,
+    vouched: vouchActive(row, now),
   };
 }
 
@@ -1315,6 +1319,16 @@ export async function screenBeforeSend(
     };
   }
   const team = input.team ?? (await screeningTeam(db, s, email.teamId, now));
+  // A vouched team's mail goes out unscreened and is judged after, when
+  // drawn; a pending screening sample is judged after the send too. Mail
+  // from the shared inbox domain stays screened: that domain is the
+  // platform's own, and no vouch for one team covers it.
+  if (team.vouched && !shared) {
+    return {
+      action: "send",
+      sample: sample?.screening ? { id: sample.id, unjudged: sample.status !== "judged" } : null,
+    };
+  }
   if (!sample?.screening) {
     const read = await screeningReasons(db, { ...input, team, shared });
     if (read.reasons.length === 0) {

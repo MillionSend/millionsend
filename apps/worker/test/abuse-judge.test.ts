@@ -402,3 +402,56 @@ it("holds a new team on one phishing verdict from 80 on its shared-domain mail, 
     .where(eq(schema.teams.id, team));
   expect(held?.reason).toBe("review");
 });
+
+it("keeps a vouched team's clearances, and alerts on each payment lure past the day's alert", async () => {
+  const team = await createTeam(db, "vouched-team");
+  await db.insert(schema.teamMonitor).values({
+    teamId: team,
+    sentTotal: 20_000,
+    firstSendAt: new Date(NOW.getTime() - 60 * 86_400_000),
+    alertedAt: NOW,
+    vouchedAt: NOW,
+    vouchedBy: "op",
+    vouchReason: "checked by hand",
+  });
+  await db.insert(schema.teamDestinations).values({
+    teamId: team,
+    domain: "bill-host.example",
+    clearedAt: new Date(NOW.getTime() - 86_400_000),
+  });
+  const verdict = (categories: string[]): AbuseJudge => ({
+    provider: "typesafe",
+    model: "fake-model",
+    judge: async () => ({
+      score: 95,
+      verdict: "abuse",
+      categories,
+      reasons: ["harvests_secrets"],
+      impersonatedBrand: null,
+      language: "en",
+    }),
+  });
+  const judgeOne = async (judge: AbuseJudge) => {
+    const emailId = await insertEmail(
+      '<p>Pay <a href="https://bill-host.example/pay">here</a></p>',
+      {
+        team,
+      },
+    );
+    const id = await insertSample({ teamId: team, emailId, kind: "tier" });
+    expect(await judgeSample(db, deps(judge), { sampleId: id })).toBe("judged");
+  };
+  const alerts = () => sends.filter((s) => s.kind === "monitor.alert" && s.text.includes(team));
+
+  await judgeOne(verdict(["brand_impersonation"]));
+  expect(alerts()).toHaveLength(0);
+  await judgeOne(verdict(["payment_redirect"]));
+  await judgeOne(verdict(["payment_redirect"]));
+  expect(alerts()).toHaveLength(2);
+  const [kept] = await db
+    .select()
+    .from(schema.teamDestinations)
+    .where(eq(schema.teamDestinations.teamId, team));
+  expect(kept?.revokedAt).toBeNull();
+  expect(await digestCounts(db, team)).toEqual({});
+});

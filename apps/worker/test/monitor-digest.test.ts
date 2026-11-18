@@ -65,3 +65,35 @@ it("keeps the counts for the next digest when the mail fails", async () => {
   const rows = await db.select().from(schema.monitorDigest);
   expect(rows).toMatchObject([{ teamId: team, kind: "destination_parked", count: 2 }]);
 });
+
+it("names the vouches that end within three days, and never one until revoked", async () => {
+  const mails: { text: string }[] = [];
+  const deps = {
+    mailer: { send: async (_to: string, m: { text: string }) => void mails.push(m) },
+    appBaseUrl: "https://app.example.test",
+    now: new Date("2026-11-18T12:00:00Z"),
+  };
+  const vouch = async (slug: string, until: Date | null) => {
+    const teamId = await createTeam(db, slug);
+    await db.insert(schema.teamMonitor).values({
+      teamId,
+      vouchedAt: new Date("2026-10-01T00:00:00Z"),
+      vouchedBy: "op",
+      vouchReason: "checked",
+      vouchUntil: until,
+    });
+    return teamId;
+  };
+  const ending = await vouch("ending", new Date("2026-11-20T09:00:00Z"));
+  await vouch("later", new Date("2026-11-25T00:00:00Z"));
+  await vouch("ended", new Date("2026-11-18T11:00:00Z"));
+  await vouch("forever", null);
+  // The counts the previous case kept are not this case's.
+  await db.delete(schema.monitorDigest);
+
+  expect(await sendMonitorDigest(db, deps)).toBe(1);
+  expect(mails[0]?.text).toContain(
+    `ending: the vouch for its content ends on 2026-11-20 (UTC). https://app.example.test/console/safety/${ending}`,
+  );
+  for (const slug of ["later", "ended", "forever"]) expect(mails[0]?.text).not.toContain(slug);
+});

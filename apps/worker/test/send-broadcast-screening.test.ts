@@ -6,6 +6,7 @@ import {
   type JudgeVerdict,
   MONITOR_SETTING_DEFAULTS,
   type MonitorDeps,
+  NOVEL_DESTINATIONS_MAX,
   SCREEN_RETRIES,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -177,6 +178,33 @@ it("writes no copy before the HTML's verdict, then holds the first copy for its 
   expect(resent).toEqual([first]);
   expect(await sendEmail(db, sendDeps, { emailId: first })).toBe("sent");
   expect(sesCalls).toHaveLength(3);
+});
+
+it("fans a vouched new team's broadcast out at once, past any count of new destinations, and still samples it", async () => {
+  const { teamId, broadcastId } = await newTeamBroadcast("bcast-vouched");
+  await db.insert(schema.teamMonitor).values({
+    teamId,
+    vouchedAt: new Date(),
+    vouchedBy: "op",
+    vouchReason: "checked",
+  });
+  const links = Array.from(
+    { length: NOVEL_DESTINATIONS_MAX + 1 },
+    (_, i) => `<a href="https://spread-${i}.example">${i}</a>`,
+  ).join("");
+  await db
+    .update(schema.broadcasts)
+    .set({ html: `<p>Hi ${links}</p>` })
+    .where(eq(schema.broadcasts.id, broadcastId));
+  expect(await sendBroadcast(db, broadcastDeps, { broadcastId })).toBe("sent");
+  const drawn = await samples(broadcastId);
+  expect(drawn.find((s) => s.kind === "broadcast_skeleton")).toMatchObject({ screening: false });
+  expect(drawn.every((s) => !s.screening)).toBe(true);
+  const written = await rows(broadcastId);
+  expect(written).toHaveLength(3);
+  for (const row of written) {
+    expect(await sendEmail(db, sendDeps, { emailId: row.id })).toBe("sent");
+  }
 });
 
 it("pauses the team's broadcasts on one phishing-type verdict from 80 on the HTML", async () => {

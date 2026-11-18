@@ -489,3 +489,39 @@ describe("the monitor flag's evidence", () => {
     ).toBe(2);
   });
 });
+
+describe("a vouched team", () => {
+  it("never fires the monitor trigger, and still fires the rate triggers", () => {
+    const risky = { teamId: "v", monitorRisk: 0.95, monitorVouched: true };
+    expect(flagTrigger(standing(risky))).toBeNull();
+    expect(flagTrigger(standing({ ...risky, guardrail: "warning" }))?.reason).toBe("guardrail");
+    expect(
+      flagTrigger(standing({ ...risky, complaintRate7d: 0.002, complaintSent7d: 600 }))?.reason,
+    ).toBe("complaints");
+  });
+
+  it("clears its open monitor flag, and reopens one an operator cleared once the vouch ends", async () => {
+    const teamId = await createTeam(db, "vouched-flags");
+    const open = async () =>
+      (await flagsOf(teamId)).filter((f) => f.status === "open").map((f) => f.reason);
+    const risky = standing({ teamId, monitorRisk: 0.95 });
+    await syncTeamFlags(db, [risky], new Date(), []);
+    expect(await open()).toEqual(["monitor"]);
+    expect(
+      await syncTeamFlags(db, [{ ...risky, monitorVouched: true }], new Date(), [risky]),
+    ).toEqual({ opened: 0, cleared: 1 });
+    expect(await open()).toEqual([]);
+
+    // An operator's clear before the vouch, the stored standing over the line throughout.
+    await db
+      .update(schema.teamFlags)
+      .set({ clearedBy: "op" })
+      .where(eq(schema.teamFlags.teamId, teamId));
+    const ended = { ...risky, monitorVouchEndedAt: new Date(Date.now() + 1000) };
+    expect(await syncTeamFlags(db, [ended], new Date(), [risky])).toEqual({
+      opened: 1,
+      cleared: 0,
+    });
+    expect(await open()).toEqual(["monitor"]);
+  });
+});

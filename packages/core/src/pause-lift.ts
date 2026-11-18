@@ -1,7 +1,7 @@
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
-import { riskAt, teamMonitorRow } from "./abuse-monitor.js";
+import { riskAt, teamMonitorRow, vouchActive } from "./abuse-monitor.js";
 import { auditRow } from "./audit.js";
 import {
   type DeliverabilityHealth,
@@ -76,14 +76,16 @@ export async function pauseLiftStanding(
       ),
     );
   const lastLiftAt = last?.at ?? null;
+  const monitor = await teamMonitorRow(db, teamId);
   return {
     refusal: pauseLiftRefusal({
       suspended: team.suspendedAt !== null,
       freePool: freePoolOwner(team, now) !== null,
       reasons: health.reasons,
       openFlag: openFlag ?? null,
-      monitorRisk: riskAt(await teamMonitorRow(db, teamId), now),
+      monitorRisk: riskAt(monitor, now),
       monitorFlagRisk: opts.monitorFlagRisk,
+      monitorVouched: vouchActive(monitor, now),
       lastLiftAt,
       now,
     }),

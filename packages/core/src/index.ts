@@ -108,13 +108,16 @@ export {
   recentMonitorSamples,
   recordMonitorSample,
   resumeMonitorPause,
+  revokeTeamVouch,
   sampleAcceptedEmail,
   samplingFraction,
   setMonitorOverride,
+  setTeamVouch,
   type TeamMonitorOverview,
   teamMonitorOverview,
   teamMonitorRow,
   type VerdictOutcome,
+  vouchActive,
   YOUNG_DOMAIN_DAYS,
 } from "./abuse-monitor.js";
 export {

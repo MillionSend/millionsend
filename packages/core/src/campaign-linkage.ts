@@ -8,6 +8,7 @@ import {
   type MonitorTier,
   monitorTier,
   teamMonitorRow,
+  vouchActive,
 } from "./abuse-monitor.js";
 import { clearAbuseMarks } from "./account-signups.js";
 import { recordAudit } from "./audit.js";
@@ -536,6 +537,7 @@ async function link(
     input.trigger === "send" &&
     settings.autoHold &&
     monitor.heldAt === null &&
+    !vouchActive(monitor, input.now) &&
     [...found.values()].some((entry) => holds(entry.matches));
   if (!holding && ![...found.values()].some((entry) => entry.changed)) return result(false);
 

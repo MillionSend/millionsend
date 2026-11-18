@@ -153,7 +153,11 @@ async function judgePending(
   const loaded = await loadBlockInput(db, deps.keyring, sample, now);
   if (!loaded) return unjudged("body_purged");
   const settings = await deps.settings();
-  const { tier, holdSpent } = await screeningTeam(db, settings, sample.teamId, now);
+  const {
+    tier,
+    holdSpent,
+    vouched: teamVouched,
+  } = await screeningTeam(db, settings, sample.teamId, now);
   const media = await readMedia(loaded.input, loaded.files, tier, deps.media);
   const issues = media?.issues ?? [];
   const standing = await teamDestinationStanding(db, {
@@ -293,8 +297,12 @@ async function judgePending(
     isPlatformLinkVerdict(verdict, standing.probation) &&
     standing.probation.every((d) => vouchedNames.has(d));
   const probation = standing.probation.filter((d) => d !== clientSite || !vouchedNames.has(d));
+  // An operator's vouch for the team keeps every clearance: the verdict only counts.
   const revoking =
-    !platformProbation && !vouched && isHoldVerdict(verdict, DESTINATION_REVOKE_SCORE)
+    !teamVouched &&
+    !platformProbation &&
+    !vouched &&
+    isHoldVerdict(verdict, DESTINATION_REVOKE_SCORE)
       ? probation
       : [];
   // The verdict and its fold commit together: a crash between them would
@@ -370,8 +378,23 @@ async function judgePending(
     await noteForDigest(db, sample.teamId, "destination_parked");
   }
   if (waiting && (destinationParks || outcome.held)) await keepMedia();
-  if ((outcome.alert || outcome.paused || outcome.held) && deps.mailer) {
-    await notifyOperator(db, deps, sample.teamId, verdict, outcome, settings, now);
+  // A vouch covers the content a person checked; a phishing-type verdict
+  // asking for money (a Pix code, a payment redirect) is outside it, and the
+  // operator hears of each one now, whatever the day's alert already said.
+  const tripwire =
+    teamVouched &&
+    isHoldVerdict(verdict, settings.holdRepeatScore) &&
+    (paysByPix || verdict.categories.includes("payment_redirect"));
+  if ((outcome.alert || outcome.paused || outcome.held || tripwire) && deps.mailer) {
+    await notifyOperator(
+      db,
+      deps,
+      sample.teamId,
+      verdict,
+      { ...outcome, alert: outcome.alert || tripwire },
+      settings,
+      now,
+    );
   }
   if (outcome.held && deps.syncTenant) {
     // The hold already refuses every send; the tenant is a second lock, so a

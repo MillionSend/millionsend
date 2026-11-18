@@ -602,6 +602,7 @@ export const ptBR = {
       "destination_revoked.other": "{n} e-mails que tiraram a liberação de destinos",
       "media_blocked.one": "{n} e-mail cujas imagens o leitor de imagens recusou",
       "media_blocked.other": "{n} e-mails cujas imagens o leitor de imagens recusou",
+      vouch_ending: "{team}: o aval do conteúdo dela termina em {date} (UTC). {page}",
     },
   },
 } as const satisfies Record<AccountMailKind, AccountMailEntry>;

@@ -318,6 +318,22 @@ it(`parks mail with more than ${NOVEL_DESTINATIONS_MAX} new destinations for the
   expect(await sampleOf(id)).toBeUndefined();
 });
 
+it("sends a vouched team's mail to new destinations without waiting on the judge", async () => {
+  const t = await team("vouched-links", "probation");
+  await db
+    .update(schema.teamMonitor)
+    .set({ vouchedAt: new Date(), vouchedBy: "op", vouchReason: "checked" })
+    .where(eq(schema.teamMonitor.teamId, t.teamId));
+  const html = Array.from({ length: NOVEL_DESTINATIONS_MAX + 1 }, (_, i) =>
+    link(`vouched-${i}.example`),
+  ).join("");
+  const many = await email(t, html);
+  expect(await sendEmail(db, sendDeps(), { emailId: many })).toBe("sent");
+  const one = await email(t, link("vouched-one.example"));
+  expect(await sendEmail(db, sendDeps(), { emailId: one })).toBe("sent");
+  expect((await sampleOf(one))?.screening ?? false).toBe(false);
+});
+
 /** Screening samples of the day's new destinations, each a set of its own. */
 const screenedSets = (teamId: string, n: number) =>
   db.insert(schema.monitorSamples).values(
