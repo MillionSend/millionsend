@@ -4,7 +4,7 @@ import { AUDIT_ACTIONS } from "@millionsend/core/audit-actions";
 import type { PauseLiftRefusal } from "@millionsend/core/deliverability";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
 import { CopyChip } from "@/components/copy-chip";
 import { DotParts } from "@/components/dot-parts";
@@ -21,13 +21,13 @@ import { mutedDash, Table } from "@/components/table";
 import { toast } from "@/components/toast";
 import { Tooltip } from "@/components/tooltip";
 import { Truncated } from "@/components/truncated";
-import { formatDay, formatDayTime, formatRelative } from "@/lib/format";
+import { daysUntil, formatDate, formatDay, formatDayTime, formatRelative } from "@/lib/format";
 import { formatRisk, riskColor } from "@/lib/monitor-settings";
 import { formatScoreTenths, scoreColor } from "@/lib/score-band";
 import { useTRPC } from "@/lib/trpc";
 import { trpcErrorCode } from "@/lib/trpc-error";
 import { useTeamActions } from "../team-actions";
-import { LiftPauseDialog, useLiftRefusal } from "../teams/hold-dialogs";
+import { CancelButton, LiftPauseDialog, useLiftRefusal } from "../teams/hold-dialogs";
 import { LinkedTeams } from "../teams/linked-teams";
 import {
   CardHead,
@@ -80,6 +80,8 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const setOverride = useMutation(trpc.console.monitor.setOverride.mutationOptions());
   const clearOverride = useMutation(trpc.console.monitor.clearOverride.mutationOptions());
   const resumeMonitor = useMutation(trpc.console.monitor.resumeBroadcasts.mutationOptions());
+  const vouch = useMutation(trpc.console.monitor.vouch.mutationOptions());
+  const revokeVouch = useMutation(trpc.console.monitor.revokeVouch.mutationOptions());
   const lift = useMutation(trpc.console.teams.liftPause.mutationOptions());
   const liftRefusal = useLiftRefusal();
   const teamsT = useTranslations("console.teams");
@@ -123,6 +125,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const [note, setNote] = useState("");
   const [emailTab, setEmailTab] = useState<"flagged" | "all">("flagged");
   const [lifting, setLifting] = useState(false);
+  const [vouching, setVouching] = useState(false);
   const flagSync = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(flagSync.current), []);
   const closeFlagDialog = useCallback(() => {
@@ -163,7 +166,18 @@ export function ReviewView({ teamId }: { teamId: string }) {
     toast(monitorT(`toast.${key}`, { team: team.name }));
     refetch();
   };
-  const monitorBusy = setOverride.isPending || clearOverride.isPending || resumeMonitor.isPending;
+  const vouchDone = (key: "vouched" | "revoked") => () => {
+    setVouching(false);
+    toast(monitorT(`vouch.toast.${key}`, { team: team.name }));
+    refetch();
+  };
+  const monitorBusy =
+    setOverride.isPending ||
+    clearOverride.isPending ||
+    resumeMonitor.isPending ||
+    vouch.isPending ||
+    revokeVouch.isPending;
+  const vouched = query.data.vouch?.active ? query.data.vouch : null;
   const target = {
     id: team.id,
     name: team.name,
@@ -266,6 +280,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
                 {t(flagOpen ? "badges.flagOpen" : "badges.flagCleared")}
               </span>
             ) : null}
+            {vouched ? <span className="ms-badge ms-badge-info">{t("badges.vouched")}</span> : null}
           </>
         }
         actions={
@@ -481,9 +496,74 @@ export function ReviewView({ teamId }: { teamId: string }) {
                   {monitorT("sampleAll")}
                 </button>
               ) : null}
+              {vouched ? (
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  disabled={monitorBusy}
+                  onClick={() =>
+                    revokeVouch.mutate({ teamId: team.id }, { onSuccess: vouchDone("revoked") })
+                  }
+                >
+                  <BtnSpinner on={revokeVouch.isPending} />
+                  {monitorT("vouch.revoke")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-secondary"
+                  disabled={monitorBusy}
+                  onClick={() => setVouching(true)}
+                >
+                  {monitorT("vouch.action")}
+                </button>
+              )}
             </div>
           ) : null}
         </div>
+        {vouched && !exempt ? (
+          <div style={{ marginBottom: 16, fontSize: 13 }}>
+            <div style={{ color: "var(--ms-bone)" }}>
+              <DotParts
+                lead={
+                  <span
+                    className="ms-dot"
+                    style={{
+                      background: "var(--ms-success)",
+                      marginRight: 8,
+                      verticalAlign: "middle",
+                    }}
+                  />
+                }
+                text={monitorT("vouch.status", {
+                  operator: vouched.by ?? common("none"),
+                  date: formatDate(vouched.at, locale),
+                  left: vouched.until ? "days" : "revoked",
+                  days: vouched.until ? daysUntil(vouched.until) : 0,
+                })}
+              />
+            </div>
+            {vouched.reason ? (
+              <div
+                style={{
+                  marginTop: 2,
+                  paddingLeft: 16,
+                  fontSize: 12.5,
+                  whiteSpace: "pre-line",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                “{vouched.reason}”
+              </div>
+            ) : null}
+            <p style={{ margin: "8px 0 0", paddingLeft: 16, color: "var(--ms-muted)" }}>
+              {monitorT("vouch.effect")}
+              {vouched.until
+                ? ` ${monitorT("vouch.expires", { date: formatDate(vouched.until, locale) })}`
+                : null}
+            </p>
+          </div>
+        ) : null}
         {!monitor.judge.on && monitor.samples.length === 0 && !monitor.broadcastsPausedAt ? (
           <p style={{ margin: 0, fontSize: 13, color: "var(--ms-muted)" }}>{monitorT("off")}</p>
         ) : exempt ? (
@@ -890,6 +970,16 @@ export function ReviewView({ teamId }: { teamId: string }) {
           pending={lift.isPending}
           onClose={() => setLifting(false)}
           onSubmit={submitLift}
+        />
+      ) : null}
+      {vouching ? (
+        <VouchDialog
+          name={team.name}
+          pending={vouch.isPending}
+          onClose={() => setVouching(false)}
+          onSubmit={(input) =>
+            vouch.mutate({ teamId: team.id, ...input }, { onSuccess: vouchDone("vouched") })
+          }
         />
       ) : null}
       {actions.dialogs}
@@ -1356,6 +1446,111 @@ export function WarmupCard({
 }
 
 /** Reason codes, each explained on hover; a code this build has no text for stays plain. */
+const VOUCH_LASTS = [
+  { key: "30d", days: 30 },
+  { key: "90d", days: 90 },
+  { key: "forever", days: null },
+] as const;
+type VouchLasts = (typeof VOUCH_LASTS)[number]["key"];
+
+function VouchDialog({
+  name,
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  name: string;
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (input: { reason: string; lasts: VouchLasts }) => void;
+}) {
+  const t = useTranslations("console.safety.review.monitor.vouch.dialog");
+  const common = useTranslations("console.common");
+  const locale = useLocale();
+  const id = useId();
+  const [reason, setReason] = useState("");
+  const [lasts, setLasts] = useState<VouchLasts>("90d");
+  const valid = reason.trim() !== "";
+
+  function submit() {
+    if (pending || !valid) return;
+    onSubmit({ reason: reason.trim(), lasts });
+  }
+
+  return (
+    <Modal open onClose={onClose} onConfirm={submit} title={t("title", { team: name })}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <p style={{ margin: "6px 0 16px", color: "var(--ms-muted)", fontSize: 13.5 }}>
+          {t("lead")}
+        </p>
+        <dl className="ms-kv ms-kv-cols" style={{ marginBottom: 16 }}>
+          <KvRow label={t("whileVouched")} valueStyle={KV_SENTENCE}>
+            {t("whileVouchedValue")}
+          </KvRow>
+          <KvRow label={t("stillApplies")} valueStyle={KV_SENTENCE}>
+            {t("stillAppliesValue")}
+          </KvRow>
+        </dl>
+        <div className="ms-field" style={{ marginBottom: 14 }}>
+          <label htmlFor={`${id}-reason`}>{common("reason")}</label>
+          <textarea
+            id={`${id}-reason`}
+            className="ms-input"
+            style={{ width: "100%", minHeight: 72, resize: "vertical" }}
+            maxLength={500}
+            required
+            disabled={pending}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+          />
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--ms-muted)" }}>
+            {t("reasonHint")}
+          </p>
+        </div>
+        <div className="ms-field" style={{ marginBottom: 14 }}>
+          <label htmlFor={`${id}-${VOUCH_LASTS[0].key}`}>{t("lasts")}</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {VOUCH_LASTS.map((option) => (
+              <label key={option.key} className="ms-radio-card">
+                <input
+                  id={`${id}-${option.key}`}
+                  type="radio"
+                  name={`${id}-lasts`}
+                  checked={lasts === option.key}
+                  disabled={pending}
+                  onChange={() => setLasts(option.key)}
+                />
+                <span>
+                  {t(option.key)}
+                  <div className="sub">
+                    {option.days === null
+                      ? t("foreverSub")
+                      : t("until", {
+                          date: formatDate(Date.now() + option.days * 86_400_000, locale),
+                        })}
+                  </div>
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <ModalFooter>
+          <CancelButton onClose={onClose} />
+          <button type="submit" className="ms-btn ms-btn-primary" disabled={pending || !valid}>
+            <BtnSpinner on={pending} />
+            {t("confirm")} <ConfirmKeycap />
+          </button>
+        </ModalFooter>
+      </form>
+    </Modal>
+  );
+}
+
 function ReasonCodes({ codes }: { codes: string[] }) {
   const monitorT = useTranslations("console.safety.review.monitor");
   // The comma is kept on its code's line: the tooltip trigger is an inline

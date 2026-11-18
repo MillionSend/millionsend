@@ -20,6 +20,8 @@ const OPERATOR_ONLY_ACTIONS = [
   "monitor.broadcasts_resumed",
   "monitor.override_set",
   "monitor.override_cleared",
+  "monitor.vouched",
+  "monitor.vouch_revoked",
 ];
 
 /**

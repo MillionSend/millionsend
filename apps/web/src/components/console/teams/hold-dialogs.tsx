@@ -38,7 +38,7 @@ export interface HoldInput<R extends string> {
   notify: boolean;
 }
 
-function CancelButton({ onClose }: { onClose: () => void }) {
+export function CancelButton({ onClose }: { onClose: () => void }) {
   const common = useTranslations("console.common");
   return (
     <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>

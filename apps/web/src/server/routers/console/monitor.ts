@@ -12,7 +12,9 @@ import {
   monitorThresholdsOrdered,
   resolveMonitorSettings,
   resumeMonitorPause,
+  revokeTeamVouch,
   setMonitorOverride,
+  setTeamVouch,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
@@ -24,6 +26,9 @@ import { operatorProcedure, router } from "../../trpc";
 import { auditOperator, kickQuotaDrain, loadTeam } from "./shared";
 
 const DAY_MS = 86_400_000;
+
+/** How long a vouch lasts; "forever" lasts until an operator revokes it. */
+const VOUCH_DAYS = { "30d": 30, "90d": 90, forever: null } as const;
 
 /** The env the settings fall back to; raw strings under SKIP_ENV_VALIDATION, parsed either way. */
 const envValues = () => env as unknown as Record<string, unknown>;
@@ -147,6 +152,60 @@ export const consoleMonitorRouter = router({
     .mutation(async ({ ctx, input }) => {
       const team = await loadTeam(ctx.db, input.teamId);
       await clearMonitorOverride(ctx.db, { teamId: team.id, actor: { userId: ctx.operator.id } });
+    }),
+
+  /**
+   * Vouch for a team checked by hand: the monitor keeps sampling and
+   * alerting but never interrupts its mail. The audit row is the instance's:
+   * the reason is the operator's note about a customer, never the team's to
+   * read.
+   */
+  vouch: operatorProcedure
+    .input(
+      z.object({
+        teamId: z.uuid(),
+        reason: z.string().trim().min(1).max(500),
+        lasts: z.enum(["30d", "90d", "forever"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const now = new Date();
+      const days = VOUCH_DAYS[input.lasts];
+      const until = days === null ? null : new Date(now.getTime() + days * DAY_MS);
+      await setTeamVouch(ctx.db, {
+        teamId: team.id,
+        by: ctx.operator.id,
+        reason: input.reason,
+        until,
+        now,
+      });
+      await auditOperator(ctx, {
+        teamId: null,
+        action: "monitor.vouched",
+        target: { type: "team", id: team.id },
+        metadata: { team: team.name, reason: input.reason, until: until?.toISOString() ?? null },
+      });
+      return { until };
+    }),
+
+  revokeVouch: operatorProcedure
+    .input(z.object({ teamId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const ended = await revokeTeamVouch(ctx.db, { teamId: team.id, now: new Date() });
+      if (!ended) return { revoked: false };
+      await auditOperator(ctx, {
+        teamId: null,
+        action: "monitor.vouch_revoked",
+        target: { type: "team", id: team.id },
+        metadata: {
+          team: team.name,
+          vouchedAt: ended.vouchedAt.toISOString(),
+          reason: ended.reason,
+        },
+      });
+      return { revoked: true };
     }),
 
   /** Lifts the pause the policy applied; the operator hold it rode on goes with it. */

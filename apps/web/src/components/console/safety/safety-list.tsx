@@ -309,7 +309,12 @@ export function SafetyList() {
                           <ReasonLabel reason={row.reason} detail={row.detail} truncate />
                         </td>
                         <td>
-                          <FlagStatusBadge status={row.status} suspendedAt={row.suspendedAt} />
+                          <span style={{ display: "inline-flex", gap: 6 }}>
+                            <FlagStatusBadge status={row.status} suspendedAt={row.suspendedAt} />
+                            {row.vouched ? (
+                              <span className="ms-badge ms-badge-info">{t("status.vouched")}</span>
+                            ) : null}
+                          </span>
                         </td>
                         <td>
                           <RegionCell region={row.region} />

@@ -714,7 +714,8 @@
       "open": "Aberta",
       "cleared": "Encerrada",
       "suspended": "Suspensa",
-      "all": "Todas"
+      "all": "Todas",
+      "vouched": "Avalizada"
     },
     "reasons": {
       "monitor": "Monitor",
@@ -797,7 +798,8 @@
         "guardrailOk": "Proteção de envio ok",
         "operatorPaused": "Transmissões pausadas pelo operador",
         "flagOpen": "Sinalização aberta",
-        "flagCleared": "Sinalização encerrada"
+        "flagCleared": "Sinalização encerrada",
+        "vouched": "Avalizada"
       },
       "tiles": {
         "score": "Nota",
@@ -921,6 +923,33 @@
           "no_link_lure": "Aplica o golpe sem link: um Pix copia e cola, dados bancários trocados, um telefone para retorno, “responda com seu documento ou senha”, ou uma fatura ou zip anexado.",
           "unsolicited_bulk": "Parece envio em massa para quem nunca consentiu (promoção no estilo spam de um desconhecido), e não marketing com consentimento ou prospecção B2B. O modelo não vê o consentimento, então newsletters costumam ficar perto desse limite.",
           "prompt_injection": "O texto tenta instruir um revisor ou modelo a mudar a avaliação ou ignorar a política."
+        },
+        "vouch": {
+          "action": "Avalizar equipe",
+          "revoke": "Revogar aval",
+          "status": "Avalizada por {operator} · {date} · {left, select, revoked {até ser revogado} other {{days, plural, one {falta # dia} other {faltam # dias}}}}",
+          "effect": "As avaliações das amostras continuam registradas e alertam como sempre. Enquanto avalizada, nada fica retido, em espera ou revogado por conteúdo, nenhuma marcação do monitor é aberta e o risco não impede liberar uma pausa por bounces.",
+          "expires": "Expira em {date}; o resumo avisa 3 dias antes.",
+          "toast": {
+            "vouched": "{team} · avalizada",
+            "revoked": "{team} · aval revogado"
+          },
+          "dialog": {
+            "title": "Avalizar {team}",
+            "lead": "Para uma equipe que você verificou pessoalmente. O monitor continua avaliando os e-mails dela, mas deixa de agir pelo conteúdo.",
+            "whileVouched": "Enquanto avalizada",
+            "whileVouchedValue": "Os e-mails saem sem esperar a avaliação · Nada fica em espera, retido ou revogado por conteúdo · Sem marcações do monitor nem pausa de transmissões · A amostragem, o e-mail de alerta e o resumo continuam",
+            "stillApplies": "Continua valendo",
+            "stillAppliesValue": "Limites de bounces e reclamações · Cotas · Suspensão · Golpes com Pix ou pagamento alertam na hora",
+            "reasonHint": "Fica registrado com seu nome e o horário.",
+            "lasts": "Duração",
+            "30d": "30 dias",
+            "90d": "90 dias",
+            "forever": "Até ser revogado",
+            "until": "Até {date}",
+            "foreverSub": "Revogar leva um clique e fica registrado",
+            "confirm": "Avalizar"
+          }
         }
       },
       "warmup": {
