@@ -639,6 +639,7 @@ describe("getInbox and listInboxes", () => {
       name: `l4@${t.receiving}`,
       email_address: `l4@${t.receiving}`,
       from_name: null,
+      reply_from_name: "inbox",
       unread: 0,
       last_received: null,
       kind: "agent",
@@ -660,6 +661,39 @@ describe("getInbox and listInboxes", () => {
 });
 
 describe("updateInbox and updateInboxSafety", () => {
+  it("defaults reply_from_name by kind, takes a chosen one, and updates it", async () => {
+    const t = await team("reply-from");
+    const human = await created(t.teamId, { email_address: `h@${t.receiving}`, kind: "human" });
+    const agent = await created(t.teamId, { email_address: `a@${t.receiving}` });
+    const chosen = await created(t.teamId, {
+      email_address: `c@${t.receiving}`,
+      kind: "human",
+      reply_from_name: "teammate",
+    });
+    expect([human, agent, chosen].map((i) => i.reply_from_name)).toEqual([
+      "teammate_inbox",
+      "inbox",
+      "teammate",
+    ]);
+    const bad = await create(t.teamId, {
+      email_address: `b@${t.receiving}`,
+      reply_from_name: "everyone" as never,
+    });
+    expect(bad.ok ? null : bad.error.status).toBe(422);
+    const result = await updateInbox(db, deps, {
+      teamId: t.teamId,
+      inboxId: agent.id,
+      actor: person,
+      patch: { reply_from_name: "teammate_inbox" },
+      mayShorten: false,
+    });
+    expect(result.ok && result.inbox.reply_from_name).toBe("teammate_inbox");
+    const listed = await listInboxes(db, { teamId: t.teamId, query: {} });
+    expect(listed !== "bad_cursor" && listed.data.find((i) => i.id === agent.id)).toMatchObject({
+      reply_from_name: "teammate_inbox",
+    });
+  });
+
   it("renames, renews and announces; refuses expired inboxes", async () => {
     const t = await team("update-inbox");
     const hook = await createWebhookEndpoint(db, t.teamId, ["inbox.updated"]);

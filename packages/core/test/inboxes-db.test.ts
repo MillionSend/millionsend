@@ -322,6 +322,7 @@ describe("inbox events and endpoint inbox filters", () => {
         sharedDomainId: null,
         receivingAddress: null,
         fromName: null,
+        replyFromName: "inbox",
         expiresAt: null,
         createdAt: NOW,
       },

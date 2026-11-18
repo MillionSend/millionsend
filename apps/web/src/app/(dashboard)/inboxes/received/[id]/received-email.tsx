@@ -43,7 +43,7 @@ import { useTRPC } from "@/lib/trpc";
 import { useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useTeamRole } from "@/lib/use-team-role";
 import type { AppRouter } from "@/server/routers";
-import { heldWhy, QuarantinedBadge, TrustBadge } from "../../parts";
+import { FromLine, heldWhy, QuarantinedBadge, type ReplyFromMode, TrustBadge } from "../../parts";
 import { ReleaseButton } from "../../release-dialog";
 import { AuthBadge } from "../received-list";
 
@@ -716,12 +716,25 @@ function ComposeModal({
   const [text, setText] = useState("");
   const [to, setTo] = useState("");
   const [asFile, setAsFile] = useState<"inline" | "attachment">("inline");
+  const [pick, setPick] = useState<ReplyFromMode | null>(null);
+  // Without an inbox the answer goes out from a plain team address, named by the server.
+  const inbox = useQuery(
+    trpc.inboxes.get.queryOptions(
+      { id: inboxId ?? "" },
+      { enabled: mode !== null && inboxId !== undefined },
+    ),
+  );
+  // The From pick is per send: each opening starts from the inbox's setting.
+  const close = () => {
+    setPick(null);
+    onClose();
+  };
   const done = (result: { kind: "sent" } | { kind: "draft" }) => {
     toast(result.kind === "sent" ? t("compose.sent") : t("compose.drafted"));
     setText("");
     setTo("");
     onSent();
-    onClose();
+    close();
   };
   const reply = useMutation(trpc.receiving.reply.mutationOptions({ onSuccess: done }));
   const forward = useMutation(trpc.receiving.forward.mutationOptions({ onSuccess: done }));
@@ -734,7 +747,7 @@ function ComposeModal({
   const ready = mode === "reply" ? text.trim().length > 0 : recipients.length > 0;
   const submit = () => {
     if (!ready || pending || !mode) return;
-    const scope = inboxId ? { inboxId } : {};
+    const scope = inboxId ? { inboxId, ...(pick ? { fromName: pick } : {}) } : {};
     if (mode === "reply") reply.mutate({ id: emailId, text, ...scope });
     else
       forward.mutate({
@@ -748,7 +761,7 @@ function ComposeModal({
   return (
     <Modal
       open={mode !== null}
-      onClose={onClose}
+      onClose={close}
       onConfirm={submit}
       title={mode === "forward" ? t("detail.forward") : t("detail.reply")}
     >
@@ -759,6 +772,9 @@ function ComposeModal({
           submit();
         }}
       >
+        {inboxId && inbox.data ? (
+          <FromLine inbox={inbox.data} pick={pick} onPick={setPick} disabled={pending} />
+        ) : null}
         {mode === "forward" ? (
           <>
             <div className="ms-field">
@@ -810,7 +826,7 @@ function ComposeModal({
           </div>
         ) : null}
         <ModalFooter>
-          <button type="button" className="ms-btn ms-btn-secondary" onClick={onClose}>
+          <button type="button" className="ms-btn ms-btn-secondary" onClick={close}>
             {cancelLabel} <span className="ms-keycap">Esc</span>
           </button>
           <button type="submit" className="ms-btn ms-btn-primary" disabled={!ready || pending}>

@@ -5,6 +5,7 @@ import {
   sharedInboxDomain,
 } from "@millionsend/config";
 import {
+  accountName,
   createInbox,
   createLabel,
   createSemaphore,
@@ -31,9 +32,11 @@ import {
   MOVE_FOLDERS,
   openReceivedExtracted,
   QUARANTINE_REASONS,
+  REPLY_FROM_NAMES,
   rejectDraft,
   releasePreview,
   releaseQuarantined,
+  replyFromChoices,
   replyInThread,
   searchThreads,
   sendDraft,
@@ -87,6 +90,7 @@ const recipients = z.array(z.email()).max(50);
 const inboxRef = { inboxId: z.uuid() };
 const threadRef = { ...inboxRef, threadId: z.uuid() };
 const draftRef = { ...inboxRef, draftId: z.uuid() };
+const replyFromPick = z.enum(REPLY_FROM_NAMES).optional();
 
 /** The dashboard's lifetimes; Never is null. */
 const EXPIRY_CHOICES = ["1h", "24h", "7d", "30d"] as const;
@@ -415,6 +419,15 @@ export const inboxesRouter = router({
       .from(i)
       .where(and(eq(i.id, inbox.id), eq(i.teamId, ctx.teamId)));
     if (!extra) throw new TRPCError({ code: "NOT_FOUND" });
+    // The From names this person's sends from the inbox may carry.
+    const replyFrom = replyFromChoices(
+      {
+        fromName: inbox.from_name,
+        domainId: inbox.shared ? null : inbox.domain_id,
+        replyFromName: inbox.reply_from_name,
+      },
+      inbox.shared ? null : await accountName(ctx.db, ctx.session.user.id),
+    );
     return {
       ...inbox,
       expired: inbox.expires_at !== null && Date.parse(inbox.expires_at) <= Date.now(),
@@ -422,6 +435,7 @@ export const inboxesRouter = router({
       received_30d: extra.received30d,
       channels: { webhook: extra.webhook, key: extra.key },
       sharedSending: inbox.shared ? await sharedSending(ctx) : null,
+      reply_from: replyFrom,
     };
   }),
 
@@ -491,6 +505,7 @@ export const inboxesRouter = router({
         domainId: z.uuid().optional(),
         acceptFrom: z.enum(["anyone", "verified", "allowlist"]),
         expiresIn: z.enum(EXPIRY_CHOICES).nullable(),
+        replyFromName: replyFromPick,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -519,6 +534,7 @@ export const inboxesRouter = router({
           from_name: input.fromName || undefined,
           kind: input.kind,
           expires_in: input.expiresIn,
+          reply_from_name: input.replyFromName,
           safety: { accept_from: input.acceptFrom },
         },
       });
@@ -532,6 +548,7 @@ export const inboxesRouter = router({
         id: z.uuid(),
         name: z.string().trim().min(1).max(INBOX_NAME_MAX).optional(),
         fromName: z.string().trim().max(FROM_NAME_MAX).optional(),
+        replyFromName: replyFromPick,
         expiresIn: z.enum(EXPIRY_CHOICES).nullable().optional(),
       }),
     )
@@ -540,7 +557,12 @@ export const inboxesRouter = router({
         teamId: ctx.teamId,
         inboxId: input.id,
         actor: userActor(ctx),
-        patch: { name: input.name, from_name: input.fromName, expires_in: input.expiresIn },
+        patch: {
+          name: input.name,
+          from_name: input.fromName,
+          reply_from_name: input.replyFromName,
+          expires_in: input.expiresIn,
+        },
         mayShorten: ctx.role === "owner" || ctx.role === "admin",
       });
       if (!result.ok) throw inboxFailure(result.error);
@@ -858,6 +880,7 @@ export const inboxesRouter = router({
         subject: z.string().trim().min(1).max(2000),
         html: z.string().max(1_000_000).optional(),
         text: z.string().min(1).max(1_000_000),
+        fromName: replyFromPick,
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -875,6 +898,7 @@ export const inboxesRouter = router({
             html: input.html,
             text: input.text,
           },
+          fromName: input.fromName,
         }),
       ),
     ),
@@ -887,6 +911,7 @@ export const inboxesRouter = router({
         html: z.string().max(1_000_000).optional(),
         text: z.string().min(1).max(1_000_000),
         replyAll: z.boolean().optional(),
+        fromName: replyFromPick,
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -899,6 +924,7 @@ export const inboxesRouter = router({
           threadId: input.threadId,
           emailId: input.emailId,
           body: { html: input.html, text: input.text, reply_all: input.replyAll },
+          fromName: input.fromName,
         }),
       ),
     ),
@@ -910,6 +936,7 @@ export const inboxesRouter = router({
         emailId: z.uuid(),
         to: recipients.min(1),
         text: z.string().max(1_000_000).optional(),
+        fromName: replyFromPick,
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -922,6 +949,7 @@ export const inboxesRouter = router({
           threadId: input.threadId,
           emailId: input.emailId,
           body: { to: input.to, text: input.text || undefined },
+          fromName: input.fromName,
         }),
       ),
     ),

@@ -72,6 +72,7 @@ type InboxFields = Pick<
   | "sharedDomainId"
   | "receivingAddress"
   | "fromName"
+  | "replyFromName"
   | "expiresAt"
   | "createdAt"
 >;
@@ -87,6 +88,7 @@ export function inboxWire(row: InboxFields, counts: InboxCounts): InboxWire {
     domain_id: domainId,
     receiving_address: row.receivingAddress,
     from_name: row.fromName,
+    reply_from_name: row.replyFromName,
     unread: counts.unread,
     drafts: counts.drafts,
     last_received: iso(counts.lastReceived),
@@ -102,7 +104,14 @@ export function inboxWire(row: InboxFields, counts: InboxCounts): InboxWire {
 export function inboxListItemWire(
   row: Pick<
     InboxRow,
-    "id" | "kind" | "name" | "emailAddress" | "domainId" | "fromName" | "expiresAt"
+    | "id"
+    | "kind"
+    | "name"
+    | "emailAddress"
+    | "domainId"
+    | "fromName"
+    | "replyFromName"
+    | "expiresAt"
   >,
   counts: Pick<InboxCounts, "unread" | "lastReceived">,
 ): InboxListItemWire {
@@ -111,6 +120,7 @@ export function inboxListItemWire(
     name: row.name,
     email_address: row.emailAddress,
     from_name: row.fromName,
+    reply_from_name: row.replyFromName,
     unread: counts.unread,
     last_received: iso(counts.lastReceived),
     kind: row.kind,

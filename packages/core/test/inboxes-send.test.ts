@@ -18,9 +18,11 @@ import {
   beginInboxAccept,
   forwardedFilesProblem,
   forwardInThread,
+  forwardReceivedEmail,
   forwardToForwardTargets,
   refundInboxAccept,
   replyInThread,
+  replyToReceivedEmail,
   type SendOutcome,
   sendNewFromInbox,
 } from "../src/inboxes/send.js";
@@ -876,5 +878,87 @@ describe("the forward_to pass", () => {
     expect(
       await db.select().from(schema.emails).where(eq(schema.emails.inboxId, inbox.id)),
     ).toEqual([]);
+  });
+});
+
+describe("the From name of a person's send", () => {
+  const ADA: InboxActor = { kind: "user", userId: "send-ada" };
+  const fromOf = (o: SendOutcome) => sent(o).email.from;
+  const replyAs = async (
+    inbox: InboxRow,
+    actor: InboxActor,
+    fromName?: "inbox" | "teammate_inbox" | "teammate",
+  ) => {
+    const t = await thread(inbox);
+    return replyInThread(db, w.deps, {
+      teamId: w.teamId,
+      billing: await billing(w),
+      actor,
+      inboxId: inbox.id,
+      threadId: t.threadId,
+      emailId: t.id,
+      body: { text: "Hi" },
+      fromName,
+    });
+  };
+
+  beforeAll(async () => {
+    await db.insert(schema.user).values({
+      id: ADA.userId,
+      name: "Ada",
+      email: "ada@send.example",
+    });
+  });
+
+  it("follows the inbox setting or the pick on every reply path; keys and the shared domain keep the sender name", async () => {
+    const inbox = await addInbox(w, { local: "legal-desk", fromName: "Legal" });
+    await db
+      .update(schema.inboxes)
+      .set({ replyFromName: "teammate_inbox" })
+      .where(eq(schema.inboxes.id, inbox.id));
+    const address = inbox.emailAddress;
+
+    expect(fromOf(await replyAs(inbox, ADA))).toBe(`"Ada (Legal)" <${address}>`);
+    expect(fromOf(await replyAs(inbox, ADA, "teammate"))).toBe(`Ada <${address}>`);
+    expect(fromOf(await replyAs(inbox, TEAM_KEY, "teammate"))).toBe(`Legal <${address}>`);
+
+    const t = await thread(inbox);
+    const forwarded = await forwardInThread(db, w.deps, {
+      teamId: w.teamId,
+      billing: await billing(w),
+      actor: ADA,
+      inboxId: inbox.id,
+      threadId: t.threadId,
+      emailId: t.id,
+      body: { to: "boss@example.org" },
+      fromName: "teammate",
+    });
+    expect(fromOf(forwarded)).toBe(`Ada <${address}>`);
+
+    const received = await thread(inbox);
+    const answered = await replyToReceivedEmail(db, w.deps, {
+      teamId: w.teamId,
+      billing: await billing(w),
+      actor: ADA,
+      receivedEmailId: received.id,
+      body: { text: "Hi", inbox_id: inbox.id },
+      fromName: "teammate",
+    });
+    expect(fromOf(answered)).toBe(`Ada <${address}>`);
+    const passedOn = await forwardReceivedEmail(db, w.deps, {
+      teamId: w.teamId,
+      billing: await billing(w),
+      actor: ADA,
+      receivedEmailId: received.id,
+      body: { to: "boss@example.org", inbox_id: inbox.id },
+    });
+    expect(fromOf(passedOn)).toBe(`"Ada (Legal)" <${address}>`);
+
+    const shared = await addInbox(w, { local: "legal-shared", shared: true, fromName: "Legal" });
+    await db
+      .update(schema.inboxes)
+      .set({ replyFromName: "teammate_inbox" })
+      .where(eq(schema.inboxes.id, shared.id));
+    expect(fromOf(await replyAs(shared, ADA, "teammate"))).toBe(`Legal <${shared.emailAddress}>`);
   });
 });

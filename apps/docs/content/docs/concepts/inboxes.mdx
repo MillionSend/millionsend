@@ -79,14 +79,16 @@ The answer is the whole inbox, with `201`:
   "shared": false,
   "expires_at": null,
   "quarantined": 0,
-  "pending_approval": 0
+  "pending_approval": 0,
+  "reply_from_name": "inbox"
 }
 ```
 
 `unread` counts threads with an unread message, `drafts` the unsent drafts,
 `last_received` when a thread was last active, `quarantined` the messages
-held and not released, and `pending_approval` the drafts waiting for a
-person. The last five fields are MillionSend's.
+held and not released, `pending_approval` the drafts waiting for a
+person, and `reply_from_name` how mail a team member sends from the
+dashboard is named. The last six fields are MillionSend's.
 
 | Field | Rules |
 | --- | --- |
@@ -95,6 +97,7 @@ person. The last five fields are MillionSend's.
 | `domain_id` | The id of a `GET /domains` row, instead of `email_address`: your team's subdomain of the shared domain (the row with `shared: true`), which works like leaving `email_address` out, or one of your verified domains, where `username` names the address and `email_address`'s rules apply. |
 | `name` | 1–320 characters, so any address fits; the address when left out. |
 | `from_name` | The display name of the mail the inbox sends, up to 78 characters: a plain name, without `@`, `:`, `<`, `>`, line breaks, links or phone numbers. On the shared domain it is [reviewed](#shared-domain) first. |
+| `reply_from_name` | The From display name of mail a team member sends from the dashboard: `inbox` (the `from_name`), `teammate_inbox` (their account name, then the `from_name` in parentheses, such as `Ada (Support)`) or `teammate` (their account name alone). An account name a From can't carry falls back to the `from_name`, and a pair longer than 78 characters to the account name alone. On the shared domain the `from_name` always applies. Mail sent with an API key, by an agent or as an automatic forward always carries the `from_name`. Left out, `teammate_inbox` for a `human` inbox and `inbox` for an `agent` one. In the dashboard, each reply can pick another of these names for itself. |
 | `kind` | `agent` (the default) or `human`. |
 | `expires_in` | When the inbox [expires](#expiry), such as `1h`, `24h` or `7d`; left out, never. |
 | `safety` | Any of the [safety settings](#safety-settings); the rest take the kind's defaults. |
@@ -113,9 +116,9 @@ The other calls:
 - `GET /inboxes` lists inboxes, newest first; `?kind=agent` or `?kind=human`
   narrows it.
 - `GET /inboxes/{id}` reads one, by id or by address.
-- `PATCH /inboxes/{id}` changes `name`, `from_name` or `expires_in` and
-  answers the whole inbox. On the shared domain a new `from_name` is
-  reviewed first, with the same answers as at creation.
+- `PATCH /inboxes/{id}` changes `name`, `from_name`, `reply_from_name` or
+  `expires_in` and answers the whole inbox. On the shared domain a new
+  `from_name` is reviewed first, with the same answers as at creation.
 - `DELETE /inboxes/{id}` deletes the inbox with its threads, drafts and
   labels. Messages sent only to the inbox's address go with it; a message
   that also reached another inbox, or a catch-all address, stays there. The

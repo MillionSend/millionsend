@@ -1,4 +1,5 @@
 import { schema } from "@millionsend/db";
+import type { ReplyFromName } from "./reply-from.js";
 import type { InboxSafety } from "./safety.js";
 
 export const INBOX_NOT_FOUND_MESSAGE = "Inbox not found.";
@@ -64,6 +65,8 @@ export interface InboxWire {
   domain_id: string;
   receiving_address: string | null;
   from_name: string | null;
+  /** The From display name of a dashboard person's send (core replyFromName). */
+  reply_from_name: ReplyFromName;
   unread: number;
   drafts: number;
   last_received: string | null;
@@ -81,6 +84,7 @@ export interface InboxListItemWire {
   name: string | null;
   email_address: string;
   from_name: string | null;
+  reply_from_name: ReplyFromName;
   unread: number;
   last_received: string | null;
   kind: InboxKind;

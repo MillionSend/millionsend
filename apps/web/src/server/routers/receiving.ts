@@ -7,6 +7,7 @@ import {
   MAX_RECEIVED_MESSAGE_BYTES,
   openReceivedExtracted,
   RECEIVED_EMAIL_META_COLUMNS,
+  REPLY_FROM_NAMES,
   type ReceivedEmailDetail,
   type ReceivedExtracted,
   receivedEmailDetail,
@@ -397,6 +398,7 @@ export const receivingRouter = router({
         text: z.string().min(1).max(1_000_000),
         replyAll: z.boolean().optional(),
         inboxId: z.uuid().optional(),
+        fromName: z.enum(REPLY_FROM_NAMES).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -407,6 +409,7 @@ export const receivingRouter = router({
           actor: userActor(ctx),
           receivedEmailId: input.id,
           body: { text: input.text, reply_all: input.replyAll, inbox_id: input.inboxId },
+          fromName: input.fromName,
         }),
       ),
     ),
@@ -419,6 +422,7 @@ export const receivingRouter = router({
         text: z.string().max(1_000_000).optional(),
         mode: z.enum(["inline", "attachment"]).default("inline"),
         inboxId: z.uuid().optional(),
+        fromName: z.enum(REPLY_FROM_NAMES).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -434,6 +438,7 @@ export const receivingRouter = router({
             mode: input.mode,
             inbox_id: input.inboxId,
           },
+          fromName: input.fromName,
         }),
       ),
     ),

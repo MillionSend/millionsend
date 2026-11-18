@@ -123,6 +123,7 @@ describe("POST /inboxes and the inbox object", () => {
         "expires_at",
         "quarantined",
         "pending_approval",
+        "reply_from_name",
       ].sort(),
     );
     expect(body).toMatchObject({
@@ -131,6 +132,7 @@ describe("POST /inboxes and the inbox object", () => {
       domain_id: domainId,
       kind: "agent",
       shared: false,
+      reply_from_name: "inbox",
     });
   });
 

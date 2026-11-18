@@ -67,6 +67,13 @@
     "fromName": "Sender name",
     "fromNameHint": "The From name on mail this inbox sends. Empty: the address alone.",
     "expiresKeep": "Keep as it is",
+    "replyFrom": {
+      "legend": "Name on dashboard replies",
+      "inbox": "Sender name only",
+      "teammate_inbox": "Teammate, then sender name",
+      "teammate": "Teammate only",
+      "hint": "Uses each teammate's account name. Mail sent with an API key, by an agent or as an automatic forward keeps the sender name."
+    },
     "save": "Save",
     "saved": "Inbox saved."
   },
@@ -458,6 +465,8 @@
     "from": "From {address}",
     "fromNamed": "From <name>{fromName}</name> <{address}>",
     "setSenderName": "Set a sender name",
+    "fromLabel": "From",
+    "addressOnly": "Address only",
     "to": "To",
     "toName": "To {name}",
     "subject": "Subject",

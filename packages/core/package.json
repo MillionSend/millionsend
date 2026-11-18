@@ -96,6 +96,10 @@
       "types": "./src/inboxes/organize.ts",
       "default": "./src/inboxes/organize.ts"
     },
+    "./reply-from-rules": {
+      "types": "./src/inboxes/reply-from-rules.ts",
+      "default": "./src/inboxes/reply-from-rules.ts"
+    },
     "./release-rules": {
       "types": "./src/inboxes/release-rules.ts",
       "default": "./src/inboxes/release-rules.ts"

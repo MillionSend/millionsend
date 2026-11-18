@@ -18,18 +18,19 @@ import {
   encodeInboxActor,
   type InboxActor,
   isAgentActor,
+  parseInboxActor,
   recordInboxActivity,
   webhookSource,
 } from "./activity.js";
 import { addressKey, forwardSubject, replySubject } from "./compose.js";
 import { draftDeletedEvent, draftEvent, draftSentEvent } from "./events.js";
 import { DRAFT_APPROVAL_TTL, findLiveInbox, RECIPIENTS_PER_SEND_MAX } from "./limits.js";
+import { senderFrom } from "./reply-from.js";
 import {
   dispatchSend,
   forwardFiles,
   type HoldSpec,
   type InboxSendDeps,
-  inboxFrom,
   inboxSendDomain,
   isOutcome,
   loadThreadTarget,
@@ -682,7 +683,13 @@ export async function sendDraft(
         actor: p.actor,
         inbox,
         threadId: row.threadId,
-        from: inboxFrom(inbox),
+        // Its author's name, not the sender's: an agent's draft a person
+        // approves still goes out as the inbox.
+        from: await senderFrom(db, {
+          inbox,
+          actor: parseInboxActor(row.createdBy),
+          mode: row.replyFromName,
+        }),
         domainId,
         to: row.to ?? [],
         cc: row.cc,
@@ -972,6 +979,7 @@ export async function draftForHeldSend(
                     cc: held.cc,
                     bcc: held.bcc,
                     subject: held.subject,
+                    replyFromName: spec.fromName ?? null,
                     ...(sealed ? bodyColumns(sealed) : {}),
                   }),
               ...pending,
@@ -1004,6 +1012,7 @@ export async function draftForHeldSend(
               subject: held.subject,
               ...bodyColumns(sealed),
               createdBy: encodeInboxActor(held.actor),
+              replyFromName: spec.fromName ?? null,
               createdAt: now,
               ...pending,
             })

@@ -41,6 +41,7 @@ import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
   approvalReasonWords,
+  FromLine,
   heldWhy,
   holdOf,
   type InboundScreening,
@@ -48,6 +49,7 @@ import {
   messageHref,
   QuarantinedBadge,
   ReleasedBadge,
+  type ReplyFromMode,
   replyAllAdds,
   replyTarget,
   SuspiciousBadge,
@@ -842,6 +844,7 @@ function ReplyComposer({
   // A send remounts the editor empty; focus goes into the new one, so the
   // keyboard keeps its place. A thread switch remounts this whole composer.
   const [sent, setSent] = useState(false);
+  const [pick, setPick] = useState<ReplyFromMode | null>(null);
   const draft = useLocalDraft({
     storageKey: `ms-draft:inbox-reply:${threadId}`,
     state: html,
@@ -853,6 +856,7 @@ function ReplyComposer({
         toast(result.kind === "sent" ? t("compose.sent") : t("compose.drafted"));
         draft.markSaved("");
         setSent(true);
+        setPick(null);
         reseed("");
         onSent();
       },
@@ -864,10 +868,19 @@ function ReplyComposer({
   const others = replyAllAdds(target, inbox);
   const send = (replyAll: boolean) => {
     if (!ready) return;
-    reply.mutate({ inboxId: inbox.id, threadId, emailId: target.id, html, text, replyAll });
+    reply.mutate({
+      inboxId: inbox.id,
+      threadId,
+      emailId: target.id,
+      html,
+      text,
+      replyAll,
+      ...(pick ? { fromName: pick } : {}),
+    });
   };
   return (
     <div style={{ display: "grid", gap: 8 }}>
+      <FromLine inbox={inbox} pick={pick} onPick={setPick} disabled={reply.isPending} />
       <div>
         <MessageEditor
           key={nonce}

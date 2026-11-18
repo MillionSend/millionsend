@@ -2034,6 +2034,7 @@ function buildServer(
           username: createInboxRequestSchema.shape.username,
           name: createInboxRequestSchema.shape.name,
           from_name: createInboxRequestSchema.shape.from_name,
+          reply_from_name: createInboxRequestSchema.shape.reply_from_name,
           kind: z.literal("agent").optional().describe("Always agent"),
           expires_in: createInboxRequestSchema.shape.expires_in,
           accept_from: inboxSafetyPatchBodySchema.shape.accept_from,
@@ -2055,7 +2056,7 @@ function buildServer(
       {
         title: "Update inbox",
         description:
-          'Rename an inbox, change the name recipients see (from_name), or give it a new lifetime counted from now (expires_in, like "24h" or "7d"; null never expires). On the shared domain a new from_name is reviewed first (503 with retry-after while that review is unavailable). An inbox is deleted when it expires, so making it expire sooner takes the owner or admin role. Returns the inbox.',
+          'Rename an inbox, change the name recipients see (from_name) or the name on dashboard sends by team members (reply_from_name), or give it a new lifetime counted from now (expires_in, like "24h" or "7d"; null never expires). On the shared domain a new from_name is reviewed first (503 with retry-after while that review is unavailable). An inbox is deleted when it expires, so making it expire sooner takes the owner or admin role. Returns the inbox.',
         inputSchema: updateInboxInput,
         destructive: true,
         idempotent: true,
