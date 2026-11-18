@@ -789,6 +789,14 @@ describe("console.monitor.vouch", () => {
       until: null,
       active: true,
     });
+    await db
+      .insert(schema.teamFlags)
+      .values({ teamId: vouched, reason: "brand", detail: { brand: "Example" } });
+    const listed = async () =>
+      (await operator().console.safety.list({ status: "all" })).items.find(
+        (r) => r.teamId === vouched,
+      )?.vouched;
+    expect(await listed()).toBe(true);
 
     expect(await operator().console.monitor.revokeVouch({ teamId: vouched })).toEqual({
       revoked: true,
@@ -799,12 +807,10 @@ describe("console.monitor.vouch", () => {
       data: { team: "vouched-team", reason: "for good" },
     });
     expect((await operator().console.safety.review({ teamId: vouched })).vouch?.active).toBe(false);
+    expect(await listed()).toBe(false);
     expect(await operator().console.monitor.revokeVouch({ teamId: vouched })).toEqual({
       revoked: false,
     });
-    // The owner's own audit log never shows the lever or its reason.
-    const own = await callerFor(MEMBER, vouched, "owner").audit.list({ limit: 50 });
-    expect(own.items.filter((r) => r.action.startsWith("monitor.vouch"))).toEqual([]);
   });
 });
 

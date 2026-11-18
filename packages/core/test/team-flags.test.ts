@@ -525,3 +525,25 @@ describe("a vouched team", () => {
     expect(await open()).toEqual(["monitor"]);
   });
 });
+
+describe("a vouched team's standing", () => {
+  it("carries the vouch from team_monitor, and its end once over", async () => {
+    const teamId = await createTeam(db, "vouched-standing");
+    const now = new Date();
+    await db.insert(schema.usageCounters).values({ teamId, day: utcDay(now), sent: 10 });
+    await db
+      .insert(schema.teamMonitor)
+      .values({ teamId, vouchedAt: new Date(now.getTime() - 60_000), vouchUntil: null });
+    const vouch = async () => {
+      const row = (await computeTeamStandings(db, now)).find((r) => r.teamId === teamId);
+      return [row?.monitorVouched, row?.monitorVouchEndedAt];
+    };
+    expect(await vouch()).toEqual([true, null]);
+    const ended = new Date(now.getTime() - 1000);
+    await db
+      .update(schema.teamMonitor)
+      .set({ vouchUntil: ended })
+      .where(eq(schema.teamMonitor.teamId, teamId));
+    expect(await vouch()).toEqual([false, ended]);
+  });
+});

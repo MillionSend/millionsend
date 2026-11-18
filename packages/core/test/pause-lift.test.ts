@@ -165,4 +165,24 @@ describe("liftDeliverabilityPause", () => {
     // With the judge off there is no flag line to be over.
     expect(await lift(monitored, Number.POSITIVE_INFINITY)).toMatchObject({ hardBounces: 20 });
   });
+
+  it("lets the monitor's risk pass while the team is vouched for", async () => {
+    const teamId = await pausedTeam("acme-vouched");
+    await db.insert(schema.teamMonitor).values({
+      teamId,
+      firstSendAt: new Date(now.getTime() - 90 * DAY_MS),
+      riskNum: 20,
+      riskDen: 20,
+      riskUpdatedAt: now,
+      vouchedAt: now,
+    });
+    const refusal = async () =>
+      (await pauseLiftStanding(db, teamId, { now, monitorFlagRisk })).refusal;
+    expect(await refusal()).toBeNull();
+    await db
+      .update(schema.teamMonitor)
+      .set({ vouchUntil: now })
+      .where(eq(schema.teamMonitor.teamId, teamId));
+    expect(await refusal()).toBe("monitor");
+  });
 });

@@ -429,8 +429,10 @@ export async function loadMonitorState(
   const couldBeTrusted =
     row.sentTotal >= MONITOR_TRUSTED_SENDS &&
     daysSince(row.firstSendAt, now) >= MONITOR_TRUSTED_DAYS;
-  let flaggedRecently = false;
-  if (couldBeTrusted) {
+  // A vouch stops monitor flags from opening, so a vouched team would turn
+  // Trusted by default and be sampled at a fraction of its rate.
+  let flaggedRecently = vouchActive(row, now);
+  if (couldBeTrusted && !flaggedRecently) {
     const f = schema.teamFlags;
     const [flag] = await db
       .select({ id: f.id })

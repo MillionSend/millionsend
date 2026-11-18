@@ -368,6 +368,7 @@ async function judgePending(
   }
   const spareParks = sample.screening && outcome.spared !== null && !vouched;
   const destinationParks =
+    !teamVouched &&
     outcome.tier !== "exempt" &&
     (spareParks ||
       (sample.screening &&

@@ -419,11 +419,11 @@ it("keeps a vouched team's clearances, and alerts on each payment lure past the 
     domain: "bill-host.example",
     clearedAt: new Date(NOW.getTime() - 86_400_000),
   });
-  const verdict = (categories: string[]): AbuseJudge => ({
+  const verdict = (categories: string[], score = 95): AbuseJudge => ({
     provider: "typesafe",
     model: "fake-model",
     judge: async () => ({
-      score: 95,
+      score,
       verdict: "abuse",
       categories,
       reasons: ["harvests_secrets"],
@@ -431,23 +431,25 @@ it("keeps a vouched team's clearances, and alerts on each payment lure past the 
       language: "en",
     }),
   });
-  const judgeOne = async (judge: AbuseJudge) => {
-    const emailId = await insertEmail(
-      '<p>Pay <a href="https://bill-host.example/pay">here</a></p>',
-      {
-        team,
-      },
-    );
-    const id = await insertSample({ teamId: team, emailId, kind: "tier" });
+  const PAY = '<p>Pay <a href="https://bill-host.example/pay">here</a></p>';
+  const judgeOne = async (judge: AbuseJudge, html = PAY, screening = false) => {
+    const emailId = await insertEmail(html, { team });
+    const id = await insertSample({ teamId: team, emailId, kind: "tier", screening });
     expect(await judgeSample(db, deps(judge), { sampleId: id })).toBe("judged");
   };
   const alerts = () => sends.filter((s) => s.kind === "monitor.alert" && s.text.includes(team));
 
-  await judgeOne(verdict(["brand_impersonation"]));
+  // A screening sample left waiting when the vouch began: its mail already went, nothing parks.
+  await judgeOne(verdict(["brand_impersonation"]), PAY, true);
+  await judgeOne(verdict(["payment_redirect"], 70));
   expect(alerts()).toHaveLength(0);
   await judgeOne(verdict(["payment_redirect"]));
   await judgeOne(verdict(["payment_redirect"]));
-  expect(alerts()).toHaveLength(2);
+  await judgeOne(
+    verdict(["brand_impersonation"]),
+    `${PAY}<p>00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D</p>`,
+  );
+  expect(alerts()).toHaveLength(3);
   const [kept] = await db
     .select()
     .from(schema.teamDestinations)

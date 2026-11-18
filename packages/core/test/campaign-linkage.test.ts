@@ -413,6 +413,17 @@ describe("linkTeam", () => {
     expect((await linkTeam(db, { teamId: reviewed, trigger: "send" }))?.held).toBe(false);
   });
 
+  it("records the link of a vouched team without holding it", async () => {
+    await suspendForPhishing(phisher);
+    const team = await createTeam(db, "vouched");
+    await person(team, "facturevexto@gmail.com", null);
+    await db
+      .insert(schema.teamMonitor)
+      .values({ teamId: team, vouchedAt: new Date(Date.now() - 60_000) });
+    expect((await linkTeam(db, { teamId: team, trigger: "send" }))?.held).toBe(false);
+    expect(await standing(team)).toEqual({ reason: null, flag: { reason: "linked", detail: {} } });
+  });
+
   it("leaves established teams alone, and holds nothing with the hold policy off", async () => {
     await suspendForPhishing(phisher);
     const established = await createTeam(db, "established");

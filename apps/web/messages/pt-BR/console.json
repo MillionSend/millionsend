@@ -928,7 +928,7 @@
           "action": "Avalizar equipe",
           "revoke": "Revogar aval",
           "status": "Avalizada por {operator} · {date} · {left, select, revoked {até ser revogado} other {{days, plural, one {falta # dia} other {faltam # dias}}}}",
-          "effect": "As avaliações das amostras continuam registradas e alertam como sempre. Enquanto avalizada, nada fica retido, em espera ou revogado por conteúdo, nenhuma marcação do monitor é aberta e o risco não impede liberar uma pausa por bounces.",
+          "effect": "As avaliações das amostras continuam registradas e alertam como sempre. Enquanto avalizada, nada fica retido, em espera ou revogado por conteúdo, nenhuma sinalização do monitor é aberta e o risco não impede liberar uma pausa por bounces.",
           "expires": "Expira em {date}; o resumo avisa 3 dias antes.",
           "toast": {
             "vouched": "{team} · avalizada",
@@ -938,7 +938,7 @@
             "title": "Avalizar {team}",
             "lead": "Para uma equipe que você verificou pessoalmente. O monitor continua avaliando os e-mails dela, mas deixa de agir pelo conteúdo.",
             "whileVouched": "Enquanto avalizada",
-            "whileVouchedValue": "Os e-mails saem sem esperar a avaliação · Nada fica em espera, retido ou revogado por conteúdo · Sem marcações do monitor nem pausa de transmissões · A amostragem, o e-mail de alerta e o resumo continuam",
+            "whileVouchedValue": "Os e-mails saem sem esperar a avaliação · Nada fica em espera, retido ou revogado por conteúdo · Sem sinalizações do monitor nem pausa de transmissões · A amostragem, o e-mail de alerta e o resumo continuam",
             "stillApplies": "Continua valendo",
             "stillAppliesValue": "Limites de bounces e reclamações · Cotas · Suspensão · Golpes com Pix ou pagamento alertam na hora",
             "reasonHint": "Fica registrado com seu nome e o horário.",

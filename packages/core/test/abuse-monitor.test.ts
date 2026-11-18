@@ -14,6 +14,7 @@ import {
   isLocalOnlyMail,
   isPlatformLinkVerdict,
   isPlatformTenantName,
+  loadMonitorState,
   MONITOR_PRIOR_NEW,
   MONITOR_PRIOR_SETTLED,
   MONITOR_PRIOR_WEIGHT,
@@ -1378,6 +1379,40 @@ describe("an operator's vouch", () => {
     expect((await judge(teamId, 85, minute(11))).held).toBeNull();
     for (let i = 12; i <= 14; i += 1) expect((await judge(teamId, 85, minute(i))).held).toBeNull();
     expect((await judge(teamId, 85, minute(15))).held).toEqual({ rule: "repeat", verdicts: 5 });
+  });
+
+  it("counts only the verdicts judged after the vouch ended toward the broadcast pause", async () => {
+    const teamId = await newTeam("vouch-pause-since");
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: minute(10), now: NOW });
+    for (let i = 0; i < 60; i += 1) {
+      await stored(teamId, 100, minute(1 + (i % 9)));
+      expect(
+        (await applyJudgedSample(db, S, { teamId, score: 100, now: minute(1 + (i % 9)) })).paused,
+      ).toBe(false);
+    }
+    // Past the pause line, but the strong verdicts in the day were all vouched for.
+    await stored(teamId, 85, minute(11));
+    const weak = await applyJudgedSample(db, S, { teamId, score: 85, now: minute(11) });
+    expect(weak.risk).toBeGreaterThan(S.pauseRisk);
+    expect(weak.paused).toBe(false);
+    await stored(teamId, 95, minute(12));
+    expect((await applyJudgedSample(db, S, { teamId, score: 95, now: minute(12) })).paused).toBe(
+      true,
+    );
+  });
+
+  it("keeps a vouched team out of Trusted, whose flags the vouch stops", async () => {
+    const teamId = await createTeam(db, "vouch-trusted");
+    await db.insert(schema.teamMonitor).values({
+      teamId,
+      sentTotal: 60_000,
+      firstSendAt: new Date(NOW.getTime() - 200 * DAY_MS),
+    });
+    const tier = async () =>
+      monitorTier(await loadMonitorState(db, await teamMonitorRow(db, teamId), NOW), S, NOW);
+    expect(await tier()).toBe("trusted");
+    await setTeamVouch(db, { teamId, by: "op", reason: "checked", until: null, now: NOW });
+    expect(await tier()).toBe("established");
   });
 
   it("screens no vouched new team's broadcast before it fans out", async () => {

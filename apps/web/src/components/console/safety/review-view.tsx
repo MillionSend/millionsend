@@ -171,6 +171,8 @@ export function ReviewView({ teamId }: { teamId: string }) {
     toast(monitorT(`vouch.toast.${key}`, { team: team.name }));
     refetch();
   };
+  const vouchFailed = (error: { message: string }) =>
+    toast(teamsT("toast.error", { message: error.message }), "danger");
   const monitorBusy =
     setOverride.isPending ||
     clearOverride.isPending ||
@@ -502,7 +504,10 @@ export function ReviewView({ teamId }: { teamId: string }) {
                   className="ms-btn ms-btn-secondary"
                   disabled={monitorBusy}
                   onClick={() =>
-                    revokeVouch.mutate({ teamId: team.id }, { onSuccess: vouchDone("revoked") })
+                    revokeVouch.mutate(
+                      { teamId: team.id },
+                      { onSuccess: vouchDone("revoked"), onError: vouchFailed },
+                    )
                   }
                 >
                   <BtnSpinner on={revokeVouch.isPending} />
@@ -978,7 +983,10 @@ export function ReviewView({ teamId }: { teamId: string }) {
           pending={vouch.isPending}
           onClose={() => setVouching(false)}
           onSubmit={(input) =>
-            vouch.mutate({ teamId: team.id, ...input }, { onSuccess: vouchDone("vouched") })
+            vouch.mutate(
+              { teamId: team.id, ...input },
+              { onSuccess: vouchDone("vouched"), onError: vouchFailed },
+            )
           }
         />
       ) : null}
@@ -1445,7 +1453,6 @@ export function WarmupCard({
   );
 }
 
-/** Reason codes, each explained on hover; a code this build has no text for stays plain. */
 const VOUCH_LASTS = [
   { key: "30d", days: 30 },
   { key: "90d", days: 90 },
@@ -1551,6 +1558,7 @@ function VouchDialog({
   );
 }
 
+/** Reason codes, each explained on hover; a code this build has no text for stays plain. */
 function ReasonCodes({ codes }: { codes: string[] }) {
   const monitorT = useTranslations("console.safety.review.monitor");
   // The comma is kept on its code's line: the tooltip trigger is an inline
