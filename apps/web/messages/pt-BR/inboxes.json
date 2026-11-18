@@ -67,6 +67,13 @@
     "fromName": "Nome do remetente",
     "fromNameHint": "O nome que aparece no De dos e-mails que esta caixa envia. Vazio: só o endereço.",
     "expiresKeep": "Manter como está",
+    "replyFrom": {
+      "legend": "Nome nas respostas pelo painel",
+      "inbox": "Só o nome do remetente",
+      "teammate_inbox": "Colega, depois o nome do remetente",
+      "teammate": "Só o colega",
+      "hint": "Usa o nome da conta de cada colega. E-mails enviados com chave de API, por um agente ou como encaminhamento automático mantêm o nome do remetente."
+    },
     "save": "Salvar",
     "saved": "Caixa salva."
   },
@@ -458,6 +465,8 @@
     "from": "De {address}",
     "fromNamed": "De <name>{fromName}</name> <{address}>",
     "setSenderName": "Definir um nome de remetente",
+    "fromLabel": "De",
+    "addressOnly": "Só o endereço",
     "to": "Para",
     "toName": "Para {name}",
     "subject": "Assunto",

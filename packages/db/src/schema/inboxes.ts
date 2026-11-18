@@ -24,6 +24,13 @@ import { teams } from "./teams.js";
 
 export const inboxKindEnum = pgEnum("inbox_kind", ["agent", "human"]);
 
+/** The From display name of a dashboard user's send (core replyFromName). */
+export const inboxReplyFromNameEnum = pgEnum("inbox_reply_from_name", [
+  "inbox",
+  "teammate_inbox",
+  "teammate",
+]);
+
 export const inboxThreadFolderEnum = pgEnum("inbox_thread_folder", [
   "inbox",
   "archive",
@@ -142,6 +149,7 @@ export const inboxes = pgTable(
     receivingAddress: text("receiving_address"),
     name: text("name").notNull(),
     fromName: text("from_name"),
+    replyFromName: inboxReplyFromNameEnum("reply_from_name").notNull().default("inbox"),
     safety: jsonb("safety").$type<InboxSafety>().notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // The first accepted outbound send: day 0 of the new-recipient ramp.
@@ -326,6 +334,8 @@ export const inboxDrafts = pgTable(
     approvalReasons: text("approval_reasons").array().notNull().default([]),
     // Encoded actors (core encodeInboxActor).
     createdBy: text("created_by").notNull(),
+    // The From name a user picked for this send; null = the inbox's setting.
+    replyFromName: inboxReplyFromNameEnum("reply_from_name"),
     decidedBy: text("decided_by"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     emailId: uuid("email_id").references((): AnyPgColumn => emails.id, { onDelete: "set null" }),

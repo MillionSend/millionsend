@@ -85,15 +85,17 @@ A resposta é a caixa inteira, com `201`:
   "shared": false,
   "expires_at": null,
   "quarantined": 0,
-  "pending_approval": 0
+  "pending_approval": 0,
+  "reply_from_name": "inbox"
 }
 ```
 
 `unread` conta as conversas com alguma mensagem não lida, `drafts` os
 rascunhos não enviados, `last_received` quando uma conversa teve atividade
-pela última vez, `quarantined` as mensagens retidas e ainda não liberadas, e
-`pending_approval` os rascunhos esperando uma pessoa. Os cinco últimos campos
-são do MillionSend.
+pela última vez, `quarantined` as mensagens retidas e ainda não liberadas,
+`pending_approval` os rascunhos esperando uma pessoa, e `reply_from_name` o
+nome dos e-mails que alguém da equipe envia pelo painel. Os seis últimos
+campos são do MillionSend.
 
 | Campo | Regras |
 | --- | --- |
@@ -102,6 +104,7 @@ são do MillionSend.
 | `domain_id` | O id de uma linha do `GET /domains`, no lugar do `email_address`: o subdomínio da sua equipe no domínio compartilhado (a linha com `shared: true`), que funciona como deixar o `email_address` de fora, ou um dos seus domínios verificados, em que o `username` dá nome ao endereço e valem as regras do `email_address`. |
 | `name` | De 1 a 320 caracteres, então cabe qualquer endereço; o próprio endereço quando fica de fora. |
 | `from_name` | O nome de exibição dos e-mails que a caixa envia, com até 78 caracteres: um nome simples, sem `@`, `:`, `<`, `>`, quebras de linha, links nem números de telefone. No domínio compartilhado, ele passa por uma [revisão](#domínio-compartilhado) antes. |
+| `reply_from_name` | O nome de exibição dos e-mails que alguém da equipe envia pelo painel: `inbox` (o `from_name`), `teammate_inbox` (o nome da conta da pessoa e, entre parênteses, o `from_name`, como `Ana (Suporte)`) ou `teammate` (só o nome da conta). Um nome de conta que não cabe num remetente volta para o `from_name`, e um par com mais de 78 caracteres fica só com o nome da conta. No domínio compartilhado vale sempre o `from_name`. E-mails enviados com chave de API, por um agente ou como encaminhamento automático levam sempre o `from_name`. Se ficar de fora, `teammate_inbox` numa caixa `human` e `inbox` numa `agent`. No painel, cada resposta pode escolher outro desses nomes só para ela. |
 | `kind` | `agent` (o padrão) ou `human`. |
 | `expires_in` | Quando a caixa [expira](#validade), como `1h`, `24h` ou `7d`; se ficar de fora, nunca. |
 | `safety` | Qualquer uma das [configurações de segurança](#configurações-de-segurança); as outras ficam com os padrões do tipo. |
@@ -120,9 +123,10 @@ As outras chamadas:
 - `GET /inboxes` lista as caixas, das mais novas para as mais antigas;
   `?kind=agent` ou `?kind=human` filtra.
 - `GET /inboxes/{id}` lê uma, pelo id ou pelo endereço.
-- `PATCH /inboxes/{id}` muda `name`, `from_name` ou `expires_in` e devolve a
-  caixa inteira. No domínio compartilhado, um `from_name` novo passa pela
-  revisão antes, com as mesmas respostas da criação.
+- `PATCH /inboxes/{id}` muda `name`, `from_name`, `reply_from_name` ou
+  `expires_in` e devolve a caixa inteira. No domínio compartilhado, um
+  `from_name` novo passa pela revisão antes, com as mesmas respostas da
+  criação.
 - `DELETE /inboxes/{id}` exclui a caixa com as conversas, os rascunhos e as
   etiquetas dela. As mensagens enviadas só para o endereço da caixa vão
   junto; uma mensagem que também chegou a outra caixa, ou a um endereço do

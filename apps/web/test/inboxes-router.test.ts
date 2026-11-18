@@ -90,6 +90,7 @@ function wire(id: string, over: Partial<InboxWire> = {}): InboxWire {
     domain_id: domainId,
     receiving_address: null,
     from_name: null,
+    reply_from_name: "inbox",
     unread: 0,
     drafts: 0,
     last_received: null,
@@ -337,6 +338,7 @@ describe("tiers", () => {
         html,
         text: "Thanks, Ana.",
         replyAll: true,
+        fromName: "teammate",
       }),
     ).toEqual({ kind: "sent", emailId: "email-2", threadId });
     expect(core.replyInThread).toHaveBeenCalledWith(
@@ -349,6 +351,7 @@ describe("tiers", () => {
         threadId,
         emailId,
         body: { html, text: "Thanks, Ana.", reply_all: true },
+        fromName: "teammate",
       }),
     );
   });
@@ -898,6 +901,23 @@ describe("the inbox list", () => {
     });
   });
 
+  it("offers the signed-in person's From names, none on the shared domain", async () => {
+    core.getInbox.mockResolvedValue(
+      wire(inboxId, { from_name: "Orders", reply_from_name: "teammate_inbox" }),
+    );
+    expect((await caller(acme).inboxes.get({ id: inboxId })).reply_from).toEqual({
+      default: "teammate_inbox",
+      teammate: "Olga Owner",
+      options: [
+        { value: "inbox", name: "Orders" },
+        { value: "teammate_inbox", name: "Olga Owner (Orders)" },
+        { value: "teammate", name: "Olga Owner" },
+      ],
+    });
+    core.getInbox.mockResolvedValue(wire(inboxId, { from_name: "Orders", shared: true }));
+    expect((await caller(acme).inboxes.get({ id: inboxId })).reply_from).toBeNull();
+  });
+
   it("says when an inbox expired, and which channels reach it", async () => {
     core.getInbox.mockResolvedValue(
       wire(inboxId, { expires_at: new Date(Date.now() - 1000).toISOString() }),
@@ -1002,8 +1022,10 @@ describe("creating an inbox", () => {
       fromName: " Orders agent ",
       acceptFrom: "verified",
       expiresIn: null,
+      replyFromName: "teammate",
     });
     expect(core.createInbox.mock.calls[0]?.[2].input.from_name).toBe("Orders agent");
+    expect(core.createInbox.mock.calls[0]?.[2].input.reply_from_name).toBe("teammate");
     expect(named.from_name).toBe("Orders agent");
     core.createInbox.mockResolvedValue({ ok: true, inbox: wire(randomUUID()) });
     const bare = await caller(acme).inboxes.create({

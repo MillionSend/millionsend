@@ -286,7 +286,7 @@ export function registerInboxRoutes(
       path: "/inboxes/{inbox_id}",
       summary: "Update an inbox",
       description:
-        "Its name or from_name; MillionSend extension: expires_in, a new lifetime counted from now. On a shared-domain inbox a new from_name is reviewed first (503 while that review is unavailable). Returns the full inbox.",
+        "Its name or from_name; MillionSend extensions: reply_from_name, and expires_in, a new lifetime counted from now. On a shared-domain inbox a new from_name is reviewed first (503 while that review is unavailable). Returns the full inbox.",
       request: {
         params: inboxIdParam,
         body: { content: { "application/json": { schema: updateInboxRequestSchema } } },
@@ -308,9 +308,10 @@ export function registerInboxRoutes(
       if (
         body.name === undefined &&
         body.from_name === undefined &&
+        body.reply_from_name === undefined &&
         body.expires_in === undefined
       ) {
-        return invalid(c, "Provide at least one of name, from_name or expires_in");
+        return invalid(c, "Provide at least one of name, from_name, reply_from_name or expires_in");
       }
       if (!(await inboxFound(c, inbox_id))) return notFound(c, INBOX_NOT_FOUND_MESSAGE);
       const result = await updateInbox(db, inboxDeps(), {

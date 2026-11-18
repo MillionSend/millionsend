@@ -135,7 +135,7 @@ const { ThreadsTab } = await vi.importActual<
 >("@/app/(dashboard)/inboxes/[id]/threads-tab");
 const { LabelColorField, LabelEditor } = await import("@/app/(dashboard)/inboxes/[id]/labels");
 const { InboxesView } = await import("@/app/(dashboard)/inboxes/inboxes-view");
-const { approvalReasonWords, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
+const { approvalReasonWords, FromLine, QuarantinedBadge, replyAllAdds, replyTarget, TrustBadge } =
   await import("@/app/(dashboard)/inboxes/parts");
 const { navItemsFor, Sidebar } = await import("@/components/sidebar");
 const { AppShell } = await import("@/components/app-shell");
@@ -980,6 +980,79 @@ describe("addresses on the shared domain", () => {
     };
     expect(fieldError(edit())).toBe(t("create.errors.nameRefused"));
     rq.error = null;
+  });
+
+  it("shows the reply name choice on a custom domain only, with examples from the account name", () => {
+    const legal = {
+      id: "i2",
+      name: "Legal",
+      from_name: "Legal",
+      email_address: "legal@example.com",
+      reply_from_name: "teammate_inbox",
+      reply_from: {
+        default: "teammate_inbox",
+        teammate: "Ada",
+        options: [
+          { value: "inbox", name: "Legal" },
+          { value: "teammate_inbox", name: "Ada (Legal)" },
+          { value: "teammate", name: "Ada" },
+        ],
+      },
+      shared: false,
+    } as InboxDetail;
+    const edit = (inbox: InboxDetail) =>
+      text(
+        renderToStaticMarkup(createElement(EditDialog, { inbox, open: true, onClose: () => {} })),
+      );
+    const custom = edit(legal);
+    expect(custom).toContain(t("edit.replyFrom.legend"));
+    for (const line of [
+      "Legal &lt;legal@example.com&gt;",
+      "Ada (Legal) &lt;legal@example.com&gt;",
+      "Ada &lt;legal@example.com&gt;",
+    ]) {
+      expect(custom).toContain(line);
+    }
+    expect(custom).toMatch(/<input type="radio" name="inbox-reply-name" checked=""/);
+    expect(edit({ ...legal, shared: true, reply_from: null })).not.toContain(
+      t("edit.replyFrom.legend"),
+    );
+
+    const line = (inbox: InboxDetail) =>
+      renderToStaticMarkup(createElement(FromLine, { inbox, pick: null, onPick: () => {} }));
+    const picked = line(legal);
+    expect(picked).toContain('<option value="teammate_inbox" selected="">');
+    expect(offered(picked.match(/<select.*<\/select>/)?.[0] ?? "")).toEqual([
+      "inbox",
+      "teammate_inbox",
+      "teammate",
+    ]);
+    const single = line({ ...legal, reply_from: null });
+    expect(single).not.toContain("<select");
+    expect(single).toContain("Legal");
+
+    const unnamed = renderToStaticMarkup(
+      createElement(FromLine, {
+        inbox: {
+          ...legal,
+          from_name: null,
+          reply_from: {
+            default: "inbox",
+            teammate: "Ada",
+            options: [
+              { value: "inbox", name: null },
+              { value: "teammate_inbox", name: "Ada" },
+            ],
+          },
+        },
+        pick: null,
+        onPick: () => {},
+        after: "set-name",
+      }),
+    );
+    expect(unnamed).toContain(`>${t("compose.addressOnly")}</option>`);
+    expect(unnamed.match(/legal@example\.com/g)).toHaveLength(1);
+    expect(unnamed).toContain("set-name");
   });
 
   it("offers open on a shared address only while its team may start conversations", () => {

@@ -108,6 +108,7 @@ const inboxRow = {
   sharedDomainId: ids.shared,
   receivingAddress: null,
   fromName: "Acme",
+  replyFromName: "inbox" as const,
   expiresAt: AT,
   createdAt: AT,
 };
@@ -176,7 +177,15 @@ describe("wire serializers", () => {
   it("Inbox: Resend's fields plus the extensions; a shared inbox reports its shared domain", () => {
     const wire = inboxWire(inboxRow, counts);
     expect(keys(wire)).toEqual(
-      [...RESEND.inbox, "kind", "shared", "expires_at", "quarantined", "pending_approval"].sort(),
+      [
+        ...RESEND.inbox,
+        "kind",
+        "shared",
+        "expires_at",
+        "quarantined",
+        "pending_approval",
+        "reply_from_name",
+      ].sort(),
     );
     expect(wire).toMatchObject({
       object: "inbox",
@@ -192,7 +201,7 @@ describe("wire serializers", () => {
 
   it("InboxListItem, Label and ThreadSummary", () => {
     expect(keys(inboxListItemWire(inboxRow, counts))).toEqual(
-      [...RESEND.inboxListItem, "kind", "shared", "expires_at"].sort(),
+      [...RESEND.inboxListItem, "kind", "shared", "expires_at", "reply_from_name"].sort(),
     );
     const label = labelWire({ id: ids.label, name: "Billing", color: "#AABBCC", createdAt: AT });
     expect(keys(label)).toEqual([...RESEND.label].sort());

@@ -14,7 +14,13 @@ import { toast } from "@/components/toast";
 import { htmlToText } from "@/lib/html";
 import { firstRecipientDomain, type SendCheck, sendChecks } from "@/lib/send-checks";
 import { useTRPC } from "@/lib/trpc";
-import { type InboxDetail, nameReviewError } from "../parts";
+import {
+  FromLine,
+  type InboxDetail,
+  nameReviewError,
+  pickedFromName,
+  type ReplyFromMode,
+} from "../parts";
 
 /** How long the To field rests before its first address's domain is asked about. */
 const RECIPIENT_DEBOUNCE_MS = 400;
@@ -27,7 +33,7 @@ export function SendDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  inbox: Pick<InboxDetail, "id" | "name" | "from_name" | "email_address">;
+  inbox: Pick<InboxDetail, "id" | "name" | "from_name" | "email_address" | "reply_from">;
 }) {
   const t = useTranslations("inboxes");
   const common = useTranslations("common");
@@ -39,6 +45,7 @@ export function SendDialog({
   // The editor seeds from it on mount: the Modal unmounts it on close, so a
   // reopen shows what was typed and a send leaves it empty.
   const [html, setHtml] = useState("");
+  const [pick, setPick] = useState<ReplyFromMode | null>(null);
   const send = useMutation(
     trpc.inboxes.send.mutationOptions({
       onSuccess: (result) => {
@@ -47,6 +54,7 @@ export function SendDialog({
         setTo("");
         setSubject("");
         setHtml("");
+        setPick(null);
         onClose();
       },
     }),
@@ -73,6 +81,7 @@ export function SendDialog({
     reset();
     resetRename();
     setNaming(false);
+    setPick(null);
     onClose();
   }, [reset, resetRename, onClose]);
   const recipients = to
@@ -83,7 +92,14 @@ export function SendDialog({
   const ready = recipients.length > 0 && subject.trim() !== "" && text !== "";
   const submit = () => {
     if (!ready || send.isPending) return;
-    send.mutate({ inboxId, to: recipients, subject: subject.trim(), html, text });
+    send.mutate({
+      inboxId,
+      to: recipients,
+      subject: subject.trim(),
+      html,
+      text,
+      ...(pick ? { fromName: pick } : {}),
+    });
   };
 
   const context = useQuery(
@@ -104,7 +120,7 @@ export function SendDialog({
   const checks = sendChecks({
     subject,
     text,
-    fromName: inbox.from_name,
+    fromName: pickedFromName(inbox, pick),
     address: inbox.email_address,
     domain: context.data?.domain ? { ...context.data.domain, shared: context.data.shared } : null,
     recipientDomain,
@@ -142,46 +158,37 @@ export function SendDialog({
         }}
       >
         <div style={{ display: "grid", gap: 8 }}>
-          <p className="ms-mono" style={{ margin: 0, fontSize: 12.5, color: "var(--ms-muted)" }}>
-            {inbox.from_name ? (
-              t.rich("compose.fromNamed", {
-                fromName: inbox.from_name,
-                address: inbox.email_address,
-                name: (chunks) => (
-                  <span style={{ color: "var(--ms-bone)", fontFamily: "var(--ms-font-sans)" }}>
-                    {chunks}
-                  </span>
-                ),
-              })
-            ) : (
-              <>
-                {t("compose.from", { address: inbox.email_address })}
-                {naming ? null : (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      className="ms-link"
-                      style={{
-                        font: "inherit",
-                        fontFamily: "var(--ms-font-sans)",
-                        background: "none",
-                        border: 0,
-                        padding: 0,
-                        cursor: "pointer",
-                      }}
-                      onClick={() => {
-                        setFromName(inbox.name === inbox.email_address ? "" : inbox.name);
-                        setNaming(true);
-                      }}
-                    >
-                      {t("compose.setSenderName")}
-                    </button>
-                  </>
-                )}
-              </>
-            )}
-          </p>
+          <FromLine
+            inbox={inbox}
+            pick={pick}
+            onPick={setPick}
+            disabled={send.isPending}
+            after={
+              naming ? null : (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    className="ms-link"
+                    style={{
+                      font: "inherit",
+                      fontFamily: "var(--ms-font-sans)",
+                      background: "none",
+                      border: 0,
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => {
+                      setFromName(inbox.name === inbox.email_address ? "" : inbox.name);
+                      setNaming(true);
+                    }}
+                  >
+                    {t("compose.setSenderName")}
+                  </button>
+                </>
+              )
+            }
+          />
           {naming ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input

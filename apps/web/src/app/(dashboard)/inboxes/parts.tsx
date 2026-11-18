@@ -4,7 +4,9 @@ import { holdRisk } from "@millionsend/core/release-rules";
 import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useLocale, useTranslations } from "next-intl";
+import type { ReactNode } from "react";
 import { EnvelopeGlyph } from "@/components/email-status-icon";
+import { Select } from "@/components/select";
 import type { BadgeTone } from "@/components/status-badge";
 import { StatusTile, TONE_COLOR } from "@/components/status-tile";
 import { Tooltip } from "@/components/tooltip";
@@ -16,6 +18,8 @@ type Outputs = inferRouterOutputs<AppRouter>["inboxes"];
 /** The inbox as its page reads it: the wire Inbox plus the dashboard's own facts. */
 export type InboxDetail = Outputs["get"];
 export type ThreadRow = Outputs["threads"]["list"]["items"][number];
+/** How a person's send from the inbox is named (core REPLY_FROM_NAMES). */
+export type ReplyFromMode = InboxDetail["reply_from_name"];
 export type ThreadMessage = Outputs["threads"]["emails"]["items"][number];
 export type InboundScreening = Extract<ThreadMessage, { direction: "inbound" }>["screening"];
 /** Held mail as the release dialog reads it, whichever screen opened it. */
@@ -312,4 +316,89 @@ export function acceptFromHint(
  */
 export function acceptFromWarns(kind: string, value: InboxSafety["accept_from"]): boolean {
   return kind === "agent" && value === "anyone";
+}
+
+const FROM_LINE = { margin: 0, fontSize: 12.5, color: "var(--ms-muted)" } as const;
+
+/** The display name a send carries with `pick` (null: the inbox's setting), as FromLine shows it. */
+export function pickedFromName(
+  inbox: Pick<InboxDetail, "from_name" | "reply_from">,
+  pick: ReplyFromMode | null,
+): string | null {
+  const choices = inbox.reply_from;
+  if (!choices) return inbox.from_name;
+  const mode = pick ?? choices.default;
+  return (choices.options.find((o) => o.value === mode) ?? choices.options[0])?.name ?? null;
+}
+
+/**
+ * The From line above a composer: the name this person's send carries, as
+ * a picker when the inbox lets it carry another (reply_from). `pick` null
+ * is the inbox's setting. `after` follows the line while the inbox has no
+ * sender name.
+ */
+export function FromLine({
+  inbox,
+  pick,
+  onPick,
+  disabled = false,
+  after,
+}: {
+  inbox: Pick<InboxDetail, "email_address" | "from_name" | "reply_from">;
+  pick: ReplyFromMode | null;
+  onPick: (mode: ReplyFromMode) => void;
+  disabled?: boolean;
+  after?: ReactNode;
+}) {
+  const t = useTranslations("inboxes");
+  const choices = inbox.reply_from;
+  const address = inbox.email_address;
+  if (choices && choices.options.length > 1) {
+    return (
+      <div
+        className="ms-mono"
+        style={{ ...FROM_LINE, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+      >
+        <span>{t("compose.fromLabel")}</span>
+        <Select
+          value={pick ?? choices.default}
+          onChange={(value) => {
+            const option = choices.options.find((o) => o.value === value);
+            if (option) onPick(option.value);
+          }}
+          ariaLabel={t("compose.fromLabel")}
+          disabled={disabled}
+          options={choices.options.map((o) => ({
+            value: o.value,
+            label: o.name ?? t("compose.addressOnly"),
+          }))}
+        />
+        <span>
+          {`<${address}>`}
+          {inbox.from_name ? null : after}
+        </span>
+      </div>
+    );
+  }
+  const name = pickedFromName(inbox, pick);
+  return (
+    <p className="ms-mono" style={FROM_LINE}>
+      {name ? (
+        t.rich("compose.fromNamed", {
+          fromName: name,
+          address,
+          name: (chunks) => (
+            <span style={{ color: "var(--ms-bone)", fontFamily: "var(--ms-font-sans)" }}>
+              {chunks}
+            </span>
+          ),
+        })
+      ) : (
+        <>
+          {t("compose.from", { address })}
+          {after}
+        </>
+      )}
+    </p>
+  );
 }

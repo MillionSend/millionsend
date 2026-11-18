@@ -7,6 +7,7 @@ import {
   type ListQuery,
   MOVE_FOLDERS,
   QUARANTINE_REASONS,
+  REPLY_FROM_NAMES,
   SCREENING_VERDICTS,
   SENDER_TRUSTS,
   THREAD_FOLDERS,
@@ -25,6 +26,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const inboxIdParam = z.object({ inbox_id: z.uuid().describe("The inbox ID") });
 
 const inboxKindSchema = z.enum(INBOX_KINDS);
+
+const replyFromNameSchema = z
+  .enum(REPLY_FROM_NAMES)
+  .describe(
+    "MillionSend extension: the From display name of a team member's send from the dashboard. inbox: from_name; teammate_inbox: \"Their name (from_name)\"; teammate: their account name. An account name a From can't carry falls back to from_name, and on the shared domain from_name always applies. Sends with an API key, by an agent or as an automatic forward always use from_name.",
+  );
 
 const safetyFields = {
   accept_from: z
@@ -117,6 +124,11 @@ export const createInboxRequestSchema = z
       .describe(
         'The name recipients see, a plain name (not "Name <email>"); "" leaves it unset. On the shared domain it may not imitate a brand, and it is reviewed like username.',
       ),
+    reply_from_name: replyFromNameSchema
+      .optional()
+      .describe(
+        "MillionSend extension: see the Inbox object; defaults to teammate_inbox for kind human and inbox for agent",
+      ),
     forwarding: z
       .boolean()
       .optional()
@@ -150,6 +162,7 @@ export const updateInboxRequestSchema = z
       .describe(
         '"" removes it. On the shared domain a new one may not imitate a brand, and it is reviewed first where the instance reviews names (503 with retry-after while that review is unavailable).',
       ),
+    reply_from_name: replyFromNameSchema.optional(),
     expires_in: z
       .string()
       .nullable()
@@ -173,6 +186,7 @@ export const inboxSchema = z
       ),
     receiving_address: z.string().nullable(),
     from_name: z.string().nullable(),
+    reply_from_name: replyFromNameSchema,
     unread: z.number().int().describe("Threads with an unread message"),
     drafts: z.number().int().describe("Unsent drafts"),
     last_received: z.string().nullable(),
@@ -190,6 +204,7 @@ const inboxListItemSchema = z.object({
   name: z.string().nullable(),
   email_address: z.string(),
   from_name: z.string().nullable(),
+  reply_from_name: replyFromNameSchema,
   unread: z.number().int(),
   last_received: z.string().nullable(),
   kind: inboxKindSchema,

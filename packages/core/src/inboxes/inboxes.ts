@@ -15,7 +15,6 @@ import {
   sql,
 } from "drizzle-orm";
 import { recordAudit } from "../audit.js";
-import { isPlainName } from "../customer-text.js";
 import { imitatedBrandIn } from "../imitated-brands.js";
 import { asciiHostname } from "../org-domain.js";
 import type { Plan } from "../plans.js";
@@ -43,6 +42,7 @@ import {
   SHARED_INBOX_IDLE_TTL,
   SHARED_SUBDOMAIN_FIRST_RETRY_MS,
 } from "./limits.js";
+import { isFromName, REPLY_FROM_NAMES, type ReplyFromName } from "./reply-from.js";
 import { defaultSafety, type InboxSafety, inboxSafetySchema, safetyProblem } from "./safety.js";
 import { teamInNewTier, teamSharedSending } from "./send.js";
 import { secondsToNextUtcDay } from "./send-policy.js";
@@ -88,6 +88,8 @@ export interface CreateInboxInput {
   username?: string | undefined;
   name?: string | undefined;
   from_name?: string | undefined;
+  /** Default: teammate_inbox for kind human, inbox for agents. */
+  reply_from_name?: ReplyFromName | undefined;
   forwarding?: boolean | undefined;
   kind?: InboxKind | undefined;
   expires_in?: string | null | undefined;
@@ -165,7 +167,7 @@ const refusedOnShared = (field: string): InboxError =>
 function fromNameOf(value: string, shared: boolean): string | null | InboxError {
   const name = value.trim();
   if (name === "") return null;
-  if (!isPlainName(name, FROM_NAME_MAX) || /[:<>]/.test(name)) {
+  if (!isFromName(name)) {
     return invalid(
       `from_name must be a plain name of at most ${FROM_NAME_MAX} characters, without @ : < >, line breaks, links or phone numbers`,
     );
@@ -173,6 +175,12 @@ function fromNameOf(value: string, shared: boolean): string | null | InboxError 
   return shared && imitatedBrandIn(name, { everydayWords: false })
     ? refusedOnShared("from_name")
     : name;
+}
+
+function replyFromNameOf(value: string): ReplyFromName | InboxError {
+  return (REPLY_FROM_NAMES as readonly string[]).includes(value)
+    ? (value as ReplyFromName)
+    : invalid(`reply_from_name must be one of ${REPLY_FROM_NAMES.join(", ")}`);
 }
 
 /**
@@ -519,6 +527,10 @@ export async function createInbox(
   const shared = input.email_address === undefined;
   const fromName = input.from_name === undefined ? null : fromNameOf(input.from_name, shared);
   if (isInboxError(fromName)) return fail(fromName);
+  const replyFromName = replyFromNameOf(
+    input.reply_from_name ?? (kind === "human" ? "teammate_inbox" : "inbox"),
+  );
+  if (isInboxError(replyFromName)) return fail(replyFromName);
   const username = input.username === undefined ? undefined : usernameOf(input.username, shared);
   if (isInboxError(username)) return fail(username);
   const expiry = expiryOf(input.expires_in, now);
@@ -600,6 +612,7 @@ export async function createInbox(
               !at.shared && at.label ? `fwd-${randomAlnum(16)}@${at.label.name}` : null,
             name: name ?? emailAddress,
             fromName,
+            replyFromName,
             safety,
             expiresAt: expiry.expiresAt,
             lastUsedAt: now,
@@ -748,6 +761,7 @@ export async function updateInbox(
     patch: {
       name?: string | undefined;
       from_name?: string | undefined;
+      reply_from_name?: ReplyFromName | undefined;
       expires_in?: string | null | undefined;
     };
     /** Owners, admins and full-access keys: an earlier expiry deletes the inbox sooner, as a delete would. */
@@ -768,6 +782,11 @@ export async function updateInbox(
     const fromName = fromNameOf(p.patch.from_name, shared);
     if (isInboxError(fromName)) return fail(fromName);
     set.fromName = fromName;
+  }
+  if (p.patch.reply_from_name !== undefined) {
+    const replyFromName = replyFromNameOf(p.patch.reply_from_name);
+    if (isInboxError(replyFromName)) return fail(replyFromName);
+    set.replyFromName = replyFromName;
   }
   if (p.patch.expires_in !== undefined) {
     const expiry = expiryOf(p.patch.expires_in, now);

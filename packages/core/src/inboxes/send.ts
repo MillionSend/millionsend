@@ -69,6 +69,7 @@ import {
   RECIPIENTS_PER_SEND_MAX,
   SHARED_PAUSED_RETRY_MS,
 } from "./limits.js";
+import { type ReplyFromName, senderFrom } from "./reply-from.js";
 import {
   type AgentSendDecision,
   type AgentSendInput,
@@ -1049,6 +1050,8 @@ export interface HoldSpec {
   forwardMode?: "attachment" | undefined;
   /** Sending this existing draft: a hold marks it pending instead of writing another. */
   draftId?: string | undefined;
+  /** The From name a person picked for this send, kept on the draft. */
+  fromName?: ReplyFromName | undefined;
 }
 
 /** One send, ready for the inbox rails and the accept pipeline. */
@@ -1573,6 +1576,7 @@ interface ReplyContext {
   /** What "Re:" or "Fwd:" go in front of when the caller gives no subject. */
   subjectBase: string | null;
   from: string;
+  fromName: ReplyFromName | undefined;
   domainId: string | null;
   /** Addresses reply_all never copies. */
   own: string[];
@@ -1633,7 +1637,7 @@ function prepareReply(
     replyTarget: { automated: target.direction === "inbound" ? target.row.automated : null },
     untrustedReplyTo: untrustedReplyTos(target, c.inbox?.domainId === null),
     forwardedSecret: false,
-    hold: { type: "reply", forward: false, targetId: target.row.id },
+    hold: { type: "reply", forward: false, targetId: target.row.id, fromName: c.fromName },
     now: c.now,
   };
 }
@@ -1700,6 +1704,7 @@ async function prepareForward(
       type: "reply",
       forward: true,
       targetId: target.row.id,
+      fromName: c.fromName,
       ...(original.attached ? { forwardMode: "attachment" as const } : {}),
     },
     now: c.now,
@@ -1723,6 +1728,7 @@ async function threadContext(
     inboxId: string;
     threadId: string;
     emailId: string;
+    fromName?: ReplyFromName | undefined;
     now: Date;
   },
 ): Promise<ReplyContext | SendOutcome> {
@@ -1746,7 +1752,8 @@ async function threadContext(
     threadId: p.threadId,
     target,
     subjectBase: subject === "" ? null : subject,
-    from: inboxFrom(inbox),
+    from: await senderFrom(db, { inbox, actor: p.actor, mode: p.fromName }),
+    fromName: p.fromName,
     domainId,
     own: [inbox.emailAddress, ...(inbox.receivingAddress ? [inbox.receivingAddress] : [])],
     now: p.now,
@@ -1765,6 +1772,8 @@ export async function replyInThread(
     emailId: string;
     body: ReplyBody;
     idempotencyKey?: string | null | undefined;
+    /** A person's pick for this send (core replyFromName); ignored where it cannot apply. */
+    fromName?: ReplyFromName | undefined;
   },
 ): Promise<SendOutcome> {
   const request = {
@@ -1797,6 +1806,8 @@ export async function forwardInThread(
     emailId: string;
     body: ForwardBody;
     idempotencyKey?: string | null | undefined;
+    /** A person's pick for this send (core replyFromName); ignored where it cannot apply. */
+    fromName?: ReplyFromName | undefined;
   },
 ): Promise<SendOutcome> {
   const request = {
@@ -1831,6 +1842,7 @@ async function receivedContext(
     receivedEmailId: string;
     from: string | undefined;
     inboxId: string | undefined;
+    fromName?: ReplyFromName | undefined;
     now: Date;
   },
 ): Promise<ReplyContext | SendOutcome> {
@@ -1897,7 +1909,8 @@ async function receivedContext(
         verdict: membership.verdict,
       },
       subjectBase: row.subject === "" ? null : row.subject,
-      from: inboxFrom(inbox),
+      from: await senderFrom(db, { inbox, actor: p.actor, mode: p.fromName }),
+      fromName: p.fromName,
       domainId,
       own: [inbox.emailAddress, ...(inbox.receivingAddress ? [inbox.receivingAddress] : [])],
       now: p.now,
@@ -1923,6 +1936,7 @@ async function receivedContext(
     },
     subjectBase: row.subject === "" ? null : row.subject,
     from,
+    fromName: undefined,
     domainId: verdict.domainId,
     own: [from, ...row.receivedFor],
     now: p.now,
@@ -1939,6 +1953,8 @@ export async function replyToReceivedEmail(
     receivedEmailId: string;
     body: ReplyBody & { from?: string | undefined; inbox_id?: string | undefined };
     idempotencyKey?: string | null | undefined;
+    /** A person's pick for this send (core replyFromName); ignored where it cannot apply. */
+    fromName?: ReplyFromName | undefined;
   },
 ): Promise<SendOutcome> {
   const request = {
@@ -1955,6 +1971,7 @@ export async function replyToReceivedEmail(
         ...p,
         from: p.body.from,
         inboxId: p.body.inbox_id,
+        fromName: p.fromName,
         now: new Date(),
       });
       if (isOutcome(ctx)) return ctx;
@@ -1978,6 +1995,8 @@ export async function forwardReceivedEmail(
       mode?: "inline" | "attachment" | undefined;
     };
     idempotencyKey?: string | null | undefined;
+    /** A person's pick for this send (core replyFromName); ignored where it cannot apply. */
+    fromName?: ReplyFromName | undefined;
   },
 ): Promise<SendOutcome> {
   const request = {
@@ -1994,6 +2013,7 @@ export async function forwardReceivedEmail(
         ...p,
         from: p.body.from,
         inboxId: p.body.inbox_id,
+        fromName: p.fromName,
         now: new Date(),
       });
       if (isOutcome(ctx)) return ctx;
@@ -2021,6 +2041,7 @@ export async function sendNewFromInbox(
       text?: string | undefined;
     };
     requiresApproval?: boolean | undefined;
+    fromName?: ReplyFromName | undefined;
   },
 ): Promise<SendOutcome> {
   const now = new Date();
@@ -2045,7 +2066,7 @@ export async function sendNewFromInbox(
     actor: p.actor,
     inbox,
     threadId: null,
-    from: inboxFrom(inbox),
+    from: await senderFrom(db, { inbox, actor: p.actor, mode: p.fromName }),
     domainId,
     to,
     cc,
@@ -2060,7 +2081,7 @@ export async function sendNewFromInbox(
     replyTarget: null,
     untrustedReplyTo: [],
     forwardedSecret: false,
-    hold: { type: "standalone", forward: false, targetId: null },
+    hold: { type: "standalone", forward: false, targetId: null, fromName: p.fromName },
     now,
   });
 }

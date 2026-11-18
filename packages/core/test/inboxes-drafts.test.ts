@@ -14,7 +14,7 @@ import {
   sendDraft,
   updateDraft,
 } from "../src/inboxes/drafts.js";
-import { forwardInThread, type SendOutcome } from "../src/inboxes/send.js";
+import { forwardInThread, type SendOutcome, sendNewFromInbox } from "../src/inboxes/send.js";
 import type { DraftWire } from "../src/inboxes/types.js";
 import {
   addInbox,
@@ -428,6 +428,51 @@ describe("sendDraft", () => {
       kind: "sent",
       email: { subject: "Fwd: Question", attachments: [{ id: "0", filename: "a.pdf" }] },
     });
+  });
+});
+
+describe("sendDraft's From name", () => {
+  it("follows the draft's author: a person's pick or the inbox setting; an agent's stays the inbox", async () => {
+    const person: InboxActor = { kind: "user", userId: "drafts-ada" };
+    await db.insert(schema.user).values({
+      id: person.userId,
+      name: "Ada",
+      email: "ada@drafts.example",
+    });
+    const inbox = await addInbox(w, { local: "legal", fromName: "Legal" });
+    await db
+      .update(schema.inboxes)
+      .set({ replyFromName: "teammate_inbox" })
+      .where(eq(schema.inboxes.id, inbox.id));
+    const fromOf = (out: SendOutcome) => (out.kind === "sent" ? out.email.from : out.kind);
+
+    const own = await create(inbox, { to: "a@example.org", subject: "Hi", text: "x" }, person);
+    expect(fromOf(await send(inbox, own.draft, person))).toBe(
+      `"Ada (Legal)" <${inbox.emailAddress}>`,
+    );
+
+    const agents = await create(inbox, { to: "b@example.org", subject: "Hi", text: "x" });
+    await send(inbox, agents.draft, inboxKey(inbox));
+    expect(fromOf(await send(inbox, agents.draft, person))).toBe(`Legal <${inbox.emailAddress}>`);
+
+    const picked = await create(inbox, { to: "c@example.org", subject: "Hi", text: "x" }, person);
+    await db
+      .update(schema.inboxDrafts)
+      .set({ replyFromName: "teammate" })
+      .where(eq(schema.inboxDrafts.id, picked.draft.id));
+    expect(fromOf(await send(inbox, picked.draft, TEAM_KEY))).toBe(
+      `Ada <${inbox.emailAddress}>`,
+    );
+
+    const direct = await sendNewFromInbox(db, w.deps, {
+      teamId: w.teamId,
+      billing: await billing(w),
+      actor: person,
+      inboxId: inbox.id,
+      message: { to: ["d@example.org"], subject: "Hi", text: "x" },
+      fromName: "inbox",
+    });
+    expect(fromOf(direct)).toBe(`Legal <${inbox.emailAddress}>`);
   });
 });
 
