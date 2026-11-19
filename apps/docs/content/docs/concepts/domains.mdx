@@ -46,9 +46,9 @@ what public DNS answers right now) and, when a row is not verified, a one-line
 ## Regions
 
 A deployment provisions identities in the SES regions it serves — its
-`AWS_REGIONS`, or the one region in `AWS_REGION`; MillionSend Cloud serves
-`sa-east-1` (São Paulo) today. The dashboard's add-domain form lists the
-served regions, holds back one still in the SES sandbox while another has
+`AWS_REGIONS`, or the one region in `AWS_REGION`. The dashboard's
+add-domain form lists the served regions (on MillionSend Cloud, the regions
+offered right now), holds back one still in the SES sandbox while another has
 production access, and defaults to the first production region. The API's
 optional `region` field (the `create_domain` MCP tool included) accepts any
 served region — the values its schema lists — and defaults to the first;
