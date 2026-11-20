@@ -8,17 +8,21 @@ export function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+const MAX_CODE_POINT = 0x10ffff;
+
 /**
  * Inverse of escapeHtml, plus the numeric references other escapers emit
  * (Handlebars writes `=` as `&#x3D;`, React `'` as `&#x27;`). Ampersand
- * last so `&amp;lt;` decodes to the literal `&lt;`, not `<`.
+ * last so `&amp;lt;` decodes to the literal `&lt;`, not `<`. A reference past
+ * the last code point stays as written: String.fromCodePoint throws on it,
+ * and the body it sits in is a customer's.
  */
 export function unescapeHtml(value: string): string {
+  const fromCode = (reference: string, code: number) =>
+    code <= MAX_CODE_POINT ? String.fromCodePoint(code) : reference;
   return value
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (m, hex: string) => fromCode(m, Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (m, dec: string) => fromCode(m, Number(dec)))
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
     .replaceAll("&quot;", '"')
