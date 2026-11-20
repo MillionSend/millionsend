@@ -40,7 +40,11 @@ export function applyMergeFields(
             ? contact.firstName
             : field === "LAST_NAME"
               ? contact.lastName
-              : (contact.properties[field] ?? null);
+              : // Own keys only: "constructor" or "toString" would otherwise
+                // resolve to Object.prototype's functions.
+                Object.hasOwn(contact.properties, field)
+                ? (contact.properties[field] ?? null)
+                : null;
       if (!value) return fallback ?? "";
       if (!opts.html) return value;
       const opensUrl = URL_ATTRIBUTE_OPEN.test(content.slice(Math.max(0, offset - 12), offset));
