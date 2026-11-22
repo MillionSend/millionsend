@@ -6,6 +6,7 @@
     "logoAdd": "Add a logo",
     "logoChange": "Change logo",
     "submit": "Create team",
+    "signedInAs": "Signed in as {email}.",
     "error": "Team creation failed. Try again."
   },
   "title": "Send your first email",

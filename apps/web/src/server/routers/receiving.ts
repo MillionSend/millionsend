@@ -395,6 +395,7 @@ export const receivingRouter = router({
     .input(
       z.object({
         id: z.uuid(),
+        html: z.string().max(1_000_000).optional(),
         text: z.string().min(1).max(1_000_000),
         replyAll: z.boolean().optional(),
         inboxId: z.uuid().optional(),
@@ -408,7 +409,12 @@ export const receivingRouter = router({
           billing: await fetchQuotaRow(ctx.db, ctx.teamId),
           actor: userActor(ctx),
           receivedEmailId: input.id,
-          body: { text: input.text, reply_all: input.replyAll, inbox_id: input.inboxId },
+          body: {
+            html: input.html,
+            text: input.text,
+            reply_all: input.replyAll,
+            inbox_id: input.inboxId,
+          },
           fromName: input.fromName,
         }),
       ),
@@ -419,6 +425,7 @@ export const receivingRouter = router({
       z.object({
         id: z.uuid(),
         to: recipients.min(1),
+        html: z.string().max(1_000_000).optional(),
         text: z.string().max(1_000_000).optional(),
         mode: z.enum(["inline", "attachment"]).default("inline"),
         inboxId: z.uuid().optional(),
@@ -434,6 +441,7 @@ export const receivingRouter = router({
           receivedEmailId: input.id,
           body: {
             to: input.to,
+            html: input.html || undefined,
             text: input.text || undefined,
             mode: input.mode,
             inbox_id: input.inboxId,

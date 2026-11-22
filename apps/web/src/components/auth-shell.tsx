@@ -1,7 +1,14 @@
 import { useTranslations } from "next-intl";
 
 /** Centered card on the void with the wordmark above — login/signup/onboarding frame. */
-export function AuthShell({ children }: { children: React.ReactNode }) {
+export function AuthShell({
+  children,
+  footer,
+}: {
+  children: React.ReactNode;
+  /** A line under the card, e.g. who is signed in. */
+  footer?: React.ReactNode;
+}) {
   const t = useTranslations("common");
   return (
     <main
@@ -29,6 +36,11 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
       >
         {children}
       </div>
+      {footer ? (
+        <p style={{ margin: "18px 0 0", fontSize: "var(--ms-fs-label)", color: "var(--ms-muted)" }}>
+          {footer}
+        </p>
+      ) : null}
     </main>
   );
 }

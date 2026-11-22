@@ -9,11 +9,18 @@ import { useRef, useState } from "react";
 import { AuthShell } from "@/components/auth-shell";
 import { PlusGlyph } from "@/components/icons/nav-icons";
 import { BtnSpinner } from "@/components/spinner";
+import { signOutToLogin } from "@/lib/auth-client";
 import { TEAM_LOGO_ACCEPT } from "@/lib/image-type";
 import { uploadTeamLogo } from "@/lib/team-logo-api";
 import { useTRPC } from "@/lib/trpc";
 
-export function OnboardingForm({ logoUploadsEnabled = false }: { logoUploadsEnabled?: boolean }) {
+export function OnboardingForm({
+  userEmail,
+  logoUploadsEnabled = false,
+}: {
+  userEmail: string;
+  logoUploadsEnabled?: boolean;
+}) {
   const t = useTranslations("onboarding.team");
   const common = useTranslations("common");
   const router = useRouter();
@@ -50,7 +57,27 @@ export function OnboardingForm({ logoUploadsEnabled = false }: { logoUploadsEnab
   }
 
   return (
-    <AuthShell>
+    <AuthShell
+      footer={
+        <>
+          {t("signedInAs", { email: userEmail })}{" "}
+          <button
+            type="button"
+            className="ms-link"
+            style={{
+              background: "none",
+              border: 0,
+              padding: 0,
+              font: "inherit",
+              cursor: "pointer",
+            }}
+            onClick={signOutToLogin}
+          >
+            {common("signOut")}
+          </button>
+        </>
+      }
+    >
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 16 }}>
         <h1 className="ms-display" style={{ fontSize: "var(--ms-fs-h2)", margin: 0 }}>
           {t("title")}

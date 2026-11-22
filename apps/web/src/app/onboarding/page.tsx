@@ -18,7 +18,8 @@ export default async function OnboardingPage() {
     session.user.id,
     (await cookies()).get(ACTIVE_TEAM_COOKIE)?.value,
   );
-  if (!membership) return <OnboardingForm logoUploadsEnabled={uploadsEnabled()} />;
+  if (!membership)
+    return <OnboardingForm userEmail={session.user.email} logoUploadsEnabled={uploadsEnabled()} />;
   // Post-team onboarding lives in the app chrome (canvas Row 2): the sidebar
   // itself is the skip affordance — every nav link leads to the dashboard.
   return (

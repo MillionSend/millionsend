@@ -418,6 +418,83 @@ describe("listThreads", () => {
       }),
     ).toEqual({ error: { status: 404, name: "not_found", message: "Inbox not found." } });
   });
+
+  it("filters by awaiting approval, held and attachments, in list and search", async () => {
+    const s = await setup("flag-threads");
+    const plain = await thread(s, { subject: "Plain", last: at(1) });
+    await inbound(s, plain, { subject: "Plain", created: at(1) });
+    const draft = await thread(s, { subject: "Draft", last: at(2) });
+    await inbound(s, draft, { subject: "Draft", created: at(2) });
+    const pending = await thread(s, { subject: "Pending", last: at(3) });
+    await inbound(s, pending, { subject: "Pending", created: at(3) });
+    for (const [threadId, status] of [
+      [draft, "draft"],
+      [pending, "pending_approval"],
+    ] as const) {
+      await db.insert(schema.inboxDrafts).values({
+        teamId: s.teamId,
+        inboxId: s.inboxId,
+        type: "reply",
+        threadId,
+        replyToEmailId: randomUUID(),
+        status,
+        createdBy: "system",
+      });
+    }
+    const mixed = await thread(s, { subject: "Mixed", last: at(4) });
+    await inbound(s, mixed, { subject: "Mixed", created: at(4) });
+    await inbound(s, mixed, {
+      subject: "Mixed",
+      held: "quarantined",
+      attach: true,
+      created: at(4),
+    });
+    const heldOnly = await thread(s, { subject: "Held", last: at(5) });
+    await inbound(s, heldOnly, { subject: "Held", held: "quarantined", created: at(5) });
+    const received = await thread(s, { subject: "Invoice", last: at(6) });
+    await inbound(s, received, { subject: "Invoice", attach: true, created: at(6) });
+    const sent = await thread(s, { subject: "Quote", last: at(7) });
+    await inbound(s, sent, { subject: "Quote", created: at(7) });
+    await outbound(s, sent, { subject: "Quote", to: ["ana@sender.test"], attach: true });
+
+    const list = (query: Parameters<typeof listThreads>[1]["query"], agentView = false) =>
+      listThreads(db, { teamId: s.teamId, inboxId: s.inboxId, query, agentView });
+    const search = (query: Parameters<typeof listThreads>[1]["query"]) =>
+      searchThreads(db, {
+        teamId: s.teamId,
+        inboxId: s.inboxId,
+        query: { ...query, query: "sender.test" },
+        agentView: false,
+      });
+    expect(ids(await list({ awaitingApproval: true }))).toEqual([pending]);
+    expect(ids(await list({ awaitingApproval: false }))).toEqual([
+      sent,
+      received,
+      mixed,
+      pending,
+      draft,
+      plain,
+    ]);
+    expect(ids(await list({ held: true, includeHeld: true }))).toEqual([heldOnly, mixed]);
+    // Received attachments count only on mail the view may see.
+    expect(ids(await list({ hasAttachments: true }))).toEqual([sent, received]);
+    expect(ids(await list({ hasAttachments: true, includeHeld: true }))).toEqual([
+      sent,
+      received,
+      mixed,
+    ]);
+    expect(ids(await search({ awaitingApproval: true }))).toEqual([pending]);
+    expect(ids(await search({ held: true, includeHeld: true }))).toEqual([heldOnly, mixed]);
+    expect(ids(await search({ hasAttachments: true }))).toEqual([sent, received]);
+
+    // SECURITY: held never reveals which threads hold held mail without includeHeld.
+    expect(ids(await list({ held: true }))).toEqual([]);
+    expect(ids(await list({ held: true, includeHeld: true }, true))).toEqual([]);
+    expect(ids(await list({ hasAttachments: true, includeHeld: true }, true))).toEqual([
+      sent,
+      received,
+    ]);
+  });
 });
 
 describe("searchThreads", () => {

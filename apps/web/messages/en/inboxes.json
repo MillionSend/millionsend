@@ -27,6 +27,17 @@
   "notSpam": "Not spam",
   "restore": "Restore",
   "trashRetention": "Threads in Trash are deleted {days, plural, one {# day} other {# days}} after they're moved here.",
+  "filter": {
+    "button": "Filter",
+    "buttonCount": "Filter, {count} active",
+    "status": "Status",
+    "attention": "Needs attention",
+    "awaiting": "Awaiting approval",
+    "held": "Held / quarantined",
+    "attachments": "Has attachments",
+    "clear": "Clear filters",
+    "noMatch": "No threads match these filters."
+  },
   "labels": {
     "edit": "Edit label",
     "editHint": "Press the right arrow to edit this label",
@@ -473,6 +484,7 @@
     "message": "Message",
     "messagePlaceholder": "Write your message…",
     "note": "Note",
+    "notePlaceholder": "Add a note (optional)…",
     "mode": "Forward as",
     "inline": "Inline, under the note",
     "attachment": "An attached .eml file",

@@ -6,6 +6,7 @@
     "logoAdd": "Adicionar uma logo",
     "logoChange": "Trocar a logo",
     "submit": "Criar equipe",
+    "signedInAs": "Conectado como {email}.",
     "error": "Falha ao criar a equipe. Tente de novo."
   },
   "title": "Envie seu primeiro e-mail",

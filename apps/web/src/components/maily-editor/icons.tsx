@@ -118,6 +118,13 @@ export function ClearFormatIcon(p: IconProps) {
     </Svg>
   );
 }
+export function ExpandIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9.2 6.8M2.5 13.5l4.3-4.3" />
+    </Svg>
+  );
+}
 export function VariableIcon(p: IconProps) {
   return (
     <Svg {...p}>

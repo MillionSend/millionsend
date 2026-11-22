@@ -69,6 +69,12 @@ export interface ThreadListQuery {
   folders?: ThreadFolder[] | undefined;
   labels?: string[] | undefined;
   read?: boolean | undefined;
+  /** true keeps only threads with a draft awaiting approval. */
+  awaitingApproval?: boolean | undefined;
+  /** true keeps only threads with a held message; matches nothing without includeHeld. */
+  held?: boolean | undefined;
+  /** true keeps only threads with a message carrying an attachment. */
+  hasAttachments?: boolean | undefined;
   limit?: number | undefined;
   after?: string | undefined;
   before?: string | undefined;
@@ -93,6 +99,7 @@ const r = schema.receivedEmails;
 const e = schema.emails;
 const l = schema.inboxLabels;
 const tl = schema.inboxThreadLabels;
+const d = schema.inboxDrafts;
 
 type ThreadRow = typeof th.$inferSelect;
 type InboxRow = typeof schema.inboxes.$inferSelect;
@@ -208,7 +215,7 @@ async function knownLabels(
   return missing === undefined ? wanted : labelNotFound(missing);
 }
 
-/** The thread-level filters list and search share: folders, labels, read state, visibility. */
+/** The thread-level filters list and search share: folders, labels, read state, flags, visibility. */
 async function threadScope(
   db: Db,
   p: { teamId: string; inboxId: string; query: ThreadListQuery; includeHeld: boolean },
@@ -229,6 +236,17 @@ async function threadScope(
       ? sql`exists (select 1 from ${tl} where ${tl.threadId} = ${th.id} and ${inArray(tl.labelId, labels)})`
       : undefined,
     p.query.read === undefined ? undefined : p.query.read ? sql`not ${hasUnread}` : hasUnread,
+    p.query.awaitingApproval
+      ? sql`exists (select 1 from ${d} where ${d.inboxId} = ${th.inboxId} and ${d.threadId} = ${th.id} and ${d.status} = 'pending_approval')`
+      : undefined,
+    p.query.held
+      ? p.includeHeld
+        ? sql`exists (select 1 from ${m} where ${m.threadId} = ${th.id} and ${m.quarantinedAt} is not null and ${m.releasedAt} is null)`
+        : sql`false`
+      : undefined,
+    p.query.hasAttachments
+      ? sql`(exists (select 1 from ${m} join ${r} on ${r.id} = ${m.receivedEmailId} where ${m.threadId} = ${th.id} and ${counted(p.includeHeld)} and ${r.attachmentCount} > 0) or exists (select 1 from ${e} where ${e.threadId} = ${th.id} and ${e.attachments} is not null))`
+      : undefined,
     hasMessage(p.includeHeld),
   ) as SQL;
 }
