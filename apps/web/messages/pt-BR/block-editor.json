@@ -9,7 +9,8 @@
     "alignLeft": "Alinhar à esquerda",
     "alignCenter": "Centralizar",
     "alignRight": "Alinhar à direita",
-    "clear": "Limpar formatação"
+    "clear": "Limpar formatação",
+    "expand": "Expandir editor"
   },
   "panel": {
     "link": "Link",

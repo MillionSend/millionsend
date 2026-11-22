@@ -148,19 +148,30 @@ body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
 .ms-maily-compact .ms-maily-surface {
   min-height: 120px;
 }
+/* Expanded for a long message: still short of the screen, or of the thread
+   pane under --ms-fill-top, so the send buttons below stay in reach. */
+.ms-maily-compact.ms-maily-expanded {
+  --ms-maily-expanded-h: max(
+    200px,
+    min(480px, 70vh, calc(100dvh - var(--ms-fill-top, 0px) - 160px))
+  );
+}
+.ms-maily.ms-maily-compact.ms-maily-expanded .ProseMirror {
+  min-height: var(--ms-maily-expanded-h);
+  max-height: max(200px, min(70vh, calc(100dvh - var(--ms-fill-top, 0px) - 160px)));
+}
+.ms-maily-compact.ms-maily-expanded .ms-maily-surface {
+  min-height: var(--ms-maily-expanded-h);
+}
 /* A text field marks focus with its caret alone. Tiptap gives the body
    tabindex="0", which the global [tabindex="0"] ring would otherwise box. */
 .ms-maily .ProseMirror:focus-visible {
   box-shadow: none;
 }
-/* Maily's selection bubble offers headings, alignment, colors and its footer
-   block, all of which a message body leaves out; the toolbar has the rest. */
-.ms-maily-compact [data-tippy-root] {
-  display: none;
-}
-/* Maily mounts those bubble menus in flow for a moment, wider than a phone:
+/* Maily mounts its bubble menus in flow for a moment, wider than a phone:
    they would widen the thread pane, and the phone would zoom the page out to
-   fit and lose its scroll position. The body keeps its width to itself. */
+   fit and lose its scroll position. The body keeps its width to itself (a
+   phone wraps the selection bubble to fit, below, rather than clip it). */
 .ms-maily-compact .ms-maily-wrap {
   contain: inline-size;
   overflow-x: clip;
@@ -558,6 +569,10 @@ body:has(.ms-modal-overlay):not(:has(.ms-modal-overlay .ms-maily))
    second row inside a phone screen instead of running off its edge; Maily
    positions the toolbar from its measured size. */
 @media (max-width: 639px) {
+  .ms-maily-compact [data-tippy-root] [class~="mly:flex"][class~="mly:rounded-lg"] {
+    flex-wrap: wrap;
+    max-width: calc(100vw - 48px);
+  }
   .ms-maily [class~="mly:w-max"][class~="mly:rounded-lg"] {
     max-width: calc(100vw - 24px);
     margin-inline: 12px;

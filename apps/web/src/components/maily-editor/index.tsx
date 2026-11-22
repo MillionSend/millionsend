@@ -28,9 +28,9 @@ import {
 import "@maily-to/core/style.css";
 import "./maily-theme.css";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMailyDoc, type MailyDoc } from "@/lib/email-doc";
-import { withoutClasses } from "@/lib/html";
+import { messageHtml } from "@/lib/html";
 import { MERGE_FIELDS_I18N_NS, type MergeFieldOption, makeMergeToken } from "@/lib/merge-fields";
 import { refusedAsReadOnly } from "@/lib/read-only";
 import { VariableIcon } from "./icons";
@@ -71,9 +71,9 @@ export interface MailyEditorChange {
 }
 
 /**
- * A message body (a reply, a new email) rather than an email design: marks,
- * lists and links only, "/" and "@" insert nothing, every change carries the
- * editor's own html, and ⌘↵ / Ctrl↵ calls onSubmit.
+ * A message body (a reply, a new email) rather than an email design: "/"
+ * offers the blocks a message can carry, "@" inserts nothing, every change
+ * carries the editor's own html, and ⌘↵ / Ctrl↵ calls onSubmit.
  */
 export interface MailyEditorCompact {
   placeholder: string;
@@ -81,6 +81,8 @@ export interface MailyEditorCompact {
   onSubmit: () => void;
   /** Focus the editor once it mounts (read on mount only). */
   autoFocus?: boolean;
+  /** Read-only while a send or save is in flight, so no keystroke is lost to it. */
+  disabled?: boolean;
 }
 
 export interface MailyEditorProps {
@@ -115,6 +117,11 @@ const SLASH_BLOCKS = [
   [section, "section"],
 ] as const;
 
+/** A message body's blocks: no layout ones and no page-sized heading. */
+const COMPACT_SLASH_BLOCKS = SLASH_BLOCKS.filter(
+  ([, key]) => !["heading1", "spacer", "columns", "section"].includes(key),
+);
+
 /** Node types that render their own inner placeholder (or none at all). */
 const NO_PLACEHOLDER_NODES = new Set([
   "columns",
@@ -145,6 +152,7 @@ export function MailyEditor({
   compactRef.current = compact;
 
   const [editor, setEditor] = useState<TiptapEditor | null>(null);
+  const [expanded, setExpanded] = useState(false);
   // Bumped on every editor transaction so the toolbar's active/can() states
   // track the selection. The Maily <Editor> keeps stable props, so it never
   // re-initialises from these re-renders.
@@ -169,7 +177,7 @@ export function MailyEditor({
     (ed: TiptapEditor) => {
       onChangeRef.current({
         document: liveDoc.current,
-        ...(isCompact ? { html: ed.isEmpty ? "" : withoutClasses(ed.getHTML()) } : {}),
+        ...(isCompact ? { html: ed.isEmpty ? "" : messageHtml(ed.getHTML()) } : {}),
       });
     },
     [isCompact],
@@ -209,9 +217,9 @@ export function MailyEditor({
   }, []);
 
   const extensions = useMemo(() => {
-    // A message body has no blocks or merge fields. Maily re-adds its own
-    // slash and variable menus unless same-name extensions replace them, so
-    // compact mode passes them with suggestions that never open.
+    // A message body has no merge fields. Maily re-adds its own variable
+    // menu unless a same-name extension replaces it, so compact mode passes
+    // one whose suggestions never open.
     const never = { allow: () => false };
     return [
       // Extended with our own node view: the in-content pill and its edit
@@ -243,18 +251,16 @@ export function MailyEditor({
       // Same-name extensions replace Maily's defaults — that is how the slash
       // menu and placeholder become localizable at all.
       SlashCommandExtension.configure({
-        suggestion: isCompact
-          ? { ...getSlashCommandSuggestions([]), ...never }
-          : getSlashCommandSuggestions([
-              {
-                title: t("slash.group"),
-                commands: SLASH_BLOCKS.map(([block, key]) => ({
-                  ...block,
-                  title: t(`slash.${key}.title`),
-                  description: t(`slash.${key}.desc`),
-                })),
-              },
-            ]),
+        suggestion: getSlashCommandSuggestions([
+          {
+            title: t("slash.group"),
+            commands: (isCompact ? COMPACT_SLASH_BLOCKS : SLASH_BLOCKS).map(([block, key]) => ({
+              ...block,
+              title: t(`slash.${key}.title`),
+              description: t(`slash.${key}.desc`),
+            })),
+          },
+        ]),
       }),
       PlaceholderExtension.configure({
         placeholder: ({ editor, node }) => {
@@ -309,6 +315,10 @@ export function MailyEditor({
     },
     [emit, emitOnCreate],
   );
+  const disabled = compact?.disabled ?? false;
+  useEffect(() => {
+    editor?.setEditable(!disabled, false);
+  }, [editor, disabled]);
   const onUpdate = useCallback(
     (ed: TiptapEditor) => {
       liveDoc.current = ed.getJSON() as MailyDoc;
@@ -320,19 +330,38 @@ export function MailyEditor({
   // Captured ahead of ProseMirror, whose Mod-Enter inserts a line break;
   // stopping it also keeps an enclosing Modal's own ⌘↵ from sending twice.
   // Like the Modal's, it is a send no button carries, so it asks read-only.
+  // While the slash menu is open (Maily mounts it on <body> only then),
+  // Enter is its pick, so it passes through to ProseMirror.
   const onSubmitKey = (event: React.KeyboardEvent) => {
     if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    if (document.getElementById("slash-command")) return;
     event.preventDefault();
     event.stopPropagation();
     if (!refusedAsReadOnly()) compactRef.current?.onSubmit();
   };
+  // A key the editor used (the slash menu's Enter pick or Escape close) ends
+  // here, before a Modal's or a pane's own ⌘↵ / Esc on document acts on it.
+  const onUsedKey = (event: React.KeyboardEvent) => {
+    if (event.defaultPrevented && (event.key === "Enter" || event.key === "Escape")) {
+      event.stopPropagation();
+    }
+  };
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: key routing for the editor inside, not a control
     <div
-      className={isCompact ? "ms-maily ms-maily-compact" : "ms-maily"}
+      className={
+        isCompact ? `ms-maily ms-maily-compact${expanded ? " ms-maily-expanded" : ""}` : "ms-maily"
+      }
       onKeyDownCapture={isCompact ? onSubmitKey : undefined}
+      onKeyDown={isCompact ? onUsedKey : undefined}
     >
-      <EditorToolbar editor={editor} fields={fields} compact={isCompact} />
+      <EditorToolbar
+        editor={editor}
+        fields={fields}
+        compact={isCompact}
+        {...(isCompact ? { expand: { on: expanded, toggle: () => setExpanded((on) => !on) } } : {})}
+      />
       <div className="ms-maily-surface">
         {/* Spread the seed so only the one set key (contentJson OR contentHtml)
             is passed — exactOptionalPropertyTypes rejects an explicit undefined. */}

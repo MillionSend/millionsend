@@ -27,6 +27,17 @@
   "notSpam": "Não é spam",
   "restore": "Restaurar",
   "trashRetention": "As conversas na Lixeira são excluídas {days, plural, one {# dia} other {# dias}} depois de chegarem aqui.",
+  "filter": {
+    "button": "Filtrar",
+    "buttonCount": "Filtrar, {count, plural, one {# ativo} other {# ativos}}",
+    "status": "Status",
+    "attention": "Precisam de atenção",
+    "awaiting": "Aguardando aprovação",
+    "held": "Retidas / em quarentena",
+    "attachments": "Com anexos",
+    "clear": "Limpar filtros",
+    "noMatch": "Nenhuma conversa corresponde a esses filtros."
+  },
   "labels": {
     "edit": "Editar etiqueta",
     "editHint": "Aperte a seta para a direita para editar esta etiqueta",
@@ -473,6 +484,7 @@
     "message": "Mensagem",
     "messagePlaceholder": "Escreva sua mensagem…",
     "note": "Nota",
+    "notePlaceholder": "Adicione uma nota (opcional)…",
     "mode": "Encaminhar como",
     "inline": "No corpo, abaixo da nota",
     "attachment": "Um arquivo .eml anexado",

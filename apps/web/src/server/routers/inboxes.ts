@@ -818,6 +818,7 @@ export const inboxesRouter = router({
               cc: recipients,
               bcc: recipients,
               subject: z.string().max(2000),
+              html: z.string().max(1_000_000),
               text: z.string().max(1_000_000),
             })
             .partial(),
@@ -1064,6 +1065,9 @@ function threadListInput() {
     folders: z.array(z.enum(THREAD_FOLDERS)).max(5).optional(),
     labels: z.array(z.uuid()).max(50).optional(),
     read: z.boolean().optional(),
+    awaitingApproval: z.boolean().optional(),
+    held: z.boolean().optional(),
+    hasAttachments: z.boolean().optional(),
   };
 }
 
@@ -1071,6 +1075,9 @@ function threadQuery(input: {
   folders?: (typeof THREAD_FOLDERS)[number][] | undefined;
   labels?: string[] | undefined;
   read?: boolean | undefined;
+  awaitingApproval?: boolean | undefined;
+  held?: boolean | undefined;
+  hasAttachments?: boolean | undefined;
   limit: number;
   cursor?: string | undefined;
 }) {
@@ -1078,6 +1085,9 @@ function threadQuery(input: {
     folders: input.folders,
     labels: input.labels,
     read: input.read,
+    awaitingApproval: input.awaitingApproval,
+    held: input.held,
+    hasAttachments: input.hasAttachments,
     limit: input.limit,
     after: input.cursor,
     includeHeld: true,

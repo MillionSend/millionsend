@@ -407,7 +407,7 @@ describe("the open thread", () => {
     const save = button("Save draft");
     await act(async () => save.focus());
     await press(save, "Escape");
-    expect($("section textarea")).not.toBeNull();
+    expect($("section [data-draft-editing]")).not.toBeNull();
     expect($("section h2")).not.toBeNull();
   });
 

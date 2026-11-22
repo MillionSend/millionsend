@@ -5,7 +5,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { DotParts } from "@/components/dot-parts";
 import { DraftBanner } from "@/components/draft-banner";
 import {
@@ -31,11 +31,12 @@ import { Tooltip } from "@/components/tooltip";
 import { authenticatedSender } from "@/lib/auth-result";
 import { isForwardSubject } from "@/lib/email-preview";
 import { addrSpec, formatBytes, formatRelative, mailDomain, senderName } from "@/lib/format";
-import { htmlToText } from "@/lib/html";
+import { htmlToText, textAsHtml } from "@/lib/html";
 import { isReadOnly } from "@/lib/read-only";
 import { useTRPC } from "@/lib/trpc";
 import { oneOf, useUrlState } from "@/lib/url-state";
 import { useEscape } from "@/lib/use-escape";
+import { useFillViewport } from "@/lib/use-fill-viewport";
 import { INBOX_POLL_MS, useRefreshInboxUnread } from "@/lib/use-inbox-unread";
 import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
@@ -59,6 +60,14 @@ import {
 } from "../parts";
 import { ReleaseButton } from "../release-dialog";
 import { LabelBadge, LabelsMenu } from "./labels";
+import {
+  ActiveFilters,
+  filterInput,
+  hasFilters,
+  NO_FILTERS,
+  ThreadFilterMenu,
+  useThreadFilters,
+} from "./thread-filters";
 
 const FOLDERS = ["inbox", "archive", "spam", "sent", "trash"] as const;
 const MOVE_TO = ["inbox", "archive", "spam", "trash"] as const;
@@ -92,11 +101,24 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   // Only a click shows the spinner: the poll below stays quiet.
   const [refreshing, setRefreshing] = useState(false);
   const query = useDeferredValue(search.trim());
-  const base = { inboxId: inbox.id, folders: [folder], limit: 50 };
+  const [filterParams, setFilters] = useThreadFilters();
+  const labelList = useQuery(trpc.inboxes.labels.list.queryOptions({ inboxId: inbox.id }));
+  const labels = labelList.data ?? [];
+  // An unknown label id fails the whole list, and the URL's are untrusted (or
+  // deleted since): only the inbox's own go through, once they are known.
+  const filters = {
+    ...filterParams,
+    labels: filterParams.labels.filter((id) => labels.some((label) => label.id === id)),
+  };
+  const filtersReady = filterParams.labels.length === 0 || !labelList.isPending;
+  const filtered = hasFilters(filters);
+  const base = { inboxId: inbox.id, folders: [folder], limit: 50, ...filterInput(filters) };
+  const splitRef = useRef<HTMLDivElement>(null);
+  useFillViewport(splitRef, Boolean(threadId));
   const listed = useInfiniteQuery(
     trpc.inboxes.threads.list.infiniteQueryOptions(base, {
       getNextPageParam: (page) => page.nextCursor,
-      enabled: query === "",
+      enabled: query === "" && filtersReady,
       // Not under a support view, which counts every read on its grant, nor past
       // the first page, since each loaded page refetches in turn; "Atualizar" covers both.
       refetchInterval: (list) =>
@@ -106,11 +128,22 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   const searched = useInfiniteQuery(
     trpc.inboxes.threads.search.infiniteQueryOptions(
       { ...base, query },
-      { getNextPageParam: (page) => page.nextCursor, enabled: query !== "" },
+      { getNextPageParam: (page) => page.nextCursor, enabled: query !== "" && filtersReady },
     ),
   );
   const active = query === "" ? listed : searched;
   const rows: ThreadRow[] = active.data?.pages.flatMap((page) => page.items) ?? [];
+  // Side by side the list becomes its own scroller, from its top: the opened row stays in view,
+  // also when the page opens on one (?thread=) and its row arrives with the list.
+  useLayoutEffect(() => {
+    const list = splitRef.current?.firstElementChild;
+    if (threadId && !active.isPending && list && getComputedStyle(list).overflowY === "auto") {
+      list
+        .querySelector('[aria-current="true"]')
+        ?.closest("li")
+        ?.scrollIntoView({ block: "nearest" });
+    }
+  }, [threadId, active.isPending]);
   // Everything on screen reloads: the list, the header's counts and an open thread.
   const refresh = () => {
     setRefreshing(true);
@@ -140,6 +173,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           ))}
         </div>
         <SearchBox value={search} onChange={setSearch} placeholder={t("search")} />
+        <ThreadFilterMenu value={filters} labels={labels} onChange={setFilters} />
         <Tooltip inline focusableChild text={tc("refresh")}>
           <button
             type="button"
@@ -151,12 +185,13 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           </button>
         </Tooltip>
       </div>
+      <ActiveFilters value={filters} labels={labels} onChange={setFilters} />
       {folder === "trash" ? (
         <p style={{ margin: "-4px 0 12px", fontSize: 12.5, color: "var(--ms-muted)" }}>
           {t("trashRetention", { days: TRASH_RETENTION_DAYS })}
         </p>
       ) : null}
-      <div className={threadId ? "ms-thread-split" : undefined}>
+      <div ref={splitRef} className={threadId ? "ms-thread-split" : undefined}>
         <div>
           {active.isPending ? (
             <ul className="ms-thread-list" aria-hidden="true">
@@ -182,7 +217,15 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
               onAction={() => active.refetch()}
             />
           ) : rows.length === 0 ? (
-            <StateCard headline={t("emptyFolder")} />
+            filtered ? (
+              <StateCard
+                headline={t("filter.noMatch")}
+                actionLabel={t("filter.clear")}
+                onAction={() => setFilters(NO_FILTERS)}
+              />
+            ) : (
+              <StateCard headline={t("emptyFolder")} />
+            )
           ) : (
             <>
               <ul className="ms-thread-list">
@@ -391,7 +434,7 @@ function ThreadPane({
   };
   // A draft being edited is held nowhere else: Esc leaves the pane open with it.
   useEscape(() => {
-    if (!paneRef.current?.querySelector("textarea")) close();
+    if (!paneRef.current?.querySelector("textarea, [data-draft-editing]")) close();
   });
   const moveTo = (folder: (typeof MOVE_TO)[number]) =>
     update.mutate(
@@ -750,6 +793,12 @@ function DraftCard({
   );
   const busy = approve.isPending || reject.isPending || save.isPending;
   const body = draft.data?.text ?? "";
+  const editingText = editing === null ? "" : htmlToText(editing);
+  const saveInput = (html: string) => ({
+    inboxId,
+    draftId,
+    patch: { html, text: htmlToText(html) },
+  });
   return (
     <article style={{ ...card, borderColor: "var(--ms-warn-border)" }}>
       <header style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
@@ -762,14 +811,21 @@ function DraftCard({
         ) : null}
       </header>
       {editing !== null ? (
-        <textarea
-          className="ms-input"
-          rows={6}
-          style={{ width: "100%", marginTop: 10, resize: "vertical" }}
-          value={editing}
-          disabled={busy}
-          onChange={(event) => setEditing(event.target.value)}
-        />
+        <div data-draft-editing style={{ marginTop: 10 }}>
+          <MessageEditor
+            value={{ document: null, html: editing }}
+            compact={{
+              placeholder: t("compose.replyPlaceholder"),
+              ariaLabel: t("compose.message"),
+              onSubmit: () => {
+                if (!busy && editingText !== "") save.mutate(saveInput(editing));
+              },
+              autoFocus: true,
+              disabled: busy,
+            }}
+            onChange={(change) => setEditing(change.html ?? "")}
+          />
+        </div>
       ) : (
         <p style={{ margin: "10px 0 0", fontSize: 13.5, whiteSpace: "pre-wrap", lineHeight: 1.55 }}>
           {draft.isPending ? <Skeleton width="70%" /> : body}
@@ -789,7 +845,7 @@ function DraftCard({
             type="button"
             className="ms-btn ms-btn-secondary"
             disabled={busy || draft.isPending}
-            onClick={() => setEditing(body)}
+            onClick={() => setEditing(draft.data?.html || textAsHtml(body))}
           >
             {t("draft.edit")}
           </button>
@@ -797,8 +853,8 @@ function DraftCard({
           <button
             type="button"
             className="ms-btn ms-btn-secondary"
-            disabled={busy || editing.trim() === ""}
-            onClick={() => save.mutate({ inboxId, draftId, patch: { text: editing } })}
+            disabled={busy || editingText === ""}
+            onClick={() => save.mutate(saveInput(editing))}
           >
             {t("draft.save")}
           </button>
@@ -890,6 +946,7 @@ function ReplyComposer({
             ariaLabel: t("compose.message"),
             onSubmit: () => send(false),
             autoFocus: sent,
+            disabled: reply.isPending,
           }}
           onChange={(change) => setHtml(change.html ?? "")}
         />

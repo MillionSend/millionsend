@@ -673,12 +673,23 @@ table.ms-table {
 .ms-thread-split > section {
   min-height: 100dvh;
 }
+/* Side by side, the list and the pane scroll each on its own, the split
+   filling the viewport under its top (useFillViewport) above main's bottom
+   padding. The 2px padding, given back by the margin, keeps a row's focus
+   ring inside the scroller's clip. */
 @container (min-width: 760px) {
   .ms-thread-split {
     grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    align-items: stretch;
+    height: max(360px, calc(100dvh - var(--ms-fill-top, 0px) - var(--ms-fill-gap, 32px)));
   }
+  .ms-thread-split > *,
   .ms-thread-split > section {
     min-height: 0;
+    margin: -2px;
+    padding: 2px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 /* A label's pill, in thread rows and under the open thread's title: the
@@ -2860,6 +2871,9 @@ summary:focus-visible,
   .ms-main {
     padding: 16px !important;
   }
+  .ms-thread-split {
+    --ms-fill-gap: 16px;
+  }
   /* An in-page jump (the health pill, a DNS group, an opened thread) lands
      below the sticky topbar and the support strip instead of under them. */
   .ms-main [id],
@@ -2993,6 +3007,10 @@ summary:focus-visible,
   .ms-filter-row > div {
     flex: 1 1 200px;
     width: auto !important;
+  }
+  /* A menu shown as a button (the inbox's Filter) keeps a button's size. */
+  .ms-filter-row > div:has(> .ms-btn) {
+    flex: 0 0 auto;
   }
 
   /* Console grids: 3-up collapses to 2-up (4-up and the 2/1 splits collapse

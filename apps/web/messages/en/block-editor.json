@@ -9,7 +9,8 @@
     "alignLeft": "Align left",
     "alignCenter": "Align center",
     "alignRight": "Align right",
-    "clear": "Clear formatting"
+    "clear": "Clear formatting",
+    "expand": "Expand editor"
   },
   "panel": {
     "link": "Link",

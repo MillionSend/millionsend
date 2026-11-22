@@ -1,4 +1,4 @@
-import { PADDING_MARKS } from "@millionsend/core/html";
+import { escapeHtml, PADDING_MARKS } from "@millionsend/core/html";
 
 export { escapeHtml } from "@millionsend/core/html";
 
@@ -126,15 +126,47 @@ function numericEntity(code: number, raw: string): string {
 }
 
 /**
- * The HTML with every class attribute removed: an editor's own classes mean
- * nothing in a sent email. Parsed with the DOM, so text that merely looks
- * like an attribute is left alone. Browser only.
+ * Plain text as html an editor reads back as the same text: a blank line
+ * parts paragraphs and a single newline is a line break, the way htmlToText
+ * writes them.
  */
-export function withoutClasses(html: string): string {
+export function textAsHtml(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((para) => `<p>${para.split("\n").map(escapeHtml).join("<br>")}</p>`)
+    .join("");
+}
+
+const BUTTON_RADIUS: Record<string, string> = { sharp: "0", smooth: "6px", round: "9999px" };
+
+/**
+ * A message editor's HTML made sendable: every class attribute removed (an
+ * editor's own classes mean nothing in a sent email), and each button block,
+ * which the editor writes as an empty div carrying its settings in data-*
+ * attributes, given the styled link a mail client shows. The div stays, so
+ * the editor reads the html back as the same button. Parsed with the DOM, so
+ * text that merely looks like an attribute is left alone. Browser only.
+ */
+export function messageHtml(html: string): string {
   const template = document.createElement("template");
   template.innerHTML = html;
   for (const element of template.content.querySelectorAll("[class]")) {
     element.removeAttribute("class");
+  }
+  for (const button of template.content.querySelectorAll('div[data-type="button"]')) {
+    const outline = button.getAttribute("data-variant") === "outline";
+    // Maily writes its colours under their camelCase names, unprefixed, and only once set.
+    const fill = button.getAttribute("buttoncolor") || "#111827";
+    const ink = button.getAttribute("textcolor") || (outline ? fill : "#ffffff");
+    const link = document.createElement("a");
+    link.textContent = button.getAttribute("data-text") ?? "";
+    link.setAttribute("href", button.getAttribute("data-url") ?? "");
+    link.setAttribute(
+      "style",
+      `display:inline-block;padding:10px 32px;font-weight:600;text-decoration:none;border:2px solid ${fill};border-radius:${BUTTON_RADIUS[button.getAttribute("data-border-radius") ?? ""] ?? "6px"};color:${ink};background:${outline ? "transparent" : fill}`,
+    );
+    button.setAttribute("style", `text-align:${button.getAttribute("data-alignment") ?? "left"}`);
+    button.replaceChildren(link);
   }
   return template.innerHTML;
 }

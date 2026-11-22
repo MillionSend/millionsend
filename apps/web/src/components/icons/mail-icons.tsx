@@ -62,6 +62,16 @@ export function TagIcon({ size = 14, strokeWidth }: IconProps) {
   );
 }
 
+export function ListFilterIcon({ size = 14, strokeWidth }: IconProps) {
+  return (
+    <Svg size={size} strokeWidth={strokeWidth}>
+      <path d="M3 6h18" />
+      <path d="M7 12h10" />
+      <path d="M10 18h4" />
+    </Svg>
+  );
+}
+
 /** A static lucide inbox; the nav's InboxesGlyph animates. */
 export function InboxIcon({ size = 14, strokeWidth }: IconProps) {
   return (

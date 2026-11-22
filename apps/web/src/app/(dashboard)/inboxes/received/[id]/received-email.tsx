@@ -20,6 +20,7 @@ import {
 } from "@/components/email-status-icon";
 import { LeadCell } from "@/components/lead-cell";
 import { LoadError } from "@/components/load-error";
+import { MessageEditor } from "@/components/maily-editor/lazy";
 import { MetaItem } from "@/components/meta-item";
 import { Modal } from "@/components/modal";
 import { ConfirmKeycap, ModalFooter } from "@/components/modal-footer";
@@ -38,6 +39,7 @@ import {
   grayExplanation,
 } from "@/lib/auth-result";
 import { formatBytes, formatRelative, mailDomain } from "@/lib/format";
+import { htmlToText } from "@/lib/html";
 import { statusGlow } from "@/lib/status-glow";
 import { useTRPC } from "@/lib/trpc";
 import { useRefreshInboxUnread } from "@/lib/use-inbox-unread";
@@ -713,7 +715,9 @@ function ComposeModal({
 }) {
   const t = useTranslations("inboxes");
   const trpc = useTRPC();
-  const [text, setText] = useState("");
+  // The editor seeds from it on mount: the Modal unmounts it on close, so a
+  // reopen shows what was typed and a send leaves it empty.
+  const [html, setHtml] = useState("");
   const [to, setTo] = useState("");
   const [asFile, setAsFile] = useState<"inline" | "attachment">("inline");
   const [pick, setPick] = useState<ReplyFromMode | null>(null);
@@ -731,7 +735,7 @@ function ComposeModal({
   };
   const done = (result: { kind: "sent" } | { kind: "draft" }) => {
     toast(result.kind === "sent" ? t("compose.sent") : t("compose.drafted"));
-    setText("");
+    setHtml("");
     setTo("");
     onSent();
     close();
@@ -744,17 +748,18 @@ function ComposeModal({
     .split(/[,\s]+/)
     .map((value) => value.trim())
     .filter(Boolean);
-  const ready = mode === "reply" ? text.trim().length > 0 : recipients.length > 0;
+  const text = htmlToText(html);
+  const ready = mode === "reply" ? text !== "" : recipients.length > 0;
   const submit = () => {
     if (!ready || pending || !mode) return;
     const scope = inboxId ? { inboxId, ...(pick ? { fromName: pick } : {}) } : {};
-    if (mode === "reply") reply.mutate({ id: emailId, text, ...scope });
+    if (mode === "reply") reply.mutate({ id: emailId, html, text, ...scope });
     else
       forward.mutate({
         id: emailId,
         to: recipients,
         mode: asFile,
-        ...(text ? { text } : {}),
+        ...(text ? { html, text } : {}),
         ...scope,
       });
   };
@@ -807,17 +812,19 @@ function ComposeModal({
           </>
         ) : null}
         <div className="ms-field">
-          <label htmlFor="compose-text">
-            {mode === "forward" ? t("compose.note") : t("compose.message")}
-          </label>
-          <textarea
-            id="compose-text"
-            className="ms-input"
-            rows={7}
-            style={{ width: "100%", resize: "vertical" }}
-            value={text}
-            disabled={pending}
-            onChange={(event) => setText(event.target.value)}
+          {/* biome-ignore lint/a11y/noLabelWithoutControl: a caption; the editor below carries the same name, and a contenteditable can't be a label's control */}
+          <label>{mode === "forward" ? t("compose.note") : t("compose.message")}</label>
+          <MessageEditor
+            key={mode}
+            value={{ document: null, html }}
+            compact={{
+              placeholder:
+                mode === "forward" ? t("compose.notePlaceholder") : t("compose.replyPlaceholder"),
+              ariaLabel: mode === "forward" ? t("compose.note") : t("compose.message"),
+              onSubmit: submit,
+              disabled: pending,
+            }}
+            onChange={(change) => setHtml(change.html ?? "")}
           />
         </div>
         {error ? (

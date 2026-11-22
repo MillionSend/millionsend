@@ -9,6 +9,7 @@ import {
   BoldIcon,
   BulletListIcon,
   ClearFormatIcon,
+  ExpandIcon,
   H1Icon,
   H2Icon,
   ItalicIcon,
@@ -60,14 +61,17 @@ export function EditorToolbar({
   editor,
   fields,
   compact = false,
+  expand,
 }: {
   editor: TiptapEditor | null;
   fields: PickerField[];
-  /** A message body's toolbar: no headings, alignment or variables. */
+  /** A message body's toolbar: no variables, and no headings or alignment until expanded. */
   compact?: boolean;
+  expand?: { on: boolean; toggle: () => void };
 }) {
   const t = useTranslations("block-editor");
   const off = !editor;
+  const lean = compact && !expand?.on;
 
   const insertVariable = (name: string, label: string, fallback: string | null) => {
     if (!editor) return;
@@ -117,7 +121,7 @@ export function EditorToolbar({
 
       <Sep />
 
-      {compact ? null : (
+      {lean ? null : (
         <>
           <ToolButton
             title={t("toolbar.h1")}
@@ -159,7 +163,7 @@ export function EditorToolbar({
 
       <Sep />
 
-      {compact ? null : (
+      {lean ? null : (
         <>
           <ToolButton
             title={t("toolbar.alignLeft")}
@@ -205,6 +209,14 @@ export function EditorToolbar({
           <VariablePicker fields={fields} onInsert={insertVariable} />
         </>
       )}
+      {expand ? (
+        <>
+          <span className="ms-maily-toolbar-spacer" />
+          <ToolButton title={t("toolbar.expand")} active={expand.on} onClick={expand.toggle}>
+            <ExpandIcon />
+          </ToolButton>
+        </>
+      ) : null}
     </div>
   );
 }
