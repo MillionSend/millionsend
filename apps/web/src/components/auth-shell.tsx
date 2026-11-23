@@ -13,7 +13,8 @@ export function AuthShell({
   return (
     <main
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
+        boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
