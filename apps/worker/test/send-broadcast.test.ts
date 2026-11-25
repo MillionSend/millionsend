@@ -1036,6 +1036,22 @@ it("applyMergeFields resolves custom properties, with fallback and no leaked tok
   expect(applyMergeFields("[{{{unknown}}}]", contact, { html: false })).toBe("[]");
 });
 
+it("applyMergeFields treats a token named after an Object.prototype member as unknown", () => {
+  // contact.properties is a plain object: "constructor" and "toString" exist
+  // on its prototype as functions, and escapeHtml throws on one, which stops
+  // the fan-out at the first contact on every retry.
+  const contact = { email: "ada@example.com", firstName: "Ada", lastName: null, properties: {} };
+  expect(applyMergeFields("[{{{constructor}}}]", contact, { html: true })).toBe("[]");
+  expect(applyMergeFields("[{{{toString|x}}}]", contact, { html: false })).toBe("[x]");
+  expect(
+    applyMergeFields(
+      "{{{constructor}}}",
+      { ...contact, properties: { constructor: "Acme" } },
+      { html: true },
+    ),
+  ).toBe("Acme");
+});
+
 it("applyMergeFields prefers a builtin over a same-named property", () => {
   const contact = {
     email: "ada@example.com",
