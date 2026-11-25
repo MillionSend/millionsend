@@ -13,6 +13,7 @@ export {
   API_RATE_LIMIT_PER_MINUTE_DEFAULT,
   AWS_REGION_DEFAULT,
   abuseJudgeConfig,
+  abuseRulesFile,
   abuseVisionConfig,
   abuseVisionProfile,
   accountEmailFrom,

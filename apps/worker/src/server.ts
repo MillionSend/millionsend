@@ -25,6 +25,7 @@ import {
   anyYoungLinkDomain,
   backfillPoolOwners,
   bookFreeBurst,
+  checkAbuseRulesAtBoot,
   committedDailyVolume,
   createDomainAgeResolver,
   createSharedNameReview,
@@ -152,6 +153,7 @@ if (!env.MASTER_ENCRYPTION_KEY) {
 
 const db = getDb();
 const keyring = createKeyringFromEnv(env);
+console.log(checkAbuseRulesAtBoot());
 // Days whole email rows (recipients, subject, events) are kept; bodies age
 // out earlier on EMAIL_RETENTION_DAYS. Read here until it joins the env schema.
 const metadataRetentionDays = env.EMAIL_METADATA_RETENTION_DAYS;

@@ -1,4 +1,5 @@
 import type { ReceivedAuthentication, ReceivedHiddenText } from "@millionsend/db/schema";
+import { abuseRules } from "../abuse-rules.js";
 import { isShortener } from "../email-insights.js";
 import type { SenderTrust, SpamVerdict } from "../inboxes/types.js";
 import type { BodyLink } from "../links.js";
@@ -8,13 +9,11 @@ import { registrableDomain } from "../org-domain.js";
  * A local spam score from facts already in hand at ingest: no DNS
  * blocklist (the free mirrors exclude commercial use) and no network at
  * all. Every hit records a reason id. The weights are starting values,
- * stored with the verdict so they can be tuned on real mail.
+ * stored with the verdict so they can be tuned on real mail; the verdict
+ * lines and the hidden-text sizes come from the detection rules
+ * (`limits.received`).
  */
 
-const FAIL_AT = 50;
-const GRAY_AT = 25;
-const HIDDEN_TEXT_CHARS = 200;
-const INVISIBLE_CHARS = 20;
 const DANGEROUS_ATTACHMENT =
   /\.(?:exe|scr|js|vbs|bat|cmd|com|pif|jar|iso|img|lnk|hta|msi|docm|xlsm|pptm|html?)$/i;
 const ADDRESS = /[^\s<>"'@,;:()]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi;
@@ -60,6 +59,7 @@ export function spamVerdict(i: SpamInput): {
   score: number;
   reasons: string[];
 } {
+  const lines = abuseRules().limits.received;
   const hits: [string, number][] = [];
   const hit = (reason: string, points: number) => hits.push([reason, points]);
   const auth = i.authentication;
@@ -97,8 +97,8 @@ export function spamVerdict(i: SpamInput): {
   }
   const hidden = i.hiddenText;
   if (hidden) {
-    if (hidden.chars - hidden.preview_chars >= HIDDEN_TEXT_CHARS) hit("hidden_text", 15);
-    if (hidden.invisible_chars >= INVISIBLE_CHARS) hit("invisible_chars", 10);
+    if (hidden.chars - hidden.preview_chars >= lines.hiddenTextChars) hit("hidden_text", 15);
+    if (hidden.invisible_chars >= lines.invisibleChars) hit("invisible_chars", 10);
     if (hidden.flags.includes("alternative_mismatch")) hit("alternative_mismatch", 10);
   }
   let shortener = false;
@@ -136,7 +136,7 @@ export function spamVerdict(i: SpamInput): {
     hits.reduce((sum, [, points]) => sum + points, 0),
   );
   return {
-    verdict: score >= FAIL_AT ? "fail" : score >= GRAY_AT ? "gray" : "pass",
+    verdict: score >= lines.failAt ? "fail" : score >= lines.grayAt ? "gray" : "pass",
     score,
     reasons: hits.map(([reason]) => reason),
   };

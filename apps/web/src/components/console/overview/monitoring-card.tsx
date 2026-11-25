@@ -14,8 +14,8 @@ import { LoadErrorCard } from "../safety/parts";
 import { ProbeChart } from "./charts";
 
 /**
- * The content monitor at a glance: the judge the env names, today's tallies,
- * the open monitor flags. Off, it says so and points at the guide; on, the
+ * The content monitor at a glance: the judge the env names, the detection
+ * rules' version and source, today's tallies, the open monitor flags. Off, it says so and points at the guide; on, the
  * card opens the hourly sample history like the stat tiles do.
  */
 export function MonitoringCard() {
@@ -43,6 +43,7 @@ export function MonitoringCard() {
     );
   }
 
+  const rules = `${data.rules.version} · ${t(data.rules.source === "file" ? "rulesFile" : "rulesDefault")}`;
   const head = (
     <>
       <h3 className="ms-display" style={{ fontSize: 22, margin: 0, fontWeight: 500 }}>
@@ -64,6 +65,9 @@ export function MonitoringCard() {
             {t("offDocs")}
           </a>
         </p>
+        <p style={{ margin: "8px 0 0", fontSize: 13, color: "var(--ms-muted)" }}>
+          {t("rules")}: <span className="ms-mono">{rules}</span>
+        </p>
       </div>
     );
   }
@@ -72,6 +76,7 @@ export function MonitoringCard() {
   const unjudgedRate = today.sampled > 0 ? today.unjudged / today.sampled : null;
   const figures: { id: string; label: React.ReactNode; value: string; color?: string }[] = [
     { id: "judge", label: t("judge"), value: `${data.judge.provider} · ${data.judge.model}` },
+    { id: "rules", label: t("rules"), value: rules },
     { id: "sampled", label: t("sampledToday"), value: nf.format(today.sampled) },
     { id: "judged", label: t("judged"), value: nf.format(today.judged) },
     {
@@ -119,21 +124,24 @@ export function MonitoringCard() {
       >
         {head}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 36px" }}>
-          {figures.map((figure) => (
-            <div key={figure.id}>
-              <div className="ms-microlabel">{figure.label}</div>
-              <div
-                className={figure.id === "judge" ? "ms-mono" : "ms-digits"}
-                style={{
-                  fontSize: figure.id === "judge" ? 13 : 22,
-                  marginTop: 4,
-                  color: figure.color,
-                }}
-              >
-                {figure.value}
+          {figures.map((figure) => {
+            const mono = figure.id === "judge" || figure.id === "rules";
+            return (
+              <div key={figure.id}>
+                <div className="ms-microlabel">{figure.label}</div>
+                <div
+                  className={mono ? "ms-mono" : "ms-digits"}
+                  style={{
+                    fontSize: mono ? 13 : 22,
+                    marginTop: 4,
+                    color: figure.color,
+                  }}
+                >
+                  {figure.value}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </button>
       {open ? (

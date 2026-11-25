@@ -1,13 +1,13 @@
 import { sharedInboxDomain } from "@millionsend/config";
 import {
   type AbuseJudge,
+  abuseRules,
   accountMailPhrase,
   applyJudgedSample,
   buildJudgeBlock,
   claimNotification,
   clearDestinations,
   clientIdentitySite,
-  DESTINATION_REVOKE_SCORE,
   decryptEmailBody,
   destinationVerdictParks,
   type EmailAttachment,
@@ -302,7 +302,7 @@ async function judgePending(
     !teamVouched &&
     !platformProbation &&
     !vouched &&
-    isHoldVerdict(verdict, DESTINATION_REVOKE_SCORE)
+    isHoldVerdict(verdict, abuseRules().limits.screening.destinationRevokeScore)
       ? probation
       : [];
   // The verdict and its fold commit together: a crash between them would

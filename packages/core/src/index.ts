@@ -38,7 +38,6 @@ export {
   ABUSE_JUDGE_QUESTIONS,
   ABUSE_JUDGE_QUESTIONS_VERSION,
   composeJudgeVerdict,
-  JUDGE_ABUSE_NOUL,
   JUDGE_IMPERSONATION_NOUL,
   JUDGE_VERDICT_NOUL,
   judgeState,
@@ -120,6 +119,17 @@ export {
   vouchActive,
   YOUNG_DOMAIN_DAYS,
 } from "./abuse-monitor.js";
+export {
+  type AbuseRules,
+  type AbuseRulesSource,
+  abuseRules,
+  abuseRulesInfo,
+  abuseRulesSchema,
+  checkAbuseRulesAtBoot,
+  DEFAULT_ABUSE_RULES,
+  loadAbuseRulesFile,
+  parseAbuseRules,
+} from "./abuse-rules.js";
 export {
   type AcceptEmailAuth,
   type AcceptEmailDeps,

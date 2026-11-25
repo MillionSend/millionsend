@@ -1,6 +1,7 @@
 import type { AbuseJudgeConfig } from "@millionsend/config";
-import { composeInboundVerdict, INBOUND_JUDGE_QUESTIONS, inboundJudgeState } from "./inbound.js";
-import { ABUSE_JUDGE_QUESTIONS, composeJudgeVerdict, judgeState } from "./questions.js";
+import { abuseRules } from "../abuse-rules.js";
+import { composeInboundVerdict, inboundJudgeState } from "./inbound.js";
+import { composeJudgeVerdict, judgeState } from "./questions.js";
 import {
   type AbuseJudge,
   type InboundJudgeVerdict,
@@ -73,19 +74,19 @@ export async function askTypesafe(
 
 /** One question set: the questions posted, the state built from the block, the answers composed. */
 interface QuestionSpec<V> {
-  questions: Record<string, unknown>;
+  questions(): Record<string, unknown>;
   state(block: string): Record<string, string>;
   compose(answers: unknown): V;
 }
 
 const OUTBOUND: QuestionSpec<JudgeVerdict> = {
-  questions: ABUSE_JUDGE_QUESTIONS,
+  questions: () => abuseRules().judge.outbound.questions,
   state: judgeState,
   compose: composeJudgeVerdict,
 };
 
 const INBOUND: QuestionSpec<InboundJudgeVerdict> = {
-  questions: INBOUND_JUDGE_QUESTIONS,
+  questions: () => abuseRules().judge.inbound.questions,
   state: inboundJudgeState,
   compose: composeInboundVerdict,
 };
@@ -95,7 +96,7 @@ export function createTypesafeJudge(opts: TypesafeOptions): AbuseJudge {
   async function ask<V extends object>(spec: QuestionSpec<V>, block: string, signal: AbortSignal) {
     const json = await askTypesafe(
       opts,
-      { state: spec.state(block), questions: spec.questions },
+      { state: spec.state(block), questions: spec.questions() },
       signal,
     );
     const verdict = spec.compose(json.answers);

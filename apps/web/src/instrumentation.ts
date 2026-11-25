@@ -8,6 +8,9 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { initErrorTracking } = await import("@millionsend/core/error-tracking-node");
     await initErrorTracking("web");
+    // A bad rules file fails boot, not the first request that reads it.
+    const { checkAbuseRulesAtBoot } = await import("@millionsend/core/abuse-rules");
+    console.log(checkAbuseRulesAtBoot());
   }
 }
 

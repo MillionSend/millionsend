@@ -293,6 +293,11 @@ export const env = createEnv({
       .int()
       .min(1000)
       .default(ABUSE_JUDGE_TIMEOUT_MS_DEFAULT),
+    // Optional detection rules (the judge's questions, the brand and host
+    // lists, the screening and fingerprint numbers) as a JSON file the
+    // processes read at boot; unset runs the built-in rules. A file that
+    // fails the schema fails boot.
+    ABUSE_RULES_FILE: z.string().optional(),
     // Optional image reading for the judge: Claude Haiku 5.5 on Amazon
     // Bedrock writes down the text and brands in an email's images and in
     // attachment pages that are images, with the worker's AWS credentials,
@@ -642,6 +647,11 @@ export function abuseJudgeConfig(e: Env = env): AbuseJudgeConfig | null {
     apiKey: e.ABUSE_JUDGE_API_KEY,
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
   };
+}
+
+/** The detection rules file's path, or undefined for the built-in rules; raw-string safe. */
+export function abuseRulesFile(e: Env = env): string | undefined {
+  return (e.ABUSE_RULES_FILE as string | undefined)?.trim() || undefined;
 }
 
 export interface AbuseVisionConfig {

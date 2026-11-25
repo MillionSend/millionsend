@@ -12,6 +12,7 @@ import {
 import {
   CLAMAV_MAX_BYTES,
   CLAMAV_TIMEOUT_MS,
+  checkAbuseRulesAtBoot,
   deriveInboxKeys,
   deriveReceivedDownloadKey,
   deriveUnsubscribeKey,
@@ -40,6 +41,7 @@ await initErrorTracking("api");
 // Throws on missing encryption configuration, so boot fails before any
 // listener starts.
 const keyring = createKeyringFromEnv(env);
+console.log(checkAbuseRulesAtBoot());
 
 // The API is the email.send producer, so the queue is unconditional.
 const queue = await Queue.start(env.DATABASE_URL);

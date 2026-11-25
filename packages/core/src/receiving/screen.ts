@@ -3,13 +3,14 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import type { InboxJudgeRecord } from "@millionsend/db/schema";
 import { and, eq, sql } from "drizzle-orm";
-import { buildInboundJudgeBlock, INBOUND_JUDGE_QUESTIONS_VERSION } from "../abuse-judge/inbound.js";
+import { buildInboundJudgeBlock } from "../abuse-judge/inbound.js";
 import {
   type AbuseJudge,
   type InboundJudgeVerdict,
   judgeErrorClass,
 } from "../abuse-judge/types.js";
 import { createTypesafeJudge } from "../abuse-judge/typesafe.js";
+import { abuseRules } from "../abuse-rules.js";
 import type { Keyring } from "../crypto/keyring.js";
 import { resultRows } from "../driver-result.js";
 import { INBOUND_JUDGE_PER_INBOX_DAILY, INBOUND_QUARANTINE_SCORE } from "../inboxes/limits.js";
@@ -95,7 +96,7 @@ export async function judgeReceived(
   p: { row: ReceivedEmailRow; tier: SenderTrust; inboxId: string; now: Date },
 ): Promise<InboundJudgeRun> {
   const record = (status: string, latencyMs: number, model?: string): InboxJudgeRecord => ({
-    version: INBOUND_JUDGE_QUESTIONS_VERSION,
+    version: abuseRules().judge.inbound.version,
     model: model ?? deps.judge.model,
     status,
     latency_ms: latencyMs,

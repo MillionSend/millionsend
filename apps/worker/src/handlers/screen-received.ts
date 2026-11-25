@@ -1,5 +1,6 @@
 import {
   type AbuseJudge,
+  abuseRules,
   afterCommit,
   announceIfVisible,
   decideScreening,
@@ -31,9 +32,6 @@ type ScreenDeps = {
   /** Waits between throttled calls; tests skip the wait. */
   sleep?: ((ms: number) => Promise<void>) | undefined;
 };
-
-/** A judged message this suspicious is delivered marked, not held. */
-const SUSPICIOUS_SCORE = 50;
 
 /**
  * The received.screen job: the inbound judge for one membership held
@@ -160,7 +158,9 @@ export async function screenReceived(
     await quarantine(held, set);
   } else {
     const suspicious =
-      Math.max(verdict.injectionScore, verdict.phishingScore) >= SUSPICIOUS_SCORE ||
+      // A judged message this suspicious is delivered marked, not held.
+      Math.max(verdict.injectionScore, verdict.phishingScore) >=
+        abuseRules().limits.inbound.suspiciousScore ||
       verdict.reasons.includes("concealed") ||
       rules.verdict === "suspicious";
     const spam = verdict.spamScore >= INBOUND_QUARANTINE_SCORE || rules.action === "spam";
