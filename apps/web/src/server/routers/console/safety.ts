@@ -681,7 +681,11 @@ export const consoleSafetyRouter = router({
       .where(
         and(eq(schema.teamMonitor.teamId, team.id), isNotNull(schema.teamMonitor.limitBypassAt)),
       );
-    const newAccountCapNow = await newAccountCap(ctx.db, { teamId: team.id, at: now });
+    const newAccountCapNow = await newAccountCap(ctx.db, {
+      teamId: team.id,
+      at: now,
+      readOnly: true,
+    });
     const [newAccountWaiting] = await ctx.db
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.emails)

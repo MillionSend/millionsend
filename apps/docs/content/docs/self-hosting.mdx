@@ -1937,12 +1937,9 @@ waiting mail. The system plan and account mail are never limited.
 | `NEW_ACCOUNT_DAYS` | 7 | How many 24-hour windows the limit lasts, the first included |
 
 **Send-burst alert.** Every 5 minutes the worker's `safety.bursts` job looks
-for teams younger than `BURST_TEAM_AGE_DAYS` that sent at least
-`BURST_MIN_SENT` emails in the last `BURST_WINDOW_HOURS` hours, where at least
-`BURST_SINGLE_SHARE` of their latest sends had one recipient and at least
-`BURST_PROVIDER_SHARE` went to one provider family (Gmail, Microsoft, Yahoo,
-Apple, the Mail.ru group, the Yandex group, else the domain itself). The
-operator gets one email per team with a link to its review page. It holds
+for young teams whose recent sends match the settings below; the consumer
+domains of one mailbox operator count as one provider family. The operator
+gets one email per team with a link to its review page. It holds
 nothing. Vouched teams and teams with a limit bypass are left out.
 
 | Setting | Default | Meaning |

@@ -2,7 +2,7 @@ import { isCloudDeployment } from "@millionsend/config";
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
-import { monitorRowWithHistory } from "./abuse-monitor.js";
+import { monitorRowWithHistory, peekMonitorRow } from "./abuse-monitor.js";
 import { addWithinLimit } from "./domain-warmup.js";
 import { instanceSettings } from "./monitor-settings.js";
 import { DAY_MS } from "./utc-day.js";
@@ -34,10 +34,13 @@ export function limitBypassActive(
   );
 }
 
-/** The cap on the team's accepts at `at`, null when none applies. */
+/**
+ * The cap on the team's accepts at `at`, null when none applies. `readOnly`
+ * is for display paths: it never writes the monitor row's history backfill.
+ */
 export async function newAccountCap(
   db: Db,
-  input: { teamId: string; at: Date },
+  input: { teamId: string; at: Date; readOnly?: boolean },
 ): Promise<NewAccountCap | null> {
   if (!isCloudDeployment()) return null;
   const s = await instanceSettings(db);
@@ -47,7 +50,9 @@ export async function newAccountCap(
     .from(schema.teams)
     .where(eq(schema.teams.id, input.teamId));
   if (!team || team.plan === "system") return null;
-  const monitor = await monitorRowWithHistory(db, input.teamId, input.at);
+  const monitor = input.readOnly
+    ? await peekMonitorRow(db, input.teamId, input.at)
+    : await monitorRowWithHistory(db, input.teamId, input.at);
   if (limitBypassActive(monitor, input.at)) return null;
   // Until the worker records the first send, the window starts now.
   const anchor = monitor.firstSendAt?.getTime() ?? input.at.getTime();
@@ -63,13 +68,16 @@ export async function newAccountCap(
   };
 }
 
-/** Takes `count` recipients from the window's cap; false, taking nothing, when they do not fit. */
+/**
+ * Takes `count` recipients from the window's cap; false, taking nothing, when
+ * they do not fit. An email with more recipients than the cap fits only an
+ * untouched window, alone: otherwise it could never send while the limit lasts.
+ */
 export async function reserveNewAccount(
   db: Db,
   cap: NewAccountCap,
   count: number,
 ): Promise<boolean> {
-  if (count > cap.cap) return false;
   const u = schema.teamNewAccountUsage;
   return addWithinLimit(db, {
     counter: u.accepted,
@@ -78,7 +86,7 @@ export async function reserveNewAccount(
       [u.dayIndex, cap.dayIndex],
     ],
     count,
-    limit: cap.cap,
+    limit: Math.max(cap.cap, count),
   });
 }
 

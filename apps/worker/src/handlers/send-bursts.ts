@@ -12,10 +12,9 @@ export async function alertSendBursts(
   db: Db,
   deps: { mailer: SystemMailer; appBaseUrl?: string | undefined; now?: Date },
 ): Promise<number> {
-  const bursts = await claimSendBursts(db, deps.now ?? new Date());
-  if (bursts.length === 0) return 0;
   const operator = await findInstanceOperator(db);
   if (!operator) return 0;
+  const bursts = await claimSendBursts(db, deps.now ?? new Date());
   const { burstWindowHours } = await instanceSettings(db);
   let sent = 0;
   for (const burst of bursts) {

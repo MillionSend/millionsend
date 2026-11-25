@@ -33,14 +33,14 @@ afterEach(async () => {
   await close();
 });
 
-async function park(n: number): Promise<string[]> {
+async function park(n: number, perRow = 1): Promise<string[]> {
   const rows = await db
     .insert(schema.emails)
     .values(
       Array.from({ length: n }, (_, i) => ({
         teamId,
         from: "a@example.com",
-        to: [`r${i}@example.com`],
+        to: Array.from({ length: perRow }, (_, j) => `r${i}-${j}@example.com`),
         subject: "s",
         latestStatus: "queued_quota" as const,
         parkReason: "new_account" as const,
@@ -66,6 +66,26 @@ it("gates every release, whatever parked the row", async () => {
   if (!a || !b || !c) throw new Error("seed failed");
   await db.update(schema.emails).set({ parkReason: null }).where(eq(schema.emails.teamId, teamId));
   expect(await drain()).toMatchObject({ drained: 2 });
+});
+
+it("sends an email over the whole cap alone in an untouched window, and drains smaller mail past it", async () => {
+  const [big] = await park(1, 5);
+  expect(await drain()).toMatchObject({ drained: 1 });
+  const [big2] = await park(1, 5);
+  const small = await park(1);
+  await db
+    .update(schema.teamNewAccountUsage)
+    .set({ accepted: 1 })
+    .where(eq(schema.teamNewAccountUsage.teamId, teamId));
+  expect(await drain()).toEqual({ drained: 1, stillParked: 1 });
+  const rows = await db
+    .select({ id: schema.emails.id, status: schema.emails.latestStatus })
+    .from(schema.emails)
+    .where(eq(schema.emails.teamId, teamId));
+  const status = new Map(rows.map((r) => [r.id, r.status]));
+  expect(status.get(big ?? "")).toBe("queued");
+  expect(status.get(big2 ?? "")).toBe("queued_quota");
+  expect(status.get(small[0] ?? "")).toBe("queued");
 });
 
 it("tells the operator once when a team's mail first waits for the limit", async () => {

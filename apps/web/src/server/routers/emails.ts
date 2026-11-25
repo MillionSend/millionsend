@@ -228,7 +228,7 @@ async function pendingSend(
     };
   }
   if (email.parkReason === "new_account") {
-    const cap = await newAccountCap(db, { teamId, at: now });
+    const cap = await newAccountCap(db, { teamId, at: now, readOnly: true });
     return { kind: "newAccount", resetsAt: cap?.resetsAt ?? null };
   }
   // A hold by the team's own cap outranks capacity: its reset is the date.

@@ -11,7 +11,7 @@ let db: Db;
 let close: () => Promise<void>;
 let app: ReturnType<typeof createApi>;
 
-const NOW = new Date("2026-10-09T10:00:00Z");
+const NOW = new Date("2026-03-02T12:00:00Z");
 
 async function newSender(slug: string): Promise<string> {
   const teamId = await createTeam(db, slug);
@@ -103,10 +103,20 @@ it("a new team's batch sends what fits its first day and parks the rest, read ba
   expect(await read.json()).toMatchObject({
     last_event: "queued",
     queued_reason: "new_account_limit",
-    sends_after: "2026-10-10T10:00:00.000Z",
+    sends_after: "2026-03-03T12:00:00.000Z",
   });
 
   // A single send is accepted and waits too, never refused.
   const single = await post(token, "/emails", email("batch-new", "r4@example.com"));
   expect(single.status).toBe(200);
+  const { id } = (await single.json()) as { id: string };
+  const [parked] = await db
+    .select({ reason: schema.emails.parkReason })
+    .from(schema.emails)
+    .where(eq(schema.emails.id, id));
+  expect(parked?.reason).toBe("new_account");
+  const readSingle = await app.request(`/emails/${id}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  expect(await readSingle.json()).toMatchObject({ queued_reason: "new_account_limit" });
 });

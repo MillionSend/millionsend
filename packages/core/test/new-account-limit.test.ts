@@ -97,6 +97,13 @@ describe("the new-account limit", () => {
     expect(await parked(teamId)).toBe(41);
   });
 
+  it("lets a first email over the whole cap through alone, then parks what follows", async () => {
+    const teamId = await newTeam();
+    expect(await send(teamId, recipients(15, "a"))).toMatchObject({ ok: true, parked: false });
+    expect(await send(teamId, recipients(1, "b"))).toMatchObject({ parked: true });
+    expect(await send(teamId, recipients(15, "c"))).toMatchObject({ parked: true });
+  });
+
   it("counts windows of 24 hours from the first send, then lifts", async () => {
     const day1 = await newTeam(new Date(NOW.getTime() - 1.5 * DAY_MS));
     expect(await newAccountCap(db, { teamId: day1, at: NOW })).toEqual({

@@ -29,7 +29,7 @@ export function mailboxProviderSql(domain: SQL): SQL<MailboxProvider> {
 
 /**
  * The operator behind a lowercased domain: mailboxProviderSql's provider,
- * the Mail.ru and Yandex groups, else the domain itself.
+ * the grouped consumer domains of one operator, else the domain itself.
  */
 export function providerFamilySql(domain: SQL): SQL<string> {
   return sql<string>`case

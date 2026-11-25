@@ -24,13 +24,14 @@ const run = () =>
 
 beforeAll(async () => {
   ({ db, close } = await createTestDb());
+  // Arbitrary fixture values sized to the seeded sends, not recommendations.
   await db.insert(schema.instanceSettings).values({
     id: 1,
-    burstMinSent: 30,
-    burstWindowHours: 3,
-    burstTeamAgeDays: 2,
-    burstSingleShare: 0.75,
-    burstProviderShare: 0.5,
+    burstMinSent: 10,
+    burstWindowHours: 2,
+    burstTeamAgeDays: 1,
+    burstSingleShare: 0.6,
+    burstProviderShare: 0.4,
   });
   await db
     .insert(schema.user)
@@ -64,29 +65,31 @@ async function sender(name: string, ageHours: number, recipients: (i: number) =>
 }
 
 it("alerts once on a young team's single-recipient burst to one provider family", async () => {
-  const teamId = await sender("burst-team", 3, (i) => [`r${i}@${i % 2 ? "mail.ru" : "bk.ru"}`]);
-  await sender("old-team", 72, (i) => [`r${i}@mail.ru`]);
+  const teamId = await sender("burst-team", 3, (i) => [
+    `r${i}@${i % 2 ? "gmail.com" : "googlemail.com"}`,
+  ]);
+  await sender("old-team", 72, (i) => [`r${i}@gmail.com`]);
   await sender("mixed-team", 3, (i) => [`r${i}@domain${i}.example`]);
-  await sender("group-team", 3, (i) => [`r${i}@mail.ru`, `s${i}@mail.ru`]);
+  await sender("group-team", 3, (i) => [`r${i}@gmail.com`, `s${i}@gmail.com`]);
   expect(await run()).toBe(1);
   expect(mails).toHaveLength(1);
   expect(mails[0]?.to).toBe("op@example.com");
   expect(mails[0]?.text).toContain("burst-team");
-  expect(mails[0]?.text).toContain("mail.ru");
+  expect(mails[0]?.text).toContain("gmail");
   expect(mails[0]?.text).toContain(`https://app.example.test/console/safety/${teamId}`);
   expect(await run()).toBe(0);
 });
 
 it("leaves out a team an operator vouched for", async () => {
-  const teamId = await sender("vouched-team", 3, (i) => [`r${i}@yandex.ru`]);
+  const teamId = await sender("vouched-team", 3, (i) => [`r${i}@yahoo.com`]);
   await db.insert(schema.teamMonitor).values({ teamId, vouchedAt: NOW, vouchUntil: null });
   expect(await run()).toBe(0);
 });
 
 it("is off while the minimum is zero", async () => {
-  await sender("quiet-team", 3, (i) => [`r${i}@yandex.ru`]);
+  await sender("quiet-team", 3, (i) => [`r${i}@yahoo.com`]);
   await db.update(schema.instanceSettings).set({ burstMinSent: 0 });
   expect(await run()).toBe(0);
-  await db.update(schema.instanceSettings).set({ burstMinSent: 30 });
+  await db.update(schema.instanceSettings).set({ burstMinSent: 10 });
   expect(await run()).toBe(1);
 });

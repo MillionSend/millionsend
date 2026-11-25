@@ -767,6 +767,9 @@ async function releaseParked(
         if (err instanceof WarmupHeld) return `${err.full}_full` as const;
         throw err;
       });
+    // An email over the whole cap fits only an untouched window: it waits
+    // alone, and the team's smaller mail keeps draining past it.
+    if (outcome === "new_account_full" && newAccount && units > newAccount.cap) return null;
     if (outcome === "exhausted" || outcome === "new_account_full") {
       run.heldTeams.add(email.teamId);
       return null;

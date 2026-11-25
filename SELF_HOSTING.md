@@ -1652,8 +1652,8 @@ is never refused for it, and `quota.drain` sends it as the limit allows. The
 operator is mailed once per team and can bypass the limit from its review page.
 `BURST_MIN_SENT` (default 0, off), `BURST_WINDOW_HOURS`, `BURST_TEAM_AGE_DAYS`,
 `BURST_SINGLE_SHARE` and `BURST_PROVIDER_SHARE` drive the `safety.bursts` job,
-which mails the operator once about a young team whose recent sends go mostly
-to one recipient each and to one provider family; it holds nothing. The full
+which mails the operator once about a young team whose recent sends match
+those settings; it holds nothing. The full
 description is in the docs' self-hosting page.
 
 </details>

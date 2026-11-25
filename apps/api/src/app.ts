@@ -598,7 +598,7 @@ async function emailWaits(
     ? await teamPlanHold(db, teamId, isCloud)
     : null;
   const newAccount = waiting.some((r) => r.parkReason === "new_account")
-    ? await newAccountCap(db, { teamId, at: new Date() })
+    ? await newAccountCap(db, { teamId, at: new Date(), readOnly: true })
     : null;
   for (const r of waiting) {
     const [reason, at]: [QueuedReason, Date | null] = r.limitHeld
