@@ -43,6 +43,17 @@ const GROUPS = [
     key: "sharedInbox",
     fields: ["sharedInboxSend", "sharedInboxOpen", "sharedInboxTenants", "sharedInboxTeamDailyCap"],
   },
+  { key: "newAccount", fields: ["newAccountFirstDay", "newAccountDaily", "newAccountDays"] },
+  {
+    key: "sendBursts",
+    fields: [
+      "burstMinSent",
+      "burstWindowHours",
+      "burstTeamAgeDays",
+      "burstSingleShare",
+      "burstProviderShare",
+    ],
+  },
 ] as const;
 
 type Draft = string | boolean | null;

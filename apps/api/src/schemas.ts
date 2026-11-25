@@ -335,6 +335,7 @@ export const removeEmailResponseSchema = z
 /** Why a queued email waits, as GET /emails and GET /emails/{id} say it. */
 export const QUEUED_REASONS = [
   "new_domain_limit",
+  "new_account_limit",
   "warming_up",
   "daily_quota",
   "monthly_quota",

@@ -502,6 +502,15 @@ export const en = {
       exempt: "exempt",
     },
   },
+  "monitor.new_account_held": {
+    subject: "A new team's mail is waiting for the new-account limit",
+    body: [
+      "{team}, created {createdAt}, reached the new-account limit after {sent} sends. Its mail is accepted and waits; it goes out as the limit allows.",
+      "Open the review page to look at the team and, if you know it, bypass the limit there.",
+    ],
+    button: "Open review",
+    muted: ["Sent to the instance operator once per team."],
+  },
   "monitor.broadcasts_paused": {
     subject: "Content monitor paused a team's broadcasts",
     body: [

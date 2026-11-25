@@ -799,7 +799,8 @@
         "operatorPaused": "Transmissões pausadas pelo operador",
         "flagOpen": "Sinalização aberta",
         "flagCleared": "Sinalização encerrada",
-        "vouched": "Avalizada"
+        "vouched": "Avalizada",
+        "limitBypassed": "Limite dispensado"
       },
       "tiles": {
         "score": "Nota",
@@ -1022,6 +1023,37 @@
           "error": "Não foi possível mudar a confiança: {message}",
           "declineError": "Não foi possível recusar o pedido: {message}"
         }
+      },
+      "newAccount": {
+        "title": "Limite de conta nova",
+        "subtitle": "O que uma equipe nova pode enviar nos primeiros dias, contados a partir do primeiro envio.",
+        "window": "Dia {day} do limite · {cap} e-mails neste dia · reinicia em {date}",
+        "waiting": "{count, plural, one {# e-mail aguarda} other {# e-mails aguardam}} o limite.",
+        "notLimited": "O limite não segura esta equipe agora.",
+        "action": "Dispensar limite",
+        "revoke": "Revogar dispensa",
+        "status": "Dispensado por {operator} · {date} · {left, select, revoked {até ser revogado} other {{days, plural, one {falta # dia} other {faltam # dias}}}}",
+        "effect": "A equipe envia sem o limite de conta nova. O plano, o aquecimento do domínio e todas as outras verificações continuam valendo.",
+        "toast": {
+          "bypassed": "{team} · limite dispensado",
+          "revoked": "{team} · dispensa revogada"
+        },
+        "dialog": {
+          "title": "Dispensar o limite de conta nova de {team}",
+          "lead": "Para uma equipe que você conhece. Os e-mails que aguardam o limite saem na próxima liberação.",
+          "whileVouched": "Enquanto dispensado",
+          "whileVouchedValue": "Sem limite de conta nova · Os e-mails em espera são liberados",
+          "stillApplies": "Continua valendo",
+          "stillAppliesValue": "Cotas do plano · Aquecimento do domínio · Monitor de conteúdo · Limites de bounces e reclamações · Suspensão",
+          "reasonHint": "Fica registrado com seu nome e o horário.",
+          "lasts": "Duração",
+          "30d": "30 dias",
+          "90d": "90 dias",
+          "forever": "Até ser revogado",
+          "until": "Até {date}",
+          "foreverSub": "Revogar leva um clique e fica registrado",
+          "confirm": "Dispensar"
+        }
       }
     },
     "metric": {
@@ -1143,7 +1175,9 @@
         "escalation": "Reforço e tetos",
         "thresholds": "Limites e política",
         "warmup": "Aquecimento de domínio novo",
-        "sharedInbox": "Domínio compartilhado"
+        "sharedInbox": "Domínio compartilhado",
+        "newAccount": "Limite de conta nova",
+        "sendBursts": "Alerta de rajada de envios"
       },
       "groupsSub": {
         "launch": "Os primeiros envios e as primeiras horas de uma equipe são avaliados por inteiro; depois vale a taxa de rampa até a contagem de envios ou o dia, o que vier primeiro.",
@@ -1152,7 +1186,9 @@
         "escalation": "Uma checagem crítica ou importante de conteúdo falhando multiplica a taxa; duas forçam a amostragem. Os tetos param a amostragem em silêncio, nunca o envio.",
         "thresholds": "O risco vai de 0 a 1. A sinalização lista a equipe aqui e quadruplica sua taxa; o alerta coloca a equipe no seu resumo diário por e-mail; a pausa segura as transmissões de uma equipe nova quando uma mensagem amostrada também teve pontuação de 90 ou mais; a pausa para revisão suspende uma equipe nova quando uma mensagem é avaliada como phishing na pontuação de revisão, ou o número definido delas na pontuação menor durante a primeira semana, até você liberá-la.",
         "warmup": "Um limite diário em cada domínio de envio pela idade do registro, contado por dia UTC, e um único limite diário que os domínios em aquecimento de uma equipe compartilham, o maior entre os limites deles; o que passa de qualquer um espera e sai conforme eles permitem. Nenhum plano remove esses limites. Um domínio cuja idade nenhum registro publica recebe o limite de 1 a 7 dias enquanto a equipe é nova ou está em observação. Com 50 e-mails entregues sem problemas, o domínio sobe um degrau antes.",
-        "sharedInbox": "O que os endereços do domínio compartilhado das caixas podem enviar; o recebimento não é afetado. O envio aberto também precisa do avaliador configurado com a pausa para revisão ligada e, na nuvem, de um plano pago: os endereços de equipes no Free só respondem dentro das próprias conversas."
+        "sharedInbox": "O que os endereços do domínio compartilhado das caixas podem enviar; o recebimento não é afetado. O envio aberto também precisa do avaliador configurado com a pausa para revisão ligada e, na nuvem, de um plano pago: os endereços de equipes no Free só respondem dentro das próprias conversas.",
+        "newAccount": "Só na nuvem. Destinatários que uma equipe nova pode alcançar a cada 24 horas contadas a partir do primeiro envio: um limite para o primeiro dia e outro para cada dia seguinte do limite. O que passa dele é aceito e espera, e sai conforme o limite permite; você fica sabendo uma vez da primeira espera de cada equipe. Desligado enquanto os dois limites forem 0. Uma dispensa na página de revisão da equipe remove o limite.",
+        "sendBursts": "Só na nuvem. Avisa você uma vez sobre uma equipe jovem cujos envios recentes vão quase todos para um destinatário cada e quase todos para um mesmo provedor. Não segura nada. Desligado enquanto o mínimo for 0. Equipes avalizadas ou com o limite dispensado ficam de fora."
       },
       "fields": {
         "firstSends": "Primeiros envios avaliados por inteiro",
@@ -1184,7 +1220,15 @@
         "sharedInboxSend": "Endereços compartilhados enviam",
         "sharedInboxOpen": "Começar conversas",
         "sharedInboxTenants": "Tenant do SES de cada equipe",
-        "sharedInboxTeamDailyCap": "Destinatários por equipe por dia"
+        "sharedInboxTeamDailyCap": "Destinatários por equipe por dia",
+        "newAccountFirstDay": "Limite · primeiras 24 horas",
+        "newAccountDaily": "Limite · cada dia seguinte",
+        "newAccountDays": "Duração do limite",
+        "burstMinSent": "Alertar a partir de envios",
+        "burstWindowHours": "Nas últimas horas",
+        "burstTeamAgeDays": "Equipes com menos de dias",
+        "burstSingleShare": "Parcela com um destinatário",
+        "burstProviderShare": "Parcela para um provedor"
       },
       "hints": {
         "firstSends": "as primeiras N mensagens aceitas de uma equipe",
@@ -1216,7 +1260,15 @@
         "sharedInboxSend": "desligado: não enviam nada, nem respostas; o que já está na fila espera até religar",
         "sharedInboxOpen": "endereços de equipes pagas escrevem para qualquer pessoa dentro das regras de cada caixa, com o primeiro contato avaliado; desligado: só respostas",
         "sharedInboxTenants": "o e-mail compartilhado sai pelo tenant da equipe que envia, para o SES poder pausar só essa equipe; desligado: sem tenant",
-        "sharedInboxTeamDailyCap": "destinatários de e-mails do domínio compartilhado por equipe por dia UTC, envios aprovados incluídos"
+        "sharedInboxTeamDailyCap": "destinatários de e-mails do domínio compartilhado por equipe por dia UTC, envios aprovados incluídos",
+        "newAccountFirstDay": "destinatários nas 24 horas após o primeiro envio; 0 não limita",
+        "newAccountDaily": "destinatários em cada 24 horas seguintes do limite; 0 não limita",
+        "newAccountDays": "dias desde o primeiro envio, contando o primeiro",
+        "burstMinSent": "e-mails enviados na janela; 0 desliga o alerta",
+        "burstWindowHours": "a janela em que os envios são contados",
+        "burstTeamAgeDays": "só equipes criadas há menos tempo que isso",
+        "burstSingleShare": "dos envios mais recentes, a parcela com um destinatário",
+        "burstProviderShare": "dos envios mais recentes, a parcela para a família de provedor principal"
       },
       "kinds": {
         "count": "número inteiro",

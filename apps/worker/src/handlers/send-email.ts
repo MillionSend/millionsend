@@ -1054,7 +1054,7 @@ async function sendQueued(
   // are simply skipped on the next attempt.
   const claimed = await db
     .update(schema.emails)
-    .set({ sentAt: new Date() })
+    .set({ sentAt: new Date(), poolOwnerId: poolOwnerId ?? null })
     .where(
       and(
         eq(schema.emails.id, email.id),

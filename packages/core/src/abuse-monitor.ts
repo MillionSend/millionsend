@@ -408,6 +408,11 @@ const EMPTY_ROW = (teamId: string): TeamMonitorRow => ({
   vouchedBy: null,
   vouchReason: null,
   vouchUntil: null,
+  limitBypassAt: null,
+  limitBypassBy: null,
+  limitBypassReason: null,
+  limitBypassUntil: null,
+  newAccountAlertedAt: null,
   updatedAt: new Date(0),
 });
 

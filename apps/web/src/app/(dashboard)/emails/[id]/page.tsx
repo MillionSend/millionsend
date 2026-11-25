@@ -410,6 +410,15 @@ function PendingEvents({
       body: t("detail.pending.waitingBody"),
       estimate: true,
     });
+  } else if (pending.kind === "newAccount") {
+    nodes.push({
+      type: "queued_quota",
+      label: t("detail.pending.newAccount"),
+      body: pending.resetsAt
+        ? t("detail.pending.newAccountBodyDate", { date: stamp(pending.resetsAt) })
+        : t("detail.pending.newAccountBody"),
+      estimate: true,
+    });
   } else if (pending.kind === "warmup" || pending.kind === "warmupPaused") {
     nodes.push({
       type: "queued_quota",

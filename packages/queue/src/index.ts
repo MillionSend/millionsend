@@ -241,6 +241,8 @@ export const CRON_JOBS = {
   "instance.probe": "* * * * *",
   // Every 15 min: per-team standings and the automatic trust & safety flags.
   "safety.flags": "*/15 * * * *",
+  // Every 5 min (cloud only): the operator's alert on a young team's send burst.
+  "safety.bursts": "*/5 * * * *",
   // Every 10 min: the content monitor's sample count and unjudged share as
   // probes, and the operator's notice when the judge keeps failing.
   "monitor.health": "*/10 * * * *",

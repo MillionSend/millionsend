@@ -181,10 +181,12 @@ deliberadas e explícitas:
   uma `message` e `sends_after`, o horário mais cedo em que ele sai. `GET /emails/{id}`
   e `GET /emails` mantêm `last_event: "queued"` para um e-mail que espera,
   como os clientes do Resend esperam, e acrescentam `queued_reason`
-  (`new_domain_limit`, `warming_up`, `daily_quota`, `monthly_quota` ou
-  `capacity`, e `null` quando ele não está esperando) e `sends_after` (`null`
-  quando não há horário conhecido, como em `capacity` e `warming_up`). Clientes
-  que não conhecem esses campos simplesmente os ignoram.
+  (`new_domain_limit`, `new_account_limit`, `warming_up`, `daily_quota`,
+  `monthly_quota` ou `capacity`, e `null` quando ele não está esperando) e
+  `sends_after` (`null` quando não há horário conhecido, como em `capacity` e
+  `warming_up`). `new_account_limit` quer dizer que a instância limita o que
+  uma conta nova envia nos primeiros dias; o e-mail sai conforme esse limite
+  permite. Clientes que não conhecem esses campos simplesmente os ignoram.
 - `POST /contacts`, `POST /contacts/batch` e o alias de audience retornam
   `403 plan_limit_reached` quando um contato novo levaria a equipe além do
   limite de contatos do plano (1.000 no Free; planos pagos são ilimitados).

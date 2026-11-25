@@ -5,6 +5,7 @@ import {
   accountMailPhrase,
   buildAccountMail,
   CANCEL_REMINDER_DAYS,
+  claimNewAccountAlerts,
   claimNotification,
   clearNotifications,
   DAY_MS,
@@ -750,6 +751,29 @@ export async function sweepNotifications(db: Db, deps: NotifyDeps): Promise<{ se
         ),
       ),
     );
+  }
+
+  // A team's first mail held by the new-account limit: the operator hears
+  // of it once, claimed before the mail goes out.
+  for (const team of await claimNewAccountAlerts(db, now)) {
+    const kind = "monitor.new_account_held";
+    try {
+      const mailed = await mailOperator(
+        db,
+        deps.mailer,
+        kind,
+        `/console/safety/${team.teamId}`,
+        (locale) => ({
+          team: team.name,
+          createdAt: formatMailDate(locale, team.createdAt),
+          sent: team.sent.toLocaleString(locale),
+        }),
+        deps.appBaseUrl,
+      );
+      if (mailed) sent += 1;
+    } catch (err) {
+      console.error(`notifications.sweep: ${kind} for team ${team.teamId} failed`, err);
+    }
   }
 
   // Limit requests: the operator hears of each new one, the team of each

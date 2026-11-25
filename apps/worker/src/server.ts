@@ -123,6 +123,7 @@ import { processSesEvent } from "./handlers/process-ses-event.js";
 import { runSafetyFlags } from "./handlers/safety-flags.js";
 import { screenReceived } from "./handlers/screen-received.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
+import { alertSendBursts } from "./handlers/send-bursts.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
 import {
@@ -600,6 +601,11 @@ await queue.scheduleCrons({
       regions,
       txParkedAt: (region) => sendControls.txParkedAt(region),
     });
+  },
+  "safety.bursts": async () => {
+    if (!env.IS_CLOUD) return;
+    const alerted = await alertSendBursts(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    if (alerted > 0) console.log(`safety.bursts: alerted=${alerted}`);
   },
   "safety.flags": async () => {
     const settings = judge ? await monitorSettings() : null;

@@ -6,6 +6,7 @@ import {
   type AcceptEmailResult,
   type ApiKeyAuth,
   acceptEmail,
+  admitNewAccount,
   authenticateApiKey,
   beginIdempotent,
   broadcastAudience,
@@ -64,6 +65,7 @@ import {
   markSegmentsStale,
   monthlyQuotaMessage,
   type NewDomainLimit,
+  newAccountCap,
   newDomainLimitEtas,
   newDomainLimitFullMessage,
   newDomainLimitPlanCap,
@@ -84,6 +86,7 @@ import {
   recountSegment,
   regionPause,
   releaseIdempotent,
+  releaseNewAccount,
   releasePeriodCount,
   releaseQuota,
   reserveDailyQuota,
@@ -591,17 +594,22 @@ async function emailWaits(
     teamId,
     emailIds: waiting.filter((r) => r.limitHeld).map((r) => r.id),
   });
-  const plan = waiting.some((r) => r.parkReason !== "warmup")
+  const plan = waiting.some((r) => r.parkReason !== "warmup" && r.parkReason !== "new_account")
     ? await teamPlanHold(db, teamId, isCloud)
+    : null;
+  const newAccount = waiting.some((r) => r.parkReason === "new_account")
+    ? await newAccountCap(db, { teamId, at: new Date() })
     : null;
   for (const r of waiting) {
     const [reason, at]: [QueuedReason, Date | null] = r.limitHeld
       ? ["new_domain_limit", etas.get(r.id)?.sendsAfter ?? null]
       : r.parkReason === "warmup"
         ? ["warming_up", null]
-        : plan
-          ? [plan.period === "day" ? "daily_quota" : "monthly_quota", plan.resumesAt]
-          : ["capacity", null];
+        : r.parkReason === "new_account"
+          ? ["new_account_limit", newAccount?.resetsAt ?? null]
+          : plan
+            ? [plan.period === "day" ? "daily_quota" : "monthly_quota", plan.resumesAt]
+            : ["capacity", null];
     out.set(r.id, { queued_reason: reason, sends_after: at?.toISOString() ?? null });
   }
   return out;
@@ -4321,16 +4329,7 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             if (head.reserved) toPark = items.slice(fit);
           }
           if (quota.kind === "day") {
-            const [parked] = await txDb
-              .select({ n: count() })
-              .from(schema.emails)
-              .where(
-                and(
-                  eq(schema.emails.teamId, auth.teamId),
-                  eq(schema.emails.latestStatus, "queued_quota"),
-                ),
-              );
-            if ((parked?.n ?? 0) >= quota.limit * QUOTA_BACKLOG_DAYS) {
+            if ((await countParked(txDb, auth.teamId)) >= quota.limit * QUOTA_BACKLOG_DAYS) {
               throw new AcceptRejectedError(
                 { ok: false, reason: "quota_backlog_full" },
                 first.index,
@@ -4379,18 +4378,34 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
             );
           }
         }
-        // The warm-up after the plan, each item as its own send would meet it.
+        // The new-account limit and the warm-up after the plan, each item as
+        // its own send would meet them.
         for (const o of out) {
           if (o.parked) continue;
-          const warmup = await enforceDomainWarmup(txDb, {
+          const send = {
             teamId: auth.teamId,
-            domainId: o.domainId,
             count: o.recipientCount,
             quota,
             day: o.day,
             at: o.at,
-          });
+          };
+          const newAccount = await admitNewAccount(txDb, send);
+          if (!newAccount.admitted) {
+            await releaseQuota(txDb, send);
+            await txDb
+              .update(schema.emails)
+              .set({
+                latestStatus: "queued_quota",
+                parkReason: "new_account",
+                parkedAt: new Date(),
+              })
+              .where(eq(schema.emails.id, o.id));
+            o.parked = true;
+            continue;
+          }
+          const warmup = await enforceDomainWarmup(txDb, { ...send, domainId: o.domainId });
           if (warmup.kind === "send") continue;
+          if (newAccount.cap) await releaseNewAccount(txDb, newAccount.cap, o.recipientCount);
           if (warmup.kind === "backlog_full") {
             const { cap, waiting } = warmup;
             throw new AcceptRejectedError(
