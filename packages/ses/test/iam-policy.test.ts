@@ -14,6 +14,7 @@ const RUNTIME_MODULES = [
   ["../src/send.ts", "ses"],
   ["../src/account.ts", "ses"],
   ["../src/tenants.ts", "ses"],
+  ["../src/suppression.ts", "ses"],
   ["../src/reputation.ts", "cloudwatch"],
   ["../../../apps/worker/src/sqs-poller.ts", "sqs"],
 ] as const;

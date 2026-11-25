@@ -65,6 +65,12 @@ Resources:
               - ses:DeleteTenantResourceAssociation
               - ses:UpdateReputationEntityCustomerManagedStatus
             Resource: "*"
+          # A team removing an address from its suppression list clears SES's
+          # account-level list too; the action has no resource-level scope.
+          - Effect: Allow
+            Action:
+              - ses:DeleteSuppressedDestination
+            Resource: "*"
           # SES's own complaint rate, which the region breaker judges, is a
           # CloudWatch metric.
           - Effect: Allow

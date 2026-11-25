@@ -112,6 +112,11 @@ export {
   verifySnsMessage,
 } from "./sns-verify.js";
 export {
+  deleteAccountSuppression,
+  type SesSuppressionClient,
+  type SuppressionCommand,
+} from "./suppression.js";
+export {
   associateTenantResources,
   deleteTenant,
   disassociateIdentity,
