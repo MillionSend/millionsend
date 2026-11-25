@@ -1,6 +1,6 @@
 {
   "id": "30c5a341-b384-47be-ba60-8ef3a3359100",
-  "prevId": "ae297508-096e-42cc-b6bd-b039ad3a2738",
+  "prevId": "94b90359-0ab8-400a-8a2a-0f881a45c5a3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7495,6 +7495,22 @@
           ],
           "isUnique": false,
           "where": "\"monitor_samples\".\"broadcast_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "monitor_samples_team_pending_screening_idx": {
+          "name": "monitor_samples_team_pending_screening_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"monitor_samples\".\"status\" = 'pending' and \"monitor_samples\".\"screening\"",
           "concurrently": false,
           "method": "btree",
           "with": {}

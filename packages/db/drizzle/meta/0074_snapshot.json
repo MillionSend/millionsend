@@ -7552,6 +7552,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "monitor_samples_team_pending_screening_idx": {
+          "name": "monitor_samples_team_pending_screening_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"monitor_samples\".\"status\" = 'pending' and \"monitor_samples\".\"screening\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {

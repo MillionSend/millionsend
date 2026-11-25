@@ -96,6 +96,7 @@ import {
   roundUpToSlot,
   SCHEDULED_AT_FORMS,
   type SendRefusal,
+  type SesUnsuppressEnqueue,
   SHARED_REFUSALS,
   scoreBand,
   secondsToNextUtcDay,
@@ -282,6 +283,11 @@ export interface ApiDeps {
    * Optional: without it the delete request erases inline before returning.
    */
   enqueueRecipientErase?: ((teamId: string, address: string) => Promise<void>) | undefined;
+  /**
+   * Clears addresses a team removed from its suppression list from SES's
+   * account-level list, in the worker. Optional: without it only the row goes.
+   */
+  enqueueSesUnsuppress?: SesUnsuppressEnqueue | undefined;
   /**
    * Looks up a domain's registration date in the worker (the warm-up's
    * input), on create and on verification. Optional: the worker's sweep
@@ -3867,7 +3873,10 @@ export function createApi(deps: ApiDeps): OpenAPIHono<Env> {
 
   app.use("/suppressions", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/suppressions/*", requireApiKey, enforceRateLimit, requireFullAccess);
-  registerSuppressionRoutes(app, deps.db, { enqueue: deps.enqueueWebhookDeliveries });
+  registerSuppressionRoutes(app, deps.db, {
+    enqueue: deps.enqueueWebhookDeliveries,
+    unsuppressSes: deps.enqueueSesUnsuppress,
+  });
 
   app.use("/templates", requireApiKey, enforceRateLimit, requireFullAccess);
   app.use("/templates/*", requireApiKey, enforceRateLimit, requireFullAccess);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { withLibpqSslmode } from "@millionsend/core/url";
 import { PgBoss } from "pg-boss";
 
@@ -38,6 +39,10 @@ export interface JobPayloads {
   // each successor carries it, and a team without a label takes a random
   // one a day after it.
   "shared.subdomain": { teamId: string; since: string };
+  // An address a team removed from its suppression list, cleared from SES's
+  // account-level list in every served region. The row is gone by then, so
+  // the payload carries the address.
+  "ses.unsuppress": { teamId: string; email: string; sourceEmailId: string | null };
 }
 
 /** ParsedSesEvent with occurredAt as ISO string (JSON-safe). */
@@ -139,6 +144,7 @@ const JOB_QUEUES = [
   "received.screen",
   "inbox.forward",
   "shared.subdomain",
+  "ses.unsuppress",
 ] as const;
 // Compile-time check that every JobPayloads key is listed above.
 const _everyJobQueueListed: Record<Exclude<JobName, (typeof JOB_QUEUES)[number]>, never> = {};
@@ -486,6 +492,17 @@ export class Queue {
     await this.sendMany(
       "shared.subdomain",
       jobs.map((payload) => ({ payload, dedupeKey: payload.teamId, startAfter })),
+    );
+  }
+
+  /** One job per address a team removed from its suppression list. */
+  async enqueueSesUnsuppress(requests: readonly JobPayloads["ses.unsuppress"][]): Promise<void> {
+    await this.sendMany(
+      "ses.unsuppress",
+      requests.map((payload) => ({
+        payload,
+        dedupeKey: `${payload.teamId}:${createHash("sha256").update(payload.email).digest("hex")}`,
+      })),
     );
   }
 

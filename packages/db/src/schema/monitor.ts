@@ -145,6 +145,11 @@ export const monitorSamples = pgTable(
   },
   (t) => [
     index("monitor_samples_team_created_idx").on(t.teamId, t.createdAt),
+    // Screening counts a team's outstanding samples for every email it
+    // screens; without this it walks the team's whole history to find a few.
+    index("monitor_samples_team_pending_screening_idx")
+      .on(t.teamId)
+      .where(sql`${t.status} = 'pending' and ${t.screening}`),
     // The instance-wide daily cap and the retention prune count by age alone.
     index("monitor_samples_created_idx").on(t.createdAt),
     // The set-null foreign keys fire on every email and broadcast delete.

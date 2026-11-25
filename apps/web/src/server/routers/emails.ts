@@ -710,6 +710,7 @@ export const emailsRouter = router({
         rows: [row],
         source: "dashboard",
         enqueue: ctx.enqueueWebhookDeliveries,
+        unsuppressSes: ctx.enqueueSesUnsuppress,
       });
       return { id: row.id };
     }),

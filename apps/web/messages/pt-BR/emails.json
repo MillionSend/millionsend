@@ -366,7 +366,7 @@
     "blocked": "Um bounce, uma reclamação ou uma entrada manual tiram o endereço de todos os envios; um descadastro, só dos envios com tópico e das transmissões. Se não sobrar nenhum destinatário em <code>to</code>, a API recusa o envio com <code>422 all_recipients_suppressed</code>.",
     "suggestedActions": "Ações sugeridas",
     "step1": "Confirme que a caixa postal existe agora — remover cedo demais costuma gerar novo bounce.",
-    "step2": "Depois remova a supressão; o próximo envio segue normalmente.",
+    "step2": "Depois remova a supressão; ela também sai da lista do SES logo depois, então espere alguns minutos antes de reenviar.",
     "remove": "Remover endereço de e-mail"
   },
   "suppressions": {

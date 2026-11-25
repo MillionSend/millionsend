@@ -92,6 +92,7 @@ it("indexes the sample's email and broadcast keys and stamps a resume", async ()
     "monitor_samples_email_idx",
     "monitor_samples_pkey",
     "monitor_samples_team_created_idx",
+    "monitor_samples_team_pending_screening_idx",
   ]);
   const resumed = await client.query(
     "update team_monitor set broadcasts_resumed_at = now() where team_id = $1 returning broadcasts_resumed_at is not null as resumed",
