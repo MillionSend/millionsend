@@ -82,7 +82,7 @@
     "onAccountSuppressionList": {
       "title": "On SES's suppression list",
       "body": "Amazon SES refused this send without trying it: the address is on SES's own suppression list from an earlier bounce. It was added to your suppressions here too.",
-      "action": "Once the mailbox is confirmed valid, remove it from your suppressions: that also clears it from SES's list, and the next send goes through."
+      "action": "Once the mailbox is confirmed valid, remove it from your suppressions: that also clears it from SES's list shortly after, so wait a few minutes before resending."
     },
     "transientGeneral": {
       "title": "Temporary bounce",

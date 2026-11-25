@@ -361,7 +361,7 @@
     "blocked": "A bounce, complaint or manual entry drops the address from every send; an unsubscribe only from topic sends and broadcasts. If no <code>to</code> recipient is left, the API refuses the send with <code>422 all_recipients_suppressed</code>.",
     "suggestedActions": "Suggested actions",
     "step1": "Confirm the mailbox exists now — removing early usually re-bounces.",
-    "step2": "Then remove the suppression; the next send goes through normally.",
+    "step2": "Then remove the suppression; it also leaves SES's list shortly after, so wait a few minutes before resending.",
     "remove": "Remove email address"
   },
   "suppressions": {

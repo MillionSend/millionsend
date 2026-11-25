@@ -87,8 +87,10 @@ complaint SES reports about mail it didn't attempt.
 
 Removing an address from your list here (in the dashboard, the API or MCP)
 also removes it from SES's list, in every region the instance serves. That
-happens in the background, usually within seconds (a bulk removal of
-thousands takes a few minutes), and then the next send goes through. If the
+happens in the background, shortly after: one queue paces the calls for the
+whole instance to stay under SES's rate limit, so when many removals are
+queued it can take a while (a removal of a thousand addresses takes half an
+hour or more). Wait a few minutes before you retry the send. If the
 mailbox still bounces, both lists get it back. Removing an unsubscribe entry
 never touches SES's list, since it was never there.
 

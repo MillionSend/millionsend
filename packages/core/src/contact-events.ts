@@ -206,8 +206,8 @@ export async function emitSuppressionEvents(
 ): Promise<void> {
   if (params.rows.length === 0) return;
   if (params.type === "suppression.removed" && params.unsuppressSes) {
-    // A one-click opt-out never reaches SES's list (it holds bounces and
-    // complaints), and an erased row has no address to name.
+    // A one-click opt-out never reaches SES's list (the setup limits it to
+    // bounces), and an erased row has no address to name.
     const requests = params.rows.flatMap((row) =>
       row.email !== null && row.reason !== "one_click_unsubscribe"
         ? [{ teamId: params.teamId, email: row.email, sourceEmailId: row.sourceEmailId }]

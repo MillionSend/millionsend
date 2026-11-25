@@ -93,9 +93,10 @@ informe sobre um e-mail que ele não tentou entregar.
 
 Remover um endereço da sua lista aqui (pelo painel, pela API ou pelo MCP)
 também o remove da lista do SES, em todas as regiões que a instância atende.
-Isso acontece em segundo plano, normalmente em poucos segundos (uma remoção
-em massa de milhares de endereços leva alguns minutos), e aí o próximo envio
-passa. Se a caixa postal continuar dando bounce, o endereço volta para as
+Isso acontece em segundo plano, logo depois: uma única fila controla o ritmo
+das chamadas da instância inteira para respeitar o limite de taxa do SES,
+então, quando há muitas remoções na fila, pode demorar (remover mil endereços
+leva meia hora ou mais). Espere alguns minutos antes de reenviar. Se a caixa postal continuar dando bounce, o endereço volta para as
 duas listas. Remover uma entrada de descadastro nunca mexe na lista do SES,
 porque ela nunca esteve lá.
 

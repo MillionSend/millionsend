@@ -12,10 +12,10 @@ import { and, eq } from "drizzle-orm";
 /**
  * SES throttles its non-send API at about one call per second per region,
  * for the whole account. The queue runs on one lane and each round of calls
- * (one per region) waits this long before the next, so a batch removal of a
- * thousand addresses drains in minutes without starving the other calls.
+ * (one per region) waits this long before the next, which leaves about half
+ * of that budget to the web, API and worker's other SES calls.
  */
-export const SES_UNSUPPRESS_PAUSE_MS = 1_100;
+export const SES_UNSUPPRESS_PAUSE_MS = 2_000;
 
 export interface SesUnsuppressDeps {
   regions: readonly string[];
@@ -50,8 +50,9 @@ const errorName = (error: unknown): string | undefined => (error as { name?: str
 /**
  * Clears one address from SES's account-level suppression list in every
  * served region. A region whose IAM policy lacks the action is logged and
- * skipped rather than retried; any other failure throws into pg-boss's
- * backoff, and the calls that already went through read as done next time.
+ * skipped rather than retried; any other failure stops the job and throws
+ * into pg-boss's backoff, and the calls that already went through read as
+ * done next time.
  */
 export async function runSesUnsuppress(
   db: Db,
@@ -78,6 +79,8 @@ export async function runSesUnsuppress(
       }
     });
     await sleep(SES_UNSUPPRESS_PAUSE_MS);
+    // Throttling is SES asking for less load: leave the rest to the backoff.
+    if (failure) break;
   }
   const recipient = hashRecipient(job.email);
   if (denied.size > 0) {

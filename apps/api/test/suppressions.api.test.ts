@@ -4,7 +4,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApi } from "../src/app.js";
 
 let db: Db;
@@ -519,5 +519,46 @@ describe("removal clears SES's account-level list", () => {
         { teamId, email: "ses-complaint@example.com", sourceEmailId: null },
       ]),
     );
+  });
+
+  it("still removes the row and publishes the webhook when the enqueue fails", async () => {
+    const deliveries: string[] = [];
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failingApp = createApi({
+      db,
+      keyring: EnvKeyring.fromBase64(randomBytes(32).toString("base64")),
+      isCloud: false,
+      enqueueEmailSend: async () => {},
+      enqueueWebhookDeliveries: async (rows) => {
+        deliveries.push(...rows.map((r) => r.id));
+      },
+      enqueueSesUnsuppress: async () => {
+        throw new Error("queue down");
+      },
+    });
+    const req = (method: string, path: string, body?: unknown) =>
+      failingApp.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${fullKey}`,
+          ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+    const hook = await req("POST", "/webhooks", {
+      endpoint: "https://example.com/hooks/suppressions",
+      events: ["suppression.removed"],
+    });
+    expect(hook.status).toBeLessThan(300);
+    await seedRow("ses-queue-down@example.com");
+    expect((await req("DELETE", "/suppressions/ses-queue-down@example.com")).status).toBe(200);
+    const left = await db
+      .select({ id: schema.suppressions.id })
+      .from(schema.suppressions)
+      .where(eq(schema.suppressions.email, "ses-queue-down@example.com"));
+    expect(left).toEqual([]);
+    expect(deliveries).toHaveLength(1);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });

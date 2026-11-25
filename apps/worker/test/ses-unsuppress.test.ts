@@ -135,6 +135,19 @@ it("throws a throttling error into the queue's backoff after trying every region
   expect(calls.map((c) => c.region)).toEqual(["sa-east-1", "us-east-1"]);
 });
 
+it("stops at the first failed round instead of trying the remaining spellings", async () => {
+  const teamId = await createTeam(db, "acme");
+  const { calls, clientForRegion } = fakeSes(() => awsError("TooManyRequestsException"));
+  await expect(
+    runSesUnsuppress(
+      db,
+      { regions: ["sa-east-1"], clientForRegion, sleep: async () => {} },
+      { teamId, email: "Ada@Example.com", sourceEmailId: null },
+    ),
+  ).rejects.toMatchObject({ name: "TooManyRequestsException" });
+  expect(calls.map((c) => c.address)).toEqual(["Ada@Example.com"]);
+});
+
 it("tries the row's address as stored and normalized", async () => {
   const teamId = await createTeam(db, "acme");
   const { calls, clientForRegion } = fakeSes();

@@ -1022,14 +1022,14 @@ if (sharedDomain) {
   );
 }
 
-// One lane: the handler paces SES's account-wide throttle. A batch above one
-// keeps a large removal fetching between jobs.
+// One lane: the handler paces SES's account-wide throttle. One job per fetch,
+// since a handler throw fails every job fetched with it.
 // ponytail: the pacing is per process; a second worker process doubles the
 // call rate (the SDK's throttling retries and pg-boss's backoff absorb it).
 await queue.work(
   "ses.unsuppress",
   (job) => runSesUnsuppress(db, { regions, clientForRegion }, job),
-  { batchSize: 10 },
+  { batchSize: 1 },
 );
 
 // Erasure scans a team's whole history; it runs here so the request that
