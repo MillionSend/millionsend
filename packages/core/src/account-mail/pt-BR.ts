@@ -543,6 +543,15 @@ export const ptBR = {
         "Esta avaliação pausou a equipe por ser a {n}ª do tipo phishing com pontuação {line} ou mais em 7 dias.",
     },
   },
+  "monitor.new_account_held": {
+    subject: "Os e-mails de uma equipe nova aguardam o limite de conta nova",
+    body: [
+      "{team}, criada em {createdAt}, atingiu o limite de conta nova depois de {sent} envios. Os e-mails dela são aceitos e ficam em espera; saem conforme o limite permite.",
+      "Abra a página de revisão para olhar a equipe e, se você a conhece, dispensar o limite lá.",
+    ],
+    button: "Abrir revisão",
+    muted: ["Enviado ao operador da instância uma vez por equipe."],
+  },
   "monitor.team_linked": {
     subject: "Uma equipe nova coincide com uma equipe suspensa por phishing",
     body: [

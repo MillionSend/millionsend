@@ -1,4 +1,4 @@
-import { sharedInboxDomain } from "@millionsend/config";
+import { isCloudDeployment, sharedInboxDomain } from "@millionsend/config";
 import {
   applyStatusCas,
   buildUnsubscribeHeaders,
@@ -33,6 +33,7 @@ import {
   type MonitorDeps,
   type MonitorSettings,
   makeUnsubscribeToken,
+  newAccountCap,
   noteAcceptedSend,
   noteConsoleCodeUndelivered,
   opaqueFacts,
@@ -40,6 +41,7 @@ import {
   parseSingleSender,
   purgedEmailBodyColumns,
   recordMonitorSample,
+  releaseNewAccount,
   releaseQuota,
   rewriteForTracking,
   SCORE_VERSION,
@@ -391,19 +393,26 @@ async function parkQueued(
       .update(schema.emails)
       .set({ parkReason: reason, parkedAt: new Date() })
       .where(eq(schema.emails.id, email.id))
-      .returning({ to: schema.emails.to, cc: schema.emails.cc, bcc: schema.emails.bcc });
+      .returning({
+        to: schema.emails.to,
+        cc: schema.emails.cc,
+        bcc: schema.emails.bcc,
+        createdAt: schema.emails.createdAt,
+      });
+    if (!row) return;
+    const units = countDistinctRecipients(row.to, row.cc, row.bcc);
     // Against the same counter accept charged, one unit per recipient as the
     // drain charges again on release: on a monthly plan that is the billing
     // period. The cap itself is irrelevant here, so the row is read as Cloud
     // reads it.
     const quota = await fetchTeamQuota(txDb, email.teamId, true);
-    if (quota && row) {
-      await releaseQuota(txDb, {
-        teamId: email.teamId,
-        count: countDistinctRecipients(row.to, row.cc, row.bcc),
-        quota,
-      });
-    }
+    if (quota) await releaseQuota(txDb, { teamId: email.teamId, count: units, quota });
+    // The new-account window is handed back too, as the drain charges it
+    // again. The row does not record which window it was charged in, so the
+    // one of its accept is taken: a row the drain released in a later window
+    // stays charged there, which only ever holds more.
+    const newAccount = await newAccountCap(txDb, { teamId: email.teamId, at: row.createdAt });
+    if (newAccount) await releaseNewAccount(txDb, newAccount, units);
   });
   console.warn(`email.send: ${why}, parked ${email.id}`);
 }
@@ -1054,7 +1063,7 @@ async function sendQueued(
   // are simply skipped on the next attempt.
   const claimed = await db
     .update(schema.emails)
-    .set({ sentAt: new Date() })
+    .set({ sentAt: new Date(), poolOwnerId: poolOwnerId ?? null })
     .where(
       and(
         eq(schema.emails.id, email.id),
@@ -1299,6 +1308,12 @@ async function sendQueued(
     } catch (err) {
       console.error(`email.send: monitor draw failed for ${email.id}`, err);
     }
+  } else if (!systemMail && !onboarding && isCloudDeployment()) {
+    // Without the monitor the row is still counted: the new-account limit's
+    // windows run from the exact first send it records.
+    await noteAcceptedSend(db, email.teamId, new Date()).catch((err) => {
+      console.error(`email.send: send count failed for ${email.id}`, err);
+    });
   }
   // The sentAt claim above makes this path single-shot per email, so the
   // email.sent fan-out cannot double-fire on a job retry.

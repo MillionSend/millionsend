@@ -30,6 +30,7 @@ import {
   type MonitorDeps,
   makeUnsubscribeToken,
   NOVEL_DESTINATIONS_MAX,
+  newAccountCap,
   nextUtcDayStart,
   PACING_HORIZON_MAX_RETENTION_DAYS,
   pacingHorizonDays,
@@ -43,7 +44,9 @@ import {
   recentTransactionalByAddress,
   recordMonitorSample,
   regionPause,
+  releaseNewAccount,
   releaseQuota,
+  reserveNewAccount,
   reserveQuota,
   reserveWarmup,
   roundUpToSlot,
@@ -467,6 +470,10 @@ export async function sendBroadcast(
         at: new Date(),
       });
       let warmupFull = false;
+      // The new-account limit likewise: once its window is spent, the rest
+      // of the page parks at insert.
+      const newAccount = await newAccountCap(db, { teamId: broadcast.teamId, at: new Date() });
+      let newAccountFull = false;
       const contacts = await db
         .select({
           id: schema.contacts.id,
@@ -611,6 +618,7 @@ export async function sendBroadcast(
         // row waits for an operator instead.
         const paced = emitted >= admitted && screenParked === null;
         const held = !paced && screenParked === null && warmupFull;
+        const newHeld = !paced && screenParked === null && newAccountFull;
         // Quota reservation and email insert commit atomically (the quota
         // contract), same as the API accept path — a broadcast must not
         // bypass the plan's cap.
@@ -632,9 +640,10 @@ export async function sendBroadcast(
               to: [contact.email],
               replyTo,
               subject: applyMergeFields(broadcast.subject, contact, { html: false }),
-              latestStatus: paced || held || screenParked ? "queued_quota" : "queued",
-              parkReason: screenParked ?? (held || warming ? "warmup" : null),
-              parkedAt: screenParked ? new Date() : null,
+              latestStatus: paced || held || newHeld || screenParked ? "queued_quota" : "queued",
+              parkReason:
+                screenParked ?? (newHeld ? "new_account" : held || warming ? "warmup" : null),
+              parkedAt: screenParked || newHeld ? new Date() : null,
               sendOrder,
               // The drip lives on the row: the send handler defers to it and
               // the reconcile sweep leaves a not-yet-due row alone instead of
@@ -668,7 +677,7 @@ export async function sendBroadcast(
               },
             );
           }
-          if (paced || held || screenParked) return { id: row.id, parked: true };
+          if (paced || held || newHeld || screenParked) return { id: row.id, parked: true };
           const txDb = tx as unknown as Db;
           const reservation = await reserveQuota(txDb, {
             teamId: broadcast.teamId,
@@ -676,11 +685,25 @@ export async function sendBroadcast(
             quota,
           });
           if (reservation.reserved) {
+            if (newAccount && !(await reserveNewAccount(txDb, newAccount, 1))) {
+              await releaseQuota(txDb, { teamId: broadcast.teamId, count: 1, quota });
+              await tx
+                .update(schema.emails)
+                .set({
+                  latestStatus: "queued_quota",
+                  parkReason: "new_account",
+                  parkedAt: new Date(),
+                })
+                .where(eq(schema.emails.id, row.id));
+              newAccountFull = true;
+              return { id: row.id, parked: true };
+            }
             if (!warmup || (await reserveWarmup(txDb, warmup, 1, utcDay())).reserved) {
               return { id: row.id, parked: false };
             }
             // Over the warm-up: the plan's unit goes back, the row parks for
             // the drain, which charges them all again on release.
+            if (newAccount) await releaseNewAccount(txDb, newAccount, 1);
             await releaseQuota(txDb, { teamId: broadcast.teamId, count: 1, quota });
             await tx
               .update(schema.emails)

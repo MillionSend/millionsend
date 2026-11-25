@@ -82,6 +82,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const resumeMonitor = useMutation(trpc.console.monitor.resumeBroadcasts.mutationOptions());
   const vouch = useMutation(trpc.console.monitor.vouch.mutationOptions());
   const revokeVouch = useMutation(trpc.console.monitor.revokeVouch.mutationOptions());
+  const bypassLimit = useMutation(trpc.console.monitor.bypassLimit.mutationOptions());
+  const revokeLimitBypass = useMutation(trpc.console.monitor.revokeLimitBypass.mutationOptions());
+  const newAccountT = useTranslations("console.safety.review.newAccount");
   const lift = useMutation(trpc.console.teams.liftPause.mutationOptions());
   const liftRefusal = useLiftRefusal();
   const teamsT = useTranslations("console.teams");
@@ -126,6 +129,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const [emailTab, setEmailTab] = useState<"flagged" | "all">("flagged");
   const [lifting, setLifting] = useState(false);
   const [vouching, setVouching] = useState(false);
+  const [bypassing, setBypassing] = useState(false);
   const flagSync = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(flagSync.current), []);
   const closeFlagDialog = useCallback(() => {
@@ -171,6 +175,13 @@ export function ReviewView({ teamId }: { teamId: string }) {
     toast(monitorT(`vouch.toast.${key}`, { team: team.name }));
     refetch();
   };
+  const bypassDone = (key: "bypassed" | "revoked") => () => {
+    setBypassing(false);
+    toast(newAccountT(`toast.${key}`, { team: team.name }));
+    refetch();
+  };
+  const { newAccount } = query.data;
+  const bypassed = newAccount.bypass?.active ? newAccount.bypass : null;
   const vouchFailed = (error: { message: string }) =>
     toast(teamsT("toast.error", { message: error.message }), "danger");
   const monitorBusy =
@@ -283,6 +294,9 @@ export function ReviewView({ teamId }: { teamId: string }) {
               </span>
             ) : null}
             {vouched ? <span className="ms-badge ms-badge-info">{t("badges.vouched")}</span> : null}
+            {bypassed ? (
+              <span className="ms-badge ms-badge-info">{t("badges.limitBypassed")}</span>
+            ) : null}
           </>
         }
         actions={
@@ -441,6 +455,82 @@ export function ReviewView({ teamId }: { teamId: string }) {
       </div>
       <LinkedTeams teamId={team.id} framed />
       {asking ? warmupCard : null}
+      {newAccount.cap || newAccount.waiting > 0 || bypassed ? (
+        <div className="ms-card" style={{ padding: 20, marginBottom: 16 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <CardHead flush title={newAccountT("title")} subtitle={newAccountT("subtitle")} />
+            </div>
+            {bypassed ? (
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                disabled={revokeLimitBypass.isPending}
+                onClick={() =>
+                  revokeLimitBypass.mutate(
+                    { teamId: team.id },
+                    { onSuccess: bypassDone("revoked"), onError: vouchFailed },
+                  )
+                }
+              >
+                <BtnSpinner on={revokeLimitBypass.isPending} />
+                {newAccountT("revoke")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="ms-btn ms-btn-secondary"
+                onClick={() => setBypassing(true)}
+              >
+                {newAccountT("action")}
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: 13, display: "grid", gap: 4 }}>
+            {bypassed ? (
+              <>
+                <div style={{ color: "var(--ms-bone)" }}>
+                  {newAccountT("status", {
+                    operator: bypassed.by ?? common("none"),
+                    date: formatDate(bypassed.at, locale),
+                    left: bypassed.until ? "days" : "revoked",
+                    days: bypassed.until ? daysUntil(bypassed.until) : 0,
+                  })}
+                </div>
+                {bypassed.reason ? (
+                  <div style={{ fontSize: 12.5, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>
+                    “{bypassed.reason}”
+                  </div>
+                ) : null}
+                <div style={{ color: "var(--ms-muted)" }}>{newAccountT("effect")}</div>
+              </>
+            ) : newAccount.cap ? (
+              <div style={{ color: "var(--ms-bone)" }}>
+                {newAccountT("window", {
+                  day: newAccount.cap.dayIndex + 1,
+                  cap: nf.format(newAccount.cap.cap),
+                  date: formatDate(newAccount.cap.resetsAt, locale),
+                })}
+              </div>
+            ) : (
+              <div style={{ color: "var(--ms-muted)" }}>{newAccountT("notLimited")}</div>
+            )}
+            {newAccount.waiting > 0 ? (
+              <div style={{ color: "var(--ms-muted)" }}>
+                {newAccountT("waiting", { count: newAccount.waiting })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="ms-card" style={{ padding: 20, marginBottom: 16 }}>
         <div
@@ -990,6 +1080,20 @@ export function ReviewView({ teamId }: { teamId: string }) {
           }
         />
       ) : null}
+      {bypassing ? (
+        <VouchDialog
+          name={team.name}
+          ns="console.safety.review.newAccount.dialog"
+          pending={bypassLimit.isPending}
+          onClose={() => setBypassing(false)}
+          onSubmit={(input) =>
+            bypassLimit.mutate(
+              { teamId: team.id, ...input },
+              { onSuccess: bypassDone("bypassed"), onError: vouchFailed },
+            )
+          }
+        />
+      ) : null}
       {actions.dialogs}
       {reveal.dialogs}
     </>
@@ -1460,18 +1564,21 @@ const VOUCH_LASTS = [
 ] as const;
 type VouchLasts = (typeof VOUCH_LASTS)[number]["key"];
 
+/** The vouch's dialog, and with `ns` the new-account bypass's, which shares its shape. */
 function VouchDialog({
   name,
+  ns = "console.safety.review.monitor.vouch.dialog",
   pending,
   onClose,
   onSubmit,
 }: {
   name: string;
+  ns?: "console.safety.review.monitor.vouch.dialog" | "console.safety.review.newAccount.dialog";
   pending: boolean;
   onClose: () => void;
   onSubmit: (input: { reason: string; lasts: VouchLasts }) => void;
 }) {
-  const t = useTranslations("console.safety.review.monitor.vouch.dialog");
+  const t = useTranslations(ns);
   const common = useTranslations("console.common");
   const locale = useLocale();
   const id = useId();

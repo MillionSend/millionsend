@@ -129,6 +129,8 @@ export const teams = pgTable(
     suspensionNote: text("suspension_note"),
     // Operator override: none of the team's domains warm up.
     warmupTrustedAt: timestamp("warmup_trusted_at", { withTimezone: true }),
+    // When the operator was alerted to the team's send burst: once per team.
+    sendBurstAlertedAt: timestamp("send_burst_alerted_at", { withTimezone: true }),
     // The user who created the team, set on Cloud only and never changed: on
     // the Free plan every team with the same value shares one daily cap and
     // one bounce and complaint record (free_pool_usage). Null on self-host.

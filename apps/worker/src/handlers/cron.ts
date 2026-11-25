@@ -15,6 +15,8 @@ import {
   freeFuseTripped,
   getInstanceSettings,
   isIdentitySharedByOtherDomains,
+  type NewAccountCap,
+  newAccountCap,
   nextUtcDayStart,
   OPERATOR_PARK_REASONS,
   type PlanSnapshot,
@@ -24,6 +26,7 @@ import {
   RECEIVED_SECRET_WINDOW,
   recordAudit,
   releaseQuota,
+  reserveNewAccount,
   reserveQuota,
   reserveWarmup,
   reserveWarmupDay,
@@ -216,7 +219,7 @@ class DrainRaced extends Error {}
  * plan's reservation back.
  */
 class WarmupHeld extends Error {
-  constructor(readonly full: "domain" | "pool" | "ramp") {
+  constructor(readonly full: "domain" | "pool" | "ramp" | "new_account") {
     super(`warm-up ${full} full`);
   }
 }
@@ -237,6 +240,8 @@ interface DrainRun {
   pausedTeams: Set<string>;
   /** The warm-up cap per sending domain row, read once per run. */
   warmups: Map<string, WarmupCap | null>;
+  /** The new-account limit per team, read once per run. */
+  newAccounts: Map<string, NewAccountCap | null>;
   /**
    * Registrable domains whose warm-up day is spent, teams whose shared one
    * is, and the domain rows that leave the page query with them.
@@ -294,6 +299,7 @@ export async function drainQuotaParked(db: Db, deps: DrainDeps): Promise<DrainRe
     checkedTeams: new Set(),
     pausedTeams: new Set(),
     warmups: new Map(),
+    newAccounts: new Map(),
     warmupFull: new Set(),
     poolFull: new Set(),
     heldDomains: new Set(),
@@ -694,6 +700,17 @@ async function releaseParked(
         return null;
       }
     }
+    // So does the team's new-account limit, whatever parked the row.
+    let newAccount: NewAccountCap | null = null;
+    if (!email.systemMail) {
+      if (!run.newAccounts.has(email.teamId)) {
+        run.newAccounts.set(
+          email.teamId,
+          await newAccountCap(db, { teamId: email.teamId, at: run.now }),
+        );
+      }
+      newAccount = run.newAccounts.get(email.teamId) ?? null;
+    }
     // A domain warming up its reputation lets its broadcasts out by the
     // warm-up's day; transactional mail never waits on it.
     let ramp: (WarmupRelease & { released: number }) | null = null;
@@ -713,6 +730,9 @@ async function releaseParked(
         const txDb = tx as unknown as Db;
         const reservation = await reserveQuota(txDb, { teamId: email.teamId, count: units, quota });
         if (!reservation.reserved) return "exhausted" as const;
+        if (newAccount && !(await reserveNewAccount(txDb, newAccount, units))) {
+          throw new WarmupHeld("new_account");
+        }
         if (warmup) {
           const held = await reserveWarmup(txDb, warmup, units, utcDay(run.now));
           if (!held.reserved) throw new WarmupHeld(held.full);
@@ -747,7 +767,10 @@ async function releaseParked(
         if (err instanceof WarmupHeld) return `${err.full}_full` as const;
         throw err;
       });
-    if (outcome === "exhausted") {
+    // An email over the whole cap fits only an untouched window: it waits
+    // alone, and the team's smaller mail keeps draining past it.
+    if (outcome === "new_account_full" && newAccount && units > newAccount.cap) return null;
+    if (outcome === "exhausted" || outcome === "new_account_full") {
       run.heldTeams.add(email.teamId);
       return null;
     }

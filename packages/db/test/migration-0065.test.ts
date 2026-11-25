@@ -37,7 +37,7 @@ beforeAll(async () => {
 
 afterAll(() => client.close());
 
-it("adds the fuse park reason last, leaving parked mail alone", async () => {
+it("adds the fuse park reason after the earlier ones, leaving parked mail alone", async () => {
   const values = await client.query<{ values: string[] }>(
     "select enum_range(null::email_park_reason)::text[] as values",
   );
@@ -49,6 +49,7 @@ it("adds the fuse park reason last, leaving parked mail alone", async () => {
     "media",
     "recipient",
     "fuse",
+    "new_account",
   ]);
   const kept = await client.query("select subject, park_reason from emails");
   expect(kept.rows).toEqual([{ subject: "held", park_reason: "review" }]);

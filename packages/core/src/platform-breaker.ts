@@ -30,7 +30,7 @@ import {
   sentWithoutComplaintFeedback,
 } from "./mailbox-providers.js";
 import { effectivePlan, type Plan, paidPlan } from "./plans.js";
-import { effectivelyFree, fetchEffectivePlan } from "./team-plan.js";
+import { fetchEffectivePlan } from "./team-plan.js";
 import { DAY_MS, utcDay } from "./utc-day.js";
 
 /**
@@ -810,8 +810,8 @@ export interface FreeFuseTrip {
 }
 
 /**
- * Trips the Free fuse once the complaints about mail effectively Free teams
- * sent over the last FREE_FUSE_WINDOW_DAYS, and since the operator's last
+ * Trips the Free fuse once the complaints about mail sent in a Free pool (the
+ * pool tag its send carried) over the last FREE_FUSE_WINDOW_DAYS, and since the operator's last
  * release, reach FREE_FUSE_COMPLAINTS. Returns the trip, or null while the
  * fuse stays as it was: a tripped fuse waits for the operator. Cloud only;
  * on a self-hosted instance every team reads as Free.
@@ -839,7 +839,7 @@ export async function evaluateFreeFuse(db: Db, now: Date): Promise<FreeFuseTrip 
         complaintFilter,
         gte(ev.createdAt, since),
         gte(e.sentAt, since),
-        effectivelyFree(now),
+        isNotNull(e.poolOwnerId),
       ),
     )
     .groupBy(t.id, t.name)

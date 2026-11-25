@@ -3,6 +3,23 @@
 export const GMAIL_DOMAINS: ReadonlySet<string> = new Set(["gmail.com", "googlemail.com"]);
 export const APPLE_MAIL_DOMAINS: ReadonlySet<string> = new Set(["icloud.com", "me.com", "mac.com"]);
 export const SES_MAILBOX_SIMULATOR_DOMAIN = "simulator.amazonses.com";
+/** One operator's consumer domains, grouped when counting where a team's mail goes. */
+export const MAIL_RU_GROUP_DOMAINS: ReadonlySet<string> = new Set([
+  "mail.ru",
+  "bk.ru",
+  "inbox.ru",
+  "list.ru",
+  "internet.ru",
+]);
+export const YANDEX_GROUP_DOMAINS: ReadonlySet<string> = new Set([
+  "yandex.ru",
+  "ya.ru",
+  "yandex.com",
+  "yandex.by",
+  "yandex.kz",
+  "yandex.ua",
+  "narod.ru",
+]);
 
 export type MailboxProvider = "gmail" | "microsoft" | "yahoo" | "apple" | "other";
 

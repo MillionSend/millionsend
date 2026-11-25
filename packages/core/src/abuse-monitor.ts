@@ -376,7 +376,7 @@ export async function monitorRowWithHistory(
   if (row.sentTotal > 0) return row;
   const history = await usageHistory(db, teamId);
   if (history.sent === 0 || !history.first) return row;
-  const firstSendAt = new Date(`${history.first}T00:00:00Z`);
+  const firstSendAt = historyFirstSendAt(history.first, now);
   const [written] = await db
     .insert(tm)
     .values({ teamId, sentTotal: history.sent, firstSendAt, updatedAt: now })
@@ -387,6 +387,25 @@ export async function monitorRowWithHistory(
     })
     .returning();
   return written ?? (await teamMonitorRow(db, teamId));
+}
+
+/** monitorRowWithHistory's answer without its write, for display paths. */
+export async function peekMonitorRow(db: Db, teamId: string, now: Date): Promise<TeamMonitorRow> {
+  const row = await teamMonitorRow(db, teamId);
+  if (row.sentTotal > 0) return row;
+  const history = await usageHistory(db, teamId);
+  if (history.sent === 0 || !history.first) return row;
+  return { ...row, sentTotal: history.sent, firstSendAt: historyFirstSendAt(history.first, now) };
+}
+
+/**
+ * The first send the usage counters imply: midnight of an earlier UTC day.
+ * Today's counters are accepts whose send instant the worker records exactly
+ * at the send claim, so they leave it unset rather than a midnight that would
+ * cut the team's first 24-hour window short.
+ */
+function historyFirstSendAt(first: string, now: Date): Date | null {
+  return first < utcDay(now) ? new Date(`${first}T00:00:00Z`) : null;
 }
 
 const EMPTY_ROW = (teamId: string): TeamMonitorRow => ({
@@ -408,6 +427,11 @@ const EMPTY_ROW = (teamId: string): TeamMonitorRow => ({
   vouchedBy: null,
   vouchReason: null,
   vouchUntil: null,
+  limitBypassAt: null,
+  limitBypassBy: null,
+  limitBypassReason: null,
+  limitBypassUntil: null,
+  newAccountAlertedAt: null,
   updatedAt: new Date(0),
 });
 

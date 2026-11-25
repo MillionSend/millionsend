@@ -19,6 +19,7 @@ import {
 } from "./inboxes/send.js";
 import { type SharedRefusalReason, secondsToNextUtcDay } from "./inboxes/send-policy.js";
 import type { MonitorSettings } from "./monitor-settings.js";
+import { admitNewAccount, releaseNewAccount } from "./new-account-limit.js";
 import { monthlyCapacity, type QuotaTeamRow, type TeamQuota, teamQuota } from "./plans.js";
 import { quotaChargeAt, releaseQuota, reserveQuota } from "./quota.js";
 import { type UndeliverableReason, undeliverableRecipients } from "./recipient-domains.js";
@@ -296,11 +297,22 @@ export function reviewBacklogLimit(quota: TeamQuota): number {
   return Math.ceil((QUOTA_BACKLOG_DAYS * monthlyCapacity(quota)) / 30);
 }
 
+/**
+ * The team's parked mail that counts toward a backlog limit. Mail waiting for
+ * the new-account limit does not: it is never refused for its own wait.
+ */
 export async function countParked(db: Db, teamId: string): Promise<number> {
+  const e = schema.emails;
   const [parked] = await db
     .select({ n: count() })
-    .from(schema.emails)
-    .where(and(eq(schema.emails.teamId, teamId), eq(schema.emails.latestStatus, "queued_quota")));
+    .from(e)
+    .where(
+      and(
+        eq(e.teamId, teamId),
+        eq(e.latestStatus, "queued_quota"),
+        sql`${e.parkReason} is distinct from 'new_account'`,
+      ),
+    );
   return parked?.n ?? 0;
 }
 
@@ -393,10 +405,11 @@ export type AcceptEmailResult =
        */
       underReview: boolean;
       /**
-       * Why the row parked: "warmup" for the new domain limit, "review" for
-       * a review hold; null when it did not park or the plan's cap parked it.
+       * Why the row parked: "warmup" for the new domain limit, "new_account"
+       * for the new-account limit, "review" for a review hold; null when it
+       * did not park or the plan's cap parked it.
        */
-      parkReason: "warmup" | "review" | null;
+      parkReason: "warmup" | "new_account" | "review" | null;
     }
   | { ok: false; reason: "all_suppressed" }
   | { ok: false; reason: "attachments_too_large"; maxBytes: number }
@@ -692,7 +705,7 @@ export async function acceptEmail(
     }
     // The plan said yes; the sending domain's warm-up has the last word. A
     // deferred batch runs the same gate after its own reservation.
-    let parkReason: "warmup" | "review" | null = null;
+    let parkReason: "warmup" | "new_account" | "review" | null = null;
     if (underReview && opts.quota !== "deferred") {
       // Charged above so a cap refuses it as any send; a parked row holds no
       // reservation, so the units go back and the drain charges them on
@@ -711,19 +724,22 @@ export async function acceptEmail(
       }
       parkReason = "review";
     } else if (reservation.reserved && opts.quota !== "deferred" && auth.billing !== "uncapped") {
-      const warmup = await enforceDomainWarmup(txDb, {
-        teamId: auth.teamId,
-        domainId: payload.domainId,
-        count: recipientCount,
-        quota,
-        day,
-        at: deliveryAt,
-      });
-      if (warmup.kind === "backlog_full") {
-        warmupFull = warmup;
-        return "warmup_backlog_full" as const;
+      const send = { teamId: auth.teamId, count: recipientCount, quota, day, at: deliveryAt };
+      const newAccount = await admitNewAccount(txDb, send);
+      if (!newAccount.admitted) {
+        await releaseQuota(txDb, send);
+        parkReason = "new_account";
+      } else {
+        const warmup = await enforceDomainWarmup(txDb, { ...send, domainId: payload.domainId });
+        if (warmup.kind !== "send" && newAccount.cap) {
+          await releaseNewAccount(txDb, newAccount.cap, recipientCount);
+        }
+        if (warmup.kind === "backlog_full") {
+          warmupFull = warmup;
+          return "warmup_backlog_full" as const;
+        }
+        if (warmup.kind === "park") parkReason = "warmup";
       }
-      if (warmup.kind === "park") parkReason = "warmup";
     }
     const parked = !reservation.reserved || parkReason !== null;
     const [row] = await txDb

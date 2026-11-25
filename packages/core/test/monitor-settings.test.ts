@@ -47,7 +47,15 @@ describe("resolveMonitorSettings", () => {
   it("orders the thresholds and knows every key", () => {
     expect(monitorThresholdsOrdered(MONITOR_SETTING_DEFAULTS)).toBe(true);
     expect(monitorThresholdsOrdered({ flagRisk: 0.7, alertRisk: 0.7, pauseRisk: 0.9 })).toBe(false);
-    expect(MONITOR_SETTING_KEYS).toHaveLength(30);
+    expect(MONITOR_SETTING_KEYS).toHaveLength(38);
+  });
+
+  it("leaves the new-account limit and the send-burst alert off until the operator sets them", () => {
+    expect(resolveMonitorSettings(null, { IS_CLOUD: "true" }).settings).toMatchObject({
+      newAccountFirstDay: 0,
+      newAccountDaily: 0,
+      burstMinSent: 0,
+    });
   });
 
   it("leaves shared inbox sending as it was until the console or the env changes it", () => {

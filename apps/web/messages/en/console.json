@@ -799,7 +799,8 @@
         "operatorPaused": "Broadcasts paused by operator",
         "flagOpen": "Flag open",
         "flagCleared": "Flag cleared",
-        "vouched": "Vouched"
+        "vouched": "Vouched",
+        "limitBypassed": "Limit bypassed"
       },
       "tiles": {
         "score": "Score",
@@ -1022,6 +1023,37 @@
           "error": "Could not change trust: {message}",
           "declineError": "Could not decline the request: {message}"
         }
+      },
+      "newAccount": {
+        "title": "New-account limit",
+        "subtitle": "What a new team may send in its first days, counted from its first send.",
+        "window": "Day {day} of the limit · {cap} emails this day · resets {date}",
+        "waiting": "{count, plural, one {# email waits} other {# emails wait}} for the limit.",
+        "notLimited": "The limit does not hold this team now.",
+        "action": "Bypass limit",
+        "revoke": "Revoke bypass",
+        "status": "Bypassed by {operator} · {date} · {left, select, revoked {until revoked} other {{days, plural, one {# day left} other {# days left}}}}",
+        "effect": "The team sends without the new-account limit. Its plan, the domain warm-up and every other check still apply.",
+        "toast": {
+          "bypassed": "{team} · limit bypassed",
+          "revoked": "{team} · bypass revoked"
+        },
+        "dialog": {
+          "title": "Bypass the new-account limit for {team}",
+          "lead": "For a team you know. Mail waiting for the limit goes out with the next drain.",
+          "whileVouched": "While bypassed",
+          "whileVouchedValue": "No new-account limit · Waiting mail is released",
+          "stillApplies": "Still applies",
+          "stillAppliesValue": "Plan quotas · Domain warm-up · Content monitor · Bounce and complaint guardrails · Suspension",
+          "reasonHint": "Goes on the record with your name and the time.",
+          "lasts": "Lasts",
+          "30d": "30 days",
+          "90d": "90 days",
+          "forever": "Until revoked",
+          "until": "Until {date}",
+          "foreverSub": "Revoking is one click and goes on the record",
+          "confirm": "Bypass"
+        }
       }
     },
     "metric": {
@@ -1143,7 +1175,9 @@
         "escalation": "Escalation and caps",
         "thresholds": "Thresholds and policy",
         "warmup": "New-domain warm-up",
-        "sharedInbox": "Shared domain"
+        "sharedInbox": "Shared domain",
+        "newAccount": "New-account limit",
+        "sendBursts": "Send-burst alert"
       },
       "groupsSub": {
         "launch": "A team's first sends and hours are judged in full, then the ramp rate applies until its send count or day, whichever comes first.",
@@ -1152,7 +1186,9 @@
         "escalation": "A failing critical or major content check multiplies the rate; two force it. Caps stop sampling silently, never sending.",
         "thresholds": "Risk runs 0 to 1. A flag lists the team here and quadruples its rate; the alert puts the team in your daily digest email; the pause holds a new team's broadcasts when a sampled message also scored 90 or more; the review hold suspends a new team when one message is judged phishing at the hold score, or the set number of them at the lower score in its first week, until you release it.",
         "warmup": "A daily cap on each sending domain by its registration age, counted per UTC day, and one daily limit a team's warming domains share, the highest of their caps; mail over either waits and goes out as they allow. No plan lifts them. A domain whose age no registry publishes gets the 1 to 7 day cap while its team is new or on probation. 50 clean deliveries move a domain up a step early.",
-        "sharedInbox": "What addresses on the shared inbox domain may send; receiving is never affected. Open sending also needs the judge configured with the review hold on and, on the cloud, a paid plan: Free teams' addresses only reply inside their threads."
+        "sharedInbox": "What addresses on the shared inbox domain may send; receiving is never affected. Open sending also needs the judge configured with the review hold on and, on the cloud, a paid plan: Free teams' addresses only reply inside their threads.",
+        "newAccount": "Cloud only. Recipients a new team may send in each 24 hours counted from its first send: one cap for the first day, another for each later day of the limit. Mail over it is accepted and waits, and goes out as the limit allows; you hear of a team's first wait once. Off while both caps are 0. A bypass on the team's review page lifts it.",
+        "sendBursts": "Cloud only. Mails you once about a young team whose recent sends go mostly to one recipient each and mostly to one provider. It holds nothing. Off while the minimum is 0. Vouched teams and teams with a limit bypass are left out."
       },
       "fields": {
         "firstSends": "First sends judged in full",
@@ -1184,7 +1220,15 @@
         "sharedInboxSend": "Shared addresses send",
         "sharedInboxOpen": "Start conversations",
         "sharedInboxTenants": "Each team's SES tenant",
-        "sharedInboxTeamDailyCap": "Recipients per team per day"
+        "sharedInboxTeamDailyCap": "Recipients per team per day",
+        "newAccountFirstDay": "Cap · first 24 hours",
+        "newAccountDaily": "Cap · each later day",
+        "newAccountDays": "Limit lasts",
+        "burstMinSent": "Alert from sends",
+        "burstWindowHours": "Over the last hours",
+        "burstTeamAgeDays": "Teams younger than days",
+        "burstSingleShare": "Single-recipient share",
+        "burstProviderShare": "One provider share"
       },
       "hints": {
         "firstSends": "a team's first N accepted messages",
@@ -1216,7 +1260,15 @@
         "sharedInboxSend": "off: they send nothing, replies included; mail already queued waits until it's back on",
         "sharedInboxOpen": "paid teams' addresses write to anyone under each inbox's rules, first contacts judged; off: replies only",
         "sharedInboxTenants": "shared mail goes out under the sending team's tenant, so SES can pause that team alone; off: under none",
-        "sharedInboxTeamDailyCap": "recipients of mail from the shared domain per team per UTC day, approved sends included"
+        "sharedInboxTeamDailyCap": "recipients of mail from the shared domain per team per UTC day, approved sends included",
+        "newAccountFirstDay": "recipients in the 24 hours after the first send; 0 caps nothing",
+        "newAccountDaily": "recipients in each later 24 hours of the limit; 0 caps nothing",
+        "newAccountDays": "days from the first send, the first one included",
+        "burstMinSent": "emails sent in the window; 0 turns the alert off",
+        "burstWindowHours": "the window the sends are counted over",
+        "burstTeamAgeDays": "only teams created this recently",
+        "burstSingleShare": "of the latest sends, the share with one recipient",
+        "burstProviderShare": "of the latest sends, the share to the top provider family"
       },
       "kinds": {
         "count": "whole number",

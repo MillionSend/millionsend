@@ -22,6 +22,8 @@ const OPERATOR_ONLY_ACTIONS = [
   "monitor.override_cleared",
   "monitor.vouched",
   "monitor.vouch_revoked",
+  "monitor.limit_bypassed",
+  "monitor.limit_bypass_revoked",
 ];
 
 /**
