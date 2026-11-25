@@ -54,6 +54,7 @@ vi.mock("@/server/queue", () => ({
   enqueueEmailSend: async () => {},
   enqueueWebhookDeliveries: async () => {},
   enqueueRecipientErase: async () => {},
+  enqueueSesUnsuppress: async () => {},
 }));
 vi.mock("@/server/system-mail", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/server/system-mail")>();
