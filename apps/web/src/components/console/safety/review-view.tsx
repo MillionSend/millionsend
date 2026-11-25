@@ -234,7 +234,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
     );
   };
   const { pauseLift } = standing;
-  const liftReason = pauseLift.refusal ? liftRefusal(pauseLift.refusal, pauseLift) : null;
+  const liftReason = pauseLift.refusal ? liftRefusal(pauseLift.refusal) : null;
   const submitLift = (input: { reference: string; note: string; notify: boolean }) =>
     lift.mutate(
       { id: team.id, ...input },
@@ -246,16 +246,14 @@ export function ReviewView({ teamId }: { teamId: string }) {
           clearTimeout(flagSync.current);
           flagSync.current = setTimeout(refetch, FLAG_SYNC_MS);
         },
-        onError: async (error) => {
+        onError: (error) => {
           if (trpcErrorCode(error) !== "PRECONDITION_FAILED") {
             toast(teamsT("toast.error", { message: error.message }), "danger");
             return;
           }
           setLifting(false);
-          // From a fresh read: the page's own dates are as old as the button that was clicked.
-          const { data } = await query.refetch();
-          const fresh = data?.standing.pauseLift ?? pauseLift;
-          toast(liftRefusal(error.message as PauseLiftRefusal, fresh), "danger");
+          refetch();
+          toast(liftRefusal(error.message as PauseLiftRefusal), "danger");
         },
       },
     );

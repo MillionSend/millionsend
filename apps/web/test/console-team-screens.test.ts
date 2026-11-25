@@ -406,29 +406,16 @@ describe("the review page's Lift sending pause", () => {
     expect(h.refetch).toHaveBeenCalledTimes(3);
   });
 
-  it("answers a refused confirm with the refusal, dated from a fresh read", async () => {
+  it("answers a refused confirm with the refusal and reads the page again", async () => {
     await confirmLift("lift-refused");
-    const review = h.review as { standing: { pauseLift: object } };
-    h.refetch.mockResolvedValueOnce({
-      data: {
-        ...review,
-        standing: {
-          ...review.standing,
-          pauseLift: {
-            ...review.standing.pauseLift,
-            refusal: "cooldown",
-            lastLiftAt: new Date("2026-08-14T15:00:00.000Z"),
-            nextLiftAt: new Date("2026-09-14T00:00:00.000Z"),
-          },
-        },
-      },
-    });
+    h.refetch.mockClear();
     await act(async () =>
-      h.callbacks?.onError?.({ data: { code: "PRECONDITION_FAILED" }, message: "cooldown" }),
+      h.callbacks?.onError?.({ data: { code: "PRECONDITION_FAILED" }, message: "monitor" }),
     );
     expect(liftDialog()).toBeNull();
+    expect(h.refetch).toHaveBeenCalledTimes(1);
     expect(h.toast).toHaveBeenCalledWith(
-      "Lifted on Aug 14. The next lift is possible from Sep 14.",
+      "The content monitor's risk is over its flag line. No lift until it drops back under.",
       "danger",
     );
   });

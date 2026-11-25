@@ -2040,7 +2040,7 @@ describe("console.teams.liftPause", () => {
     vi.useRealTimers();
   });
 
-  it("lifts a bounce pause once per cooldown, telling the owner but keeping the review's notes from the team", async () => {
+  it("lifts a bounce pause, again on a new pause, telling the owner but keeping the review's notes from the team", async () => {
     vi.stubEnv("AUTH_EMAIL_FROM", "MillionSend <no-reply@millionsend.test>");
     const c = schema.usageCounters;
     const lifting = await createTeam(db, "lift-acme");
@@ -2068,7 +2068,6 @@ describe("console.teams.liftPause", () => {
       rate: 0.1,
       parked: 1,
       lastLiftAt: null,
-      nextLiftAt: null,
     });
 
     const lift = {
@@ -2121,10 +2120,7 @@ describe("console.teams.liftPause", () => {
     // 12 hard bounces in the 150 sends after the lift: past the line again.
     await db.update(c).set({ sent: 350, hardBounced: 32 }).where(eq(c.teamId, lifting));
     expect((await sendRefusal(db, lifting))?.reason).toBe("sending_paused");
-    await expect(operator().console.teams.liftPause(lift)).rejects.toMatchObject({
-      code: "PRECONDITION_FAILED",
-      message: "cooldown",
-    });
+    expect(await operator().console.teams.liftPause(lift)).toEqual({ sent: 350, hardBounces: 32 });
     await db.delete(schema.teams).where(eq(schema.teams.id, lifting));
   });
 });

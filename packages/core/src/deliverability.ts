@@ -6,7 +6,7 @@ import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { freePoolOwner } from "./plans.js";
-import { DAY_MS, nextUtcDayStart, windowStartDay } from "./utc-day.js";
+import { windowStartDay } from "./utc-day.js";
 
 /**
  * Single source of truth for deliverability thresholds and standing. The
@@ -308,25 +308,13 @@ export async function fetchDeliverabilityHealth(
   };
 }
 
-/** Days between a team's pause lifts, from the latest team.sending_pause_lifted audit row. */
-export const PAUSE_LIFT_COOLDOWN_DAYS = 30;
-
-/**
- * When the cooldown after a lift at `lastLiftAt` ends: rounded up to a UTC
- * midnight, so the day a refusal names is a day a lift works from its start.
- */
-export function pauseLiftCooldownEnd(lastLiftAt: Date): Date {
-  return nextUtcDayStart(lastLiftAt.getTime() + PAUSE_LIFT_COOLDOWN_DAYS * DAY_MS - 1);
-}
-
 export type PauseLiftRefusal =
   | "suspended"
   | "free"
   | "not_paused"
   | "complaints"
   | "flagged"
-  | "monitor"
-  | "cooldown";
+  | "monitor";
 
 /**
  * Why an operator may not lift the team's deliverability pause now, or null
@@ -342,8 +330,6 @@ export function pauseLiftRefusal(f: {
   monitorFlagRisk: number;
   /** An operator vouched for the team's content: its monitor risk blocks nothing. */
   monitorVouched?: boolean;
-  lastLiftAt: Date | null;
-  now: Date;
 }): PauseLiftRefusal | null {
   if (f.suspended) return "suspended";
   if (f.freePool) return "free";
@@ -358,9 +344,6 @@ export function pauseLiftRefusal(f: {
   // so read the risk itself.
   if (!f.monitorVouched && f.monitorRisk !== null && f.monitorRisk >= f.monitorFlagRisk) {
     return "monitor";
-  }
-  if (f.lastLiftAt && f.now.getTime() < pauseLiftCooldownEnd(f.lastLiftAt).getTime()) {
-    return "cooldown";
   }
   return null;
 }

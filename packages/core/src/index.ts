@@ -402,7 +402,6 @@ export {
   MIN_WARN_COMPLAINTS,
   PAUSE_BOUNCE_RATE,
   PAUSE_COMPLAINT_RATE,
-  PAUSE_LIFT_COOLDOWN_DAYS,
   PAUSE_WINDOW_DAYS,
   type PauseLiftRefusal,
   pauseLiftRefusal,

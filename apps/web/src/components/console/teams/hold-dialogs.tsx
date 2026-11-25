@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  PAUSE_LIFT_COOLDOWN_DAYS,
-  PAUSE_WINDOW_DAYS,
-  type PauseLiftRefusal,
-} from "@millionsend/core/deliverability";
+import { PAUSE_WINDOW_DAYS, type PauseLiftRefusal } from "@millionsend/core/deliverability";
 import { useLocale, useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { KV_SENTENCE, KvRow } from "@/components/kv-row";
@@ -296,19 +292,9 @@ interface PauseLiftPreview {
 }
 
 /** A refusal's one sentence: the disabled lift button's tooltip and a refused confirm's toast. */
-export function useLiftRefusal(): (
-  refusal: PauseLiftRefusal,
-  lift: { lastLiftAt: Date | null; nextLiftAt: Date | null },
-) => string {
+export function useLiftRefusal(): (refusal: PauseLiftRefusal) => string {
   const t = useTranslations("console.teams.liftRefusal");
-  const locale = useLocale();
-  const day = (at: Date | null) => (at ? formatDayUtc(at, locale) : "");
-  return (refusal, lift) =>
-    t(refusal, {
-      window: PAUSE_WINDOW_DAYS,
-      last: day(lift.lastLiftAt),
-      next: day(lift.nextLiftAt),
-    });
+  return (refusal) => t(refusal, { window: PAUSE_WINDOW_DAYS });
 }
 
 /**
@@ -352,7 +338,7 @@ export function LiftPauseDialog({
         }}
       >
         <p style={{ margin: "6px 0 16px", color: "var(--ms-muted)", fontSize: 13.5 }}>
-          {t("lead", { window: PAUSE_WINDOW_DAYS, days: PAUSE_LIFT_COOLDOWN_DAYS })}
+          {t("lead", { window: PAUSE_WINDOW_DAYS })}
         </p>
         <dl className="ms-kv ms-kv-cols" style={{ marginBottom: 16 }}>
           <KvRow label={t("pausedOn")} valueStyle={KV_SENTENCE}>
@@ -368,9 +354,7 @@ export function LiftPauseDialog({
           <KvRow label={t("waiting")} valueStyle={KV_SENTENCE}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               {t("waitingValue", { count: lift.parked })}
-              {lift.parked > 0 ? (
-                <Tooltip text={t("waitingTip", { days: PAUSE_LIFT_COOLDOWN_DAYS })} />
-              ) : null}
+              {lift.parked > 0 ? <Tooltip text={t("waitingTip")} /> : null}
             </span>
           </KvRow>
           <KvRow label={t("lastLift")} valueStyle={KV_SENTENCE}>
