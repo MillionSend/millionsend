@@ -221,6 +221,13 @@ ABUSE_JUDGE=off
 ABUSE_JUDGE_API_KEY=
 ABUSE_JUDGE_MODEL=jev-1.13.0
 
+# Detection rules (see "Detection rules" in SELF_HOSTING.md): the judge's
+# questions, the brand and host lists and the screening numbers, as a JSON
+# file mounted read-only. Unset runs the built-in rules; a file that fails
+# validation stops boot. Start one from
+# \`pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts defaults\`.
+ABUSE_RULES_FILE=
+
 # Image reading for the judge (see "Image reading" in SELF_HOSTING.md):
 # Claude Haiku 5.5 on Amazon Bedrock writes down the text in an email's
 # images, with the worker's AWS credentials, through ABUSE_VISION_REGION's
