@@ -296,6 +296,8 @@ export {
   emitContactEvents,
   emitSuppressionEvents,
   loadContactSnapshots,
+  type SesUnsuppressEnqueue,
+  type SesUnsuppressRequest,
   type SuppressionEventRow,
   webhookEventForActivity,
 } from "./contact-events.js";

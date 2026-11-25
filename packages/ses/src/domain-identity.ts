@@ -8,6 +8,7 @@ import {
   PutEmailIdentityMailFromAttributesCommand,
   SESv2Client,
 } from "@aws-sdk/client-sesv2";
+import type { SuppressionCommand } from "./suppression.js";
 import type { TenantCommand } from "./tenants.js";
 
 /** SES regions offered for domain identities. */
@@ -23,6 +24,7 @@ type IdentityCommand =
   | PutEmailIdentityMailFromAttributesCommand
   | GetEmailIdentityCommand
   | DeleteEmailIdentityCommand
+  | SuppressionCommand
   | TenantCommand;
 
 /**
