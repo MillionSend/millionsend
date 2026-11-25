@@ -134,6 +134,7 @@ const app = createApi({
   enqueueDomainAge: async (domainId) => {
     await queue.send("domain.age", { domainId }, { dedupeKey: domainId });
   },
+  enqueueSesUnsuppress: (requests) => queue.enqueueSesUnsuppress(requests),
   enqueueRecipientErase: async (teamId, address) => {
     await queue.send(
       "recipient.erase",

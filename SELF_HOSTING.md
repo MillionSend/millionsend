@@ -1668,6 +1668,25 @@ page.
 </details>
 
 <details>
+<summary><b>New-account limit and send-burst alert (optional)</b></summary>
+
+Cloud only (`IS_CLOUD`) and off by default; set them in the console (Trust &
+safety → Monitoring settings) or the environment, the console winning.
+`NEW_ACCOUNT_FIRST_DAY` and `NEW_ACCOUNT_DAILY` (default 0, off) cap the
+recipients a team sends in its first 24 hours after its first send and in each
+later 24 hours of its first `NEW_ACCOUNT_DAYS` (default 7); mail over the cap
+parks (`park_reason = 'new_account'`, API `queued_reason: "new_account_limit"`),
+is never refused for it, and `quota.drain` sends it as the limit allows. The
+operator is mailed once per team and can bypass the limit from its review page.
+`BURST_MIN_SENT` (default 0, off), `BURST_WINDOW_HOURS`, `BURST_TEAM_AGE_DAYS`,
+`BURST_SINGLE_SHARE` and `BURST_PROVIDER_SHARE` drive the `safety.bursts` job,
+which mails the operator once about a young team whose recent sends match
+those settings; it holds nothing. The full
+description is in the docs' self-hosting page.
+
+</details>
+
+<details>
 <summary><b>Content access (break-glass)</b></summary>
 
 Off by default. With it on, an authorised operator can read the subject and

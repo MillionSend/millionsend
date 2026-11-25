@@ -19,8 +19,10 @@ import {
   getMonitorSettingsRow,
   heldByNewDomainLimit,
   isHoldVerdict,
+  limitBypassActive,
   listLimitRequests,
   monitorFlagLine,
+  newAccountCap,
   OPERATOR_PARK_REASONS,
   openMediaReview,
   parseAuditActor,
@@ -666,6 +668,34 @@ export const consoleSafetyRouter = router({
       .from(schema.teamMonitor)
       .leftJoin(schema.user, eq(schema.user.id, schema.teamMonitor.vouchedBy))
       .where(and(eq(schema.teamMonitor.teamId, team.id), isNotNull(schema.teamMonitor.vouchedAt)));
+    const [bypass] = await ctx.db
+      .select({
+        at: schema.teamMonitor.limitBypassAt,
+        until: schema.teamMonitor.limitBypassUntil,
+        reason: schema.teamMonitor.limitBypassReason,
+        byName: schema.user.name,
+        byEmail: schema.user.email,
+      })
+      .from(schema.teamMonitor)
+      .leftJoin(schema.user, eq(schema.user.id, schema.teamMonitor.limitBypassBy))
+      .where(
+        and(eq(schema.teamMonitor.teamId, team.id), isNotNull(schema.teamMonitor.limitBypassAt)),
+      );
+    const newAccountCapNow = await newAccountCap(ctx.db, {
+      teamId: team.id,
+      at: now,
+      readOnly: true,
+    });
+    const [newAccountWaiting] = await ctx.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.emails)
+      .where(
+        and(
+          eq(schema.emails.teamId, team.id),
+          eq(schema.emails.latestStatus, "queued_quota"),
+          eq(schema.emails.parkReason, "new_account"),
+        ),
+      );
     // The judge's answer for each flagged email, when it was drawn; the verdict fields only.
     const ms = schema.monitorSamples;
     const flaggedIds = flagged.map((row) => row.id);
@@ -785,6 +815,23 @@ export const consoleSafetyRouter = router({
               active: vouchActive({ vouchedAt: vouch.at, vouchUntil: vouch.until }, now),
             }
           : null,
+      newAccount: {
+        cap: newAccountCapNow,
+        waiting: newAccountWaiting?.n ?? 0,
+        bypass:
+          bypass?.at != null
+            ? {
+                by: bypass.byName || bypass.byEmail,
+                at: bypass.at,
+                until: bypass.until,
+                reason: bypass.reason,
+                active: limitBypassActive(
+                  { limitBypassAt: bypass.at, limitBypassUntil: bypass.until },
+                  now,
+                ),
+              }
+            : null,
+      },
       monitor: {
         ...monitor,
         samples,

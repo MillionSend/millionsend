@@ -23,11 +23,13 @@ async function insertSentEmail(
   contactId: string | null = null,
   sentAt = new Date(),
   team = teamId,
+  poolOwnerId: string | null = null,
 ): Promise<string> {
   const [row] = await db
     .insert(schema.emails)
     .values({
       teamId: team,
+      poolOwnerId,
       contactId,
       from: "a@acme.dev",
       to,
@@ -360,7 +362,14 @@ describe("feedback from the mailbox simulator and Free pools", () => {
       [pooled, "mid-pool-complaint"],
       [paid, "mid-paid-complaint"],
     ] as const) {
-      await insertSentEmail(mid, ["r@example.com"], null, new Date(), team);
+      await insertSentEmail(
+        mid,
+        ["r@example.com"],
+        null,
+        new Date(),
+        team,
+        team === pooled ? owner : null,
+      );
       await processSesEvent(
         db,
         makeEvent({
@@ -371,7 +380,7 @@ describe("feedback from the mailbox simulator and Free pools", () => {
         }),
       );
     }
-    await insertSentEmail("mid-pool-bounce", ["gone@example.com"], null, new Date(), pooled);
+    await insertSentEmail("mid-pool-bounce", ["gone@example.com"], null, new Date(), pooled, owner);
     await processSesEvent(
       db,
       makeEvent({
@@ -385,7 +394,7 @@ describe("feedback from the mailbox simulator and Free pools", () => {
         },
       }),
     );
-    await insertSentEmail("mid-pool-delivery", ["r@example.com"], null, new Date(), pooled);
+    await insertSentEmail("mid-pool-delivery", ["r@example.com"], null, new Date(), pooled, owner);
     await processSesEvent(
       db,
       makeEvent({ eventType: "Delivery", sesMessageId: "mid-pool-delivery", occurredAt: at }),
@@ -495,6 +504,29 @@ describe("feedback from the mailbox simulator and Free pools", () => {
         complained: 0,
       },
     ]);
+  });
+
+  it("keeps a complaint on mail sent while paid out of the pool, even once the team drops to Free", async () => {
+    const owner = "u-events-downgraded";
+    const downgraded = await createTeam(db, "events-downgraded", { poolOwnerId: owner });
+    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, downgraded));
+    const sentAt = "2026-09-26T10:00:00.000Z";
+    await insertSentEmail("mid-downgraded", ["r@example.com"], null, new Date(sentAt), downgraded);
+    await db.update(schema.teams).set({ plan: "free" }).where(eq(schema.teams.id, downgraded));
+    await processSesEvent(
+      db,
+      makeEvent({
+        eventType: "Complaint",
+        sesMessageId: "mid-downgraded",
+        occurredAt: "2026-09-27T10:00:00.000Z",
+        sentAt,
+        complaint: { recipients: ["r@example.com"] },
+      }),
+    );
+    expect(await dailyOf(downgraded, sentAt.slice(0, 10))).toMatchObject({ complained: 1 });
+    expect(
+      await db.select().from(schema.freePoolUsage).where(eq(schema.freePoolUsage.ownerId, owner)),
+    ).toEqual([]);
   });
 
   it("counts a complaint in the pool its send was tagged with, even once the team left Free", async () => {

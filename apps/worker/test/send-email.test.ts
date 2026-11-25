@@ -2192,6 +2192,12 @@ it("tags a Free pool's sends with the pool for SES, and a paid or creator-less t
       to: ["g@gmail.com"],
     });
     expect(await sendEmail(db, { keyring, ses }, { emailId })).toBe("sent");
+    // The row keeps the tag the send carried, for the Free fuse.
+    const [row] = await db
+      .select({ poolOwnerId: schema.emails.poolOwnerId })
+      .from(schema.emails)
+      .where(eq(schema.emails.id, emailId));
+    expect(row?.poolOwnerId ?? undefined).toBe(sends[0]?.poolOwnerId);
     return sends[0]?.poolOwnerId;
   };
   const pooled = await createTeam(db, "send-tag-free", { poolOwnerId: owner });

@@ -72,6 +72,13 @@ export const SES_IAM_POLICY = {
       ],
       Resource: "*",
     },
+    // A team removing an address from its suppression list clears SES's
+    // account-level list too; the action has no resource-level scope.
+    {
+      Effect: "Allow",
+      Action: ["ses:DeleteSuppressedDestination"],
+      Resource: "*",
+    },
     // SES's own complaint rate (Reputation.ComplaintRate), which the region
     // breaker judges, is published as a CloudWatch metric.
     {

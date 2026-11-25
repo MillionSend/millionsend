@@ -4,6 +4,7 @@ import {
   integer,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uuid,
@@ -210,4 +211,21 @@ export const teamWarmupUsage = pgTable(
     accepted: integer("accepted").notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.teamId, t.day] })],
+);
+
+/**
+ * Recipients a new team accepted per day of its account (day 0 starts at its
+ * first send): the new-account limit's counter, reserved like
+ * team_warmup_usage. Rows past the limit's last day are never written.
+ */
+export const teamNewAccountUsage = pgTable(
+  "team_new_account_usage",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    dayIndex: smallint("day_index").notNull(),
+    accepted: integer("accepted").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.dayIndex] })],
 );

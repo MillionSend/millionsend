@@ -1,5 +1,5 @@
 import { env } from "@millionsend/config";
-import { hashRecipient, type WebhookEnqueue } from "@millionsend/core";
+import { hashRecipient, type SesUnsuppressEnqueue, type WebhookEnqueue } from "@millionsend/core";
 import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
 
 let instance: Promise<Queue> | undefined;
@@ -36,6 +36,11 @@ export const enqueueWebhookDeliveries: WebhookEnqueue = async (deliveries) => {
   if (deliveries.length === 0) return;
   const queue = await getQueue();
   await queue.drainWebhookEndpoints(deliveries.map((d) => d.endpointId));
+};
+
+/** Clear addresses a team removed from its suppression list from SES's own list, in the worker. */
+export const enqueueSesUnsuppress: SesUnsuppressEnqueue = async (requests) => {
+  await (await getQueue()).enqueueSesUnsuppress(requests);
 };
 
 /** Forward a message released from quarantine to its inbox's forward_to addresses, in the worker. */

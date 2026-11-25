@@ -32,12 +32,13 @@ afterEach(async () => {
   await close();
 });
 
-function caller(teamId: string, role: Context["role"] = "owner") {
+function caller(teamId: string, role: Context["role"] = "owner", extra: Partial<Context> = {}) {
   const ctx: Context = {
     db,
     session: { user: { id: "u1", email: "u1@example.com", name: "u1" } },
     teamId,
     role,
+    ...extra,
   };
   return createCaller(ctx);
 }
@@ -769,6 +770,22 @@ describe("emails.suppressions", () => {
     await caller(teamA).emails.suppressions.remove({ id: added.id });
     const afterRemove = await caller(teamA).emails.suppressions.list({});
     expect(afterRemove.items).toHaveLength(0);
+  });
+
+  it("hands a removed address to the worker to clear SES's own list", async () => {
+    const teamA = await createTeam(db, "team-a");
+    const requests: unknown[] = [];
+    const extra = {
+      enqueueSesUnsuppress: async (batch: readonly unknown[]) => {
+        requests.push(...batch);
+      },
+    };
+    const added = await caller(teamA).emails.suppressions.add({
+      email: "Lift@Example.com",
+      reason: "manual",
+    });
+    await caller(teamA, "owner", extra).emails.suppressions.remove({ id: added.id });
+    expect(requests).toEqual([{ teamId: teamA, email: "Lift@Example.com", sourceEmailId: null }]);
   });
 
   it("pages without skipping same-millisecond suppressions", async () => {

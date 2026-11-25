@@ -63,7 +63,8 @@
     "waitingFor": {
       "domain_limit": "Waiting · daily limit",
       "warmup": "Waiting · warm-up",
-      "plan": "Waiting · plan limit"
+      "plan": "Waiting · plan limit",
+      "new_account": "Waiting · new account limit"
     },
     "waitingTip": {
       "spentDomain": "{domain} sent its {cap} emails for today.",
@@ -73,7 +74,8 @@
       "room": "{domain} has room again today, so this one goes out within minutes.",
       "warmup": "The domain's warm-up sends a little more each day. This one goes out as the warm-up allows.",
       "warmupPaused": "The domain's warm-up is paused. This one goes out after it resumes.",
-      "plan": "Your plan's limit is reached. This one goes out when it renews, {date}."
+      "plan": "Your plan's limit is reached. This one goes out when it renews, {date}.",
+      "newAccount": "New accounts send a limited number of emails in their first days. This one goes out as the limit allows."
     },
     "limitBanner": {
       "title": "{count, plural, one {# email is waiting for {domain}'s daily limit.} other {# emails are waiting for {domain}'s daily limit.}}",
@@ -179,7 +181,10 @@
       "expectedSoon": "in a few minutes",
       "expectedNext": "after 00:00 UTC",
       "expectedBody": "About {time} your time. Waiting mail goes out oldest first.",
-      "expectedSoonBody": "Waiting mail goes out oldest first."
+      "expectedSoonBody": "Waiting mail goes out oldest first.",
+      "newAccount": "Waiting for the new account limit",
+      "newAccountBody": "New accounts send a limited number of emails in their first days. This email goes out as the limit allows.",
+      "newAccountBodyDate": "New accounts send a limited number of emails in their first days. The limit resets {date}; this email goes out as it allows."
     },
     "headers": "Headers",
     "noHeaders": "No headers.",
@@ -361,7 +366,7 @@
     "blocked": "A bounce, complaint or manual entry drops the address from every send; an unsubscribe only from topic sends and broadcasts. If no <code>to</code> recipient is left, the API refuses the send with <code>422 all_recipients_suppressed</code>.",
     "suggestedActions": "Suggested actions",
     "step1": "Confirm the mailbox exists now — removing early usually re-bounces.",
-    "step2": "Then remove the suppression; the next send goes through normally.",
+    "step2": "Then remove the suppression; it also leaves SES's list shortly after, so wait a few minutes before resending.",
     "remove": "Remove email address"
   },
   "suppressions": {

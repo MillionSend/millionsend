@@ -345,6 +345,16 @@ export const env = createEnv({
     WARMUP_CAP_FIRST_DAY: z.coerce.number().int().min(0).optional(),
     WARMUP_CAP_FIRST_WEEK: z.coerce.number().int().min(0).optional(),
     WARMUP_CAP_FIRST_MONTH: z.coerce.number().int().min(0).optional(),
+    // New-account limit and send-burst alert (cloud only), off by default;
+    // instance settings override these too.
+    NEW_ACCOUNT_FIRST_DAY: z.coerce.number().int().min(0).optional(),
+    NEW_ACCOUNT_DAILY: z.coerce.number().int().min(0).optional(),
+    NEW_ACCOUNT_DAYS: z.coerce.number().int().min(0).optional(),
+    BURST_MIN_SENT: z.coerce.number().int().min(0).optional(),
+    BURST_WINDOW_HOURS: z.coerce.number().int().min(0).optional(),
+    BURST_TEAM_AGE_DAYS: z.coerce.number().int().min(0).optional(),
+    BURST_SINGLE_SHARE: z.coerce.number().min(0).max(1).optional(),
+    BURST_PROVIDER_SHARE: z.coerce.number().min(0).max(1).optional(),
 
     // Sign-up, invitations and email changes refuse addresses on the
     // disposable-email-domains list (sub.mailinator.com counts as mailinator.com);

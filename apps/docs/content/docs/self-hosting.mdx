@@ -1943,6 +1943,42 @@ source (`rdap`, `whois`, `ct` or `unknown`) and the time of the check are
 stored on the domain row; a certificate's date never replaces a registry's
 found on an earlier check.
 
+## New-account limit and send-burst alert (optional)
+
+Both are cloud only (`IS_CLOUD`) and off by default; nothing changes until
+the operator sets them in the console under Trust & safety → Monitoring
+settings, or as their environment variables (the console wins).
+
+**New-account limit.** Caps the recipients a team may send in each 24 hours
+counted from its first send, for its first `NEW_ACCOUNT_DAYS` days. Mail over
+the cap is accepted, parks as `queued_quota` (`park_reason = 'new_account'`)
+and is never refused for that wait; the 15-minute `quota.drain` sends it as
+the limit allows. The API reads it back as `queued_reason:
+"new_account_limit"`. The operator gets one email when a team's mail first
+waits for it, with a link to the team's review page, where **Bypass limit**
+lifts it for 30 days, 90 days or until revoked (audited) and releases the
+waiting mail. The system plan and account mail are never limited.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `NEW_ACCOUNT_FIRST_DAY` | 0 (off) | Recipients in the first 24 hours after the first send; 0 caps nothing |
+| `NEW_ACCOUNT_DAILY` | 0 (off) | Recipients in each later 24 hours of the limit; 0 caps nothing |
+| `NEW_ACCOUNT_DAYS` | 7 | How many 24-hour windows the limit lasts, the first included |
+
+**Send-burst alert.** Every 5 minutes the worker's `safety.bursts` job looks
+for young teams whose recent sends match the settings below; the consumer
+domains of one mailbox operator count as one provider family. The operator
+gets one email per team with a link to its review page. It holds
+nothing. Vouched teams and teams with a limit bypass are left out.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `BURST_MIN_SENT` | 0 (off) | Sends in the window that make a team a candidate; 0 turns the alert off |
+| `BURST_WINDOW_HOURS` | 24 | The window the sends are counted over |
+| `BURST_TEAM_AGE_DAYS` | 7 | Only teams created within this many days |
+| `BURST_SINGLE_SHARE` | 0 | Share (0–1) of the latest sends with one recipient |
+| `BURST_PROVIDER_SHARE` | 0 | Share (0–1) of the latest sends to the top provider family |
+
 ## Content access (break-glass)
 
 Off by default. With it on, an authorised operator can read the subject and

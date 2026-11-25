@@ -1,0 +1,31 @@
+CREATE TABLE "team_new_account_usage" (
+	"team_id" uuid NOT NULL,
+	"day_index" smallint NOT NULL,
+	"accepted" integer DEFAULT 0 NOT NULL,
+	CONSTRAINT "team_new_account_usage_team_id_day_index_pk" PRIMARY KEY("team_id","day_index")
+);
+--> statement-breakpoint
+ALTER TABLE "emails" ADD COLUMN "pool_owner_id" text;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "new_account_first_day" integer;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "new_account_daily" integer;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "new_account_days" integer;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "burst_min_sent" integer;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "burst_window_hours" integer;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "burst_team_age_days" integer;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "burst_single_share" double precision;--> statement-breakpoint
+ALTER TABLE "instance_settings" ADD COLUMN "burst_provider_share" double precision;--> statement-breakpoint
+ALTER TABLE "team_monitor" ADD COLUMN "limit_bypass_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "team_monitor" ADD COLUMN "limit_bypass_by" text;--> statement-breakpoint
+ALTER TABLE "team_monitor" ADD COLUMN "limit_bypass_reason" text;--> statement-breakpoint
+ALTER TABLE "team_monitor" ADD COLUMN "limit_bypass_until" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "team_monitor" ADD COLUMN "new_account_alerted_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "teams" ADD COLUMN "send_burst_alerted_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "team_new_account_usage" ADD CONSTRAINT "team_new_account_usage_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+-- The Free fuse counts complaints by the pool tag the send carried. Mail sent
+-- inside its window before the column existed takes the team's pool only when
+-- the team was Free for the whole window: never billed, or its period ended
+-- before the window. A refund ends a plan without moving the period's end, so
+-- a refunded team stays out and its paid-era mail never counts as Free. The
+-- plan is compared as text: a fresh database adds 'system' in this same
+-- transaction, and Postgres refuses a new enum value before it commits.
+UPDATE "emails" SET "pool_owner_id" = "teams"."pool_owner_id" FROM "teams" WHERE "emails"."team_id" = "teams"."id" AND "emails"."sent_at" >= now() - interval '7 days' AND "teams"."pool_owner_id" IS NOT NULL AND "teams"."plan"::text <> 'system' AND (("teams"."plan"::text = 'free' AND "teams"."current_period_end" IS NULL) OR "teams"."current_period_end" < now() - interval '7 days');

@@ -58,6 +58,7 @@ async function sender(name: string, plan: "free" | "pro", sent: number, complain
         to: [`r${i}@example.com`],
         subject: "s",
         sentAt: hoursAgo(3),
+        poolOwnerId: plan === "free" ? teamId : null,
       })),
     )
     .returning({ id: schema.emails.id });
