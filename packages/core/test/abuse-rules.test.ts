@@ -121,7 +121,9 @@ describe("loadAbuseRulesFile", () => {
     expect(() => loadAbuseRulesFile(missing)).toThrow(`${missing} cannot be read (ENOENT)`);
     const broken = join(dir, "broken.json");
     writeFileSync(broken, '{"policy": "secret wording"');
-    expect(() => loadAbuseRulesFile(broken)).toThrow(`abuse rules file ${broken} is not valid JSON`);
+    expect(() => loadAbuseRulesFile(broken)).toThrow(
+      `abuse rules file ${broken} is not valid JSON`,
+    );
     expect(() => loadAbuseRulesFile(broken)).not.toThrow(/secret/);
   });
 });
