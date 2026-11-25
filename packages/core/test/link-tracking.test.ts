@@ -163,6 +163,20 @@ describe("rewriteForTracking — click", () => {
     expect(out).toBe(`<a href="${unsub}">unsub</a>`);
   });
 
+  it("tracks a link whose href holds a numeric reference past the last code point", () => {
+    // String.fromCodePoint throws on these; a throw here fails the send on
+    // every retry, for a body the API already accepted.
+    const src =
+      '<a href="https://acme.example/?a=&#99999999;">a</a>' +
+      '<a href="https://acme.example/?b=&#x110000;&amp;c=&#x3D;">b</a>';
+    const out = rewriteForTracking(src, opts({ click: true }));
+    const tokens = [...out.matchAll(/t\/c\/([^"']+)/g)].map((m) => m[1] as string);
+    expect(tokens.map((token) => verifyClickToken(token, key)?.url)).toEqual([
+      "https://acme.example/?a=&#99999999;",
+      "https://acme.example/?b=&#x110000;&c==",
+    ]);
+  });
+
   it("leaves an already-expanded unsubscribe link under skipHrefPrefix un-wrapped, still wrapping ordinary links", () => {
     // Broadcast path: {{{UNSUBSCRIBE_URL}}} was substituted to a real https URL
     // before encryption, so the {{{-token guard no longer covers it — the prefix
