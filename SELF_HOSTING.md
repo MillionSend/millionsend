@@ -1263,7 +1263,7 @@ with a link domain under 7 days old or of an age not known, and the operator's d
 automatically. A phishing-type verdict that rests only on a sign-in, reset,
 one-time-code or billing link to a product's own name on an app platform
 (`ref.supabase.co`, `app.up.railway.app`, `x.workers.dev`: the parents are
-`PLATFORM_HOST_PARENTS` in `packages/core`) or to a loopback address, on a
+`lists.platformHostParents` in the detection rules, see **Detection rules**) or to a loopback address, on a
 message judged before SES that is not a broadcast, poses as no other brand
 (it may when every link in it, one read from its images included, goes to a
 loopback address and it has no Reply-To: a framework's default template signs
@@ -1404,8 +1404,8 @@ and every number may change, and the check refuses a key that points at
 nothing. Each process reads the file once at boot and logs
 `abuse rules: <version> (file)`; a file that is missing or fails the check
 stops the boot, and its error names the file and the failing paths, never
-their contents. The Overview's Monitoring card shows the same version and
-source. A restart applies a new file. The thresholds are calibrated to the
+their contents. The Overview's Monitoring card shows the version and source the web
+container read, so mount the same file in every container. A restart applies a new file. The thresholds are calibrated to the
 wording: re-measure on a labelled set after changing either. Instance
 settings (below) stay in the console. The hosted service runs its own
 rules.

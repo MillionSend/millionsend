@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type AccountMailKind,
+  abuseRules,
   accountMailPhrase,
   applyMergeFields,
   broadcastAudienceWhere,
@@ -29,7 +30,6 @@ import {
   type MailLocale,
   type MonitorDeps,
   makeUnsubscribeToken,
-  NOVEL_DESTINATIONS_MAX,
   nextUtcDayStart,
   PACING_HORIZON_MAX_RETENTION_DAYS,
   pacingHorizonDays,
@@ -380,7 +380,7 @@ export async function sendBroadcast(
       now: new Date(),
     });
     if (
-      standing.novel.length > NOVEL_DESTINATIONS_MAX &&
+      standing.novel.length > abuseRules().limits.screening.novelDestinationsMax &&
       !vouchActive(await teamMonitorRow(db, broadcast.teamId), new Date())
     ) {
       screenParked = "destination";

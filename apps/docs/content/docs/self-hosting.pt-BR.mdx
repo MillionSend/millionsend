@@ -1691,7 +1691,8 @@ recusa uma chave que não aponta para nada. Cada processo lê o arquivo uma vez
 ao iniciar e registra `abuse rules: <versão> (file)`; um arquivo ausente ou
 que não passa na verificação impede a inicialização, e o erro cita o arquivo
 e os caminhos que falharam, nunca o conteúdo. O card Monitoramento da Visão
-geral mostra a mesma versão e a origem. Um reinício aplica um arquivo novo.
+geral mostra a versão e a origem que o contêiner web leu, então monte o mesmo
+arquivo em todo contêiner. Um reinício aplica um arquivo novo.
 Os limites são calibrados para a redação: meça de novo em um conjunto
 rotulado depois de mudar qualquer um dos dois. As configurações da instância
 (abaixo) continuam no console. O serviço hospedado usa as próprias regras.

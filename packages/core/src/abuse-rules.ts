@@ -44,6 +44,7 @@ const INBOUND_KEYS = {
     "credential_lure",
     "is_phishing",
     "is_spam",
+    "concealed",
   ],
   choice: ["category", "language"],
 };
@@ -194,6 +195,16 @@ export const abuseRulesSchema = z
     };
     reasonsOf("outbound");
     reasonsOf("inbound");
+    // The worker reads these by name: concealed inbound mail goes to suspicious,
+    // payment_redirect counts as a payment instrument, clean means no category.
+    if (!rules.judge.inbound.reasonKeys.includes("concealed")) {
+      fail(["judge", "inbound", "reasonKeys"], "must include concealed");
+    }
+    const criteria = rules.judge.outbound.questions.category?.criteria ?? {};
+    for (const c of ["clean", "payment_redirect"]) {
+      if (!(c in criteria))
+        fail(["judge", "outbound", "questions", "category", "criteria", c], "required");
+    }
     const categories = Object.keys(rules.judge.outbound.questions.category?.criteria ?? {}).filter(
       (c) => c !== "clean",
     );

@@ -88,6 +88,33 @@ describe("parseAbuseRules", () => {
     }
   });
 
+  it("refuses rules without the keys the worker reads by name", () => {
+    const message = errorOf(
+      rulesWith((r) => {
+        delete r.judge.inbound.questions.concealed;
+        r.judge.inbound.reasonKeys = r.judge.inbound.reasonKeys.filter((k) => k !== "concealed");
+        const criteria = r.judge.outbound.questions.category?.criteria ?? {};
+        delete criteria.clean;
+        delete criteria.payment_redirect;
+        r.keys.holdCategories = r.keys.holdCategories.filter((k) => k !== "payment_redirect");
+        r.keys.platformLinkCategories = r.keys.platformLinkCategories.filter(
+          (k) => k !== "payment_redirect",
+        );
+        r.keys.loopbackLinkCategories = r.keys.loopbackLinkCategories.filter(
+          (k) => k !== "payment_redirect",
+        );
+      }),
+    );
+    for (const path of [
+      "judge.inbound.questions.concealed",
+      "judge.inbound.reasonKeys",
+      "judge.outbound.questions.category.criteria.clean",
+      "judge.outbound.questions.category.criteria.payment_redirect",
+    ]) {
+      expect(message).toContain(path);
+    }
+  });
+
   it("refuses unknown fields and out-of-range numbers", () => {
     const message = errorOf({
       ...rulesWith((r) => {
