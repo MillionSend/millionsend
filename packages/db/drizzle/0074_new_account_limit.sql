@@ -21,6 +21,9 @@ ALTER TABLE "team_monitor" ADD COLUMN "limit_bypass_until" timestamp with time z
 ALTER TABLE "team_monitor" ADD COLUMN "new_account_alerted_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "teams" ADD COLUMN "send_burst_alerted_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "team_new_account_usage" ADD CONSTRAINT "team_new_account_usage_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
--- The Free fuse counts complaints by the pool tag the send carried; mail sent
--- inside its window before the tag existed takes the team's current one.
-UPDATE "emails" SET "pool_owner_id" = "teams"."pool_owner_id" FROM "teams" WHERE "emails"."team_id" = "teams"."id" AND "emails"."sent_at" >= now() - interval '7 days' AND "teams"."pool_owner_id" IS NOT NULL AND ("teams"."plan" = 'free' OR ("teams"."plan" <> 'system' AND "teams"."current_period_end" < now() - interval '7 days'));
+-- The Free fuse counts complaints by the pool tag the send carried. Mail sent
+-- inside its window before the column existed takes the team's pool only when
+-- the team was Free for the whole window: never billed, or its period ended
+-- before the window. A refund ends a plan without moving the period's end, so
+-- a refunded team stays out and its paid-era mail never counts as Free.
+UPDATE "emails" SET "pool_owner_id" = "teams"."pool_owner_id" FROM "teams" WHERE "emails"."team_id" = "teams"."id" AND "emails"."sent_at" >= now() - interval '7 days' AND "teams"."pool_owner_id" IS NOT NULL AND "teams"."plan" <> 'system' AND (("teams"."plan" = 'free' AND "teams"."current_period_end" IS NULL) OR "teams"."current_period_end" < now() - interval '7 days');
