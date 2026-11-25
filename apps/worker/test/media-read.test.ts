@@ -18,6 +18,7 @@ import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MediaPool } from "../src/media/pool.js";
 import {
+  MEDIA_JUDGE_IMAGES_MAX,
   type MediaReadDeps,
   prepareImage,
   readMediaForJudge,
@@ -326,6 +327,25 @@ describe("readMediaForJudge", () => {
     );
     expect(off.images).toEqual([]);
     expect(off.issues).toContain("vision_off");
+  });
+
+  it("caps the images the judge's call carries, without a media issue", async () => {
+    const colors = ["#111111", "#333333", "#555555", "#777777", "#999999", "#bbbbbb"];
+    const bodyImages = await Promise.all(
+      colors.map(async (background) => {
+        const png = await sharp({ create: { width: 300, height: 300, channels: 3, background } })
+          .png()
+          .toBuffer();
+        return `data:image/png;base64,${png.toString("base64")}`;
+      }),
+    );
+    const media = await readMediaForJudge(
+      { attachments: [], bodyImages, readBodyImages: true },
+      deps(null, { judgeImages: true }),
+    );
+    expect(media.images).toHaveLength(MEDIA_JUDGE_IMAGES_MAX);
+    expect(media.findings.images).toMatchObject({ read: MEDIA_JUDGE_IMAGES_MAX, notRead: 2 });
+    expect(media.issues).not.toContain("images_not_read");
   });
 
   it("reads attachments and body images, and the judge block carries what it found", async () => {

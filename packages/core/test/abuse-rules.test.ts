@@ -179,6 +179,21 @@ describe("parseAbuseRules", () => {
     );
     expect(unset).toContain("judge.vision.limit: required with questions");
     expect(unset).toContain("judge.vision.category: required with questions");
+    const cannotHold = errorOf(
+      rulesWith((r) => {
+        withFakeVision(r);
+        r.judge.vision.holdKeys = [];
+        r.judge.vision.limit = 0;
+        r.keys.holdReasons = DEFAULT_ABUSE_RULES.keys.holdReasons;
+      }),
+    );
+    for (const path of [
+      "judge.vision.holdKeys: must not be empty",
+      "judge.vision.limit: must be above 0",
+      "keys.holdReasons: must include image_lure",
+    ]) {
+      expect(cannotHold).toContain(path);
+    }
   });
 
   it("refuses warm-up tiers out of order", () => {

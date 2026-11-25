@@ -18,8 +18,6 @@ export interface JudgeVerdict {
   language: string;
   /** The versioned model id that answered, when the provider reported one. */
   model?: string;
-  /** The provider refused the images, so this verdict read the text alone. */
-  imagesRejected?: boolean;
 }
 
 /** The inbound question set's answer for one received message (abuse-judge/inbound.ts). */

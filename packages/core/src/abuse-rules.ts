@@ -245,6 +245,13 @@ export const abuseRulesSchema = z
         if (vision[field] === undefined)
           fail(["judge", "vision", field], "required with questions");
       }
+      // An image lure must be able to hold: a key that fires on every image,
+      // or a lure the hold never names, would only feed the score.
+      if (vision.holdKeys?.length === 0) fail(["judge", "vision", "holdKeys"], "must not be empty");
+      if (vision.limit === 0) fail(["judge", "vision", "limit"], "must be above 0");
+      if (!k.holdReasons.includes(IMAGE_LURE_REASON)) {
+        fail(["keys", "holdReasons"], `must include ${IMAGE_LURE_REASON} with image questions`);
+      }
     }
     subset(["judge", "vision", "holdKeys"], vision.holdKeys ?? [], imageKeys);
     if (vision.category !== undefined && !categories.includes(vision.category)) {

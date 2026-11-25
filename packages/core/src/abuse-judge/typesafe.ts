@@ -38,9 +38,6 @@ function classForStatus(status: number): "throttled" | "no_credentials" | "upstr
   return "upstream";
 }
 
-/** How TypeSafe answers a request it will not take as sent, an image it refuses among them. */
-const REJECTED = new Set([400, 413, 415, 422]);
-
 interface ImageAsset {
   type: "image";
   format: "jpeg";
@@ -120,8 +117,7 @@ const INBOUND: QuestionSpec<InboundJudgeVerdict> = {
 /**
  * The outbound call with images: each a fresh ref the state's `images` names,
  * and the rules' image questions beside the outbound ones. An image TypeSafe
- * refuses fails the whole request, so a refusal is asked again as text
- * alone: the verdict is never lost to an image.
+ * refuses fails the whole request; the caller asks again as text alone.
  */
 async function judgeWithImages(
   opts: TypesafeOptions,
@@ -136,22 +132,15 @@ async function judgeWithImages(
       { type: "image", format: "jpeg", data_base64: Buffer.from(jpeg).toString("base64") } as const,
     ]),
   );
-  let json: { answers?: unknown; model?: unknown };
-  try {
-    json = await askTypesafe(
-      opts,
-      {
-        state: { ...judgeState(block), images: refs.join(" ") },
-        questions: { ...OUTBOUND.questions(), ...imageQuestions() },
-        assets,
-      },
-      signal,
-    );
-  } catch (err) {
-    if (!(err instanceof JudgeError) || !REJECTED.has(err.status ?? 0)) throw err;
-    const verdict = await ask(opts, OUTBOUND, block, signal);
-    return { ...verdict, imagesRejected: true };
-  }
+  const json = await askTypesafe(
+    opts,
+    {
+      state: { ...judgeState(block), images: refs.join(" ") },
+      questions: { ...OUTBOUND.questions(), ...imageQuestions() },
+      assets,
+    },
+    signal,
+  );
   const verdict = composeJudgeVerdict(json.answers, { images: true });
   const model = answeredModel(json.model);
   return model ? { ...verdict, model } : verdict;

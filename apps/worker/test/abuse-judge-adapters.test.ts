@@ -98,20 +98,10 @@ it("sends no assets or image header without images", async () => {
   expect(Object.keys(calls[0]?.body ?? {}).sort()).toEqual(["model", "questions", "state"]);
 });
 
-it("asks once more as text alone when TypeSafe refuses the images", async () => {
-  for (const status of [400, 413, 415, 422]) {
-    const { calls, fetch } = recorder(status);
-    await expect(
-      withFetch(fetch).judge("block", { signal: signal(), images }),
-    ).resolves.toMatchObject({ score: 88, imagesRejected: true });
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.body.assets).toBeUndefined();
-    expect(calls[1]?.headers.has("typesafe-danger-zone-images")).toBe(false);
-  }
-  // A throttle is not about the images: it is the sample's to retry.
-  const { calls, fetch } = recorder(429);
+it("leaves a refused image call to the caller, with TypeSafe's status", async () => {
+  const { calls, fetch } = recorder(413);
   await expect(withFetch(fetch).judge("block", { signal: signal(), images })).rejects.toMatchObject(
-    { class: "throttled" },
+    { class: "upstream", status: 413 },
   );
   expect(calls).toHaveLength(1);
 });

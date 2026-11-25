@@ -47,6 +47,12 @@ import type { VisionReader, VisionReport, VisionResult } from "./vision.js";
 export const MEDIA_STEP_TIMEOUT_MS = 25_000;
 /** Images read per email, duplicates dropped, body images first. */
 export const MEDIA_IMAGES_MAX = 12;
+/**
+ * Images the judge's own call carries, body images first: each costs the
+ * call visual tokens and upload time on mail that may wait on the verdict.
+ */
+export const MEDIA_JUDGE_IMAGES_MAX = 4;
+const MEDIA_JUDGE_BYTES_MAX = 2 * 1024 * 1024;
 const BODY_FETCH_BUDGET_MS = 6_000;
 const BODY_FETCH_CONCURRENCY = 4;
 const URL_HASH_TTL_MS = 10 * 60_000;
@@ -458,10 +464,21 @@ export async function readMediaForJudge(
   const images: Buffer[] = [];
   if (items.length > 0 && deps.judgeImages) {
     const reads: ItemRead[] = [];
+    let bytes = 0;
     for (const item of items) {
-      const jpeg = await prepareForJudge(item);
-      if (Buffer.isBuffer(jpeg)) images.push(jpeg);
-      reads.push(Buffer.isBuffer(jpeg) ? NO_REPORT : jpeg);
+      const jpeg = images.length < MEDIA_JUDGE_IMAGES_MAX ? await prepareForJudge(item) : null;
+      if (typeof jpeg === "string") {
+        reads.push(jpeg);
+      } else if (jpeg && bytes + jpeg.length <= MEDIA_JUDGE_BYTES_MAX) {
+        images.push(jpeg);
+        bytes += jpeg.length;
+        reads.push(NO_REPORT);
+      } else {
+        // Counted as not read, but no media issue: a long newsletter is not
+        // unread mail for a new team's young domain to wait on.
+        notRead.push("over the judge's cap");
+        reads.push("small");
+      }
     }
     outcome = { status: "ok", items: reads };
   } else if (items.length > 0 && deps.vision) {

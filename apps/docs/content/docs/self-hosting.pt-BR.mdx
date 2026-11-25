@@ -1897,12 +1897,14 @@ manda as imagens para o TypeSafe, dentro da própria chamada do avaliador
 para a amostra, com `ABUSE_JUDGE_API_KEY`, `ABUSE_JUDGE_BASE_URL` e
 `ABUSE_JUDGE_MODEL` (um único modelo fixado lê o texto e as imagens), por
 isso precisa de `ABUSE_JUDGE=typesafe`. Nada é transcrito: as perguntas do
-avaliador veem as imagens ao lado do e-mail, até 12 por e-mail, lidas em
-todos os níveis. Antes, as imagens são recodificadas em JPEG, na posição
-certa, ajustadas a 1.120 px e completadas até pelo menos 280 px de lado. Se
-o TypeSafe recusar as imagens, o e-mail é avaliado de novo só pelo texto e
-a amostra registra `vision_rejected`; a avaliação nunca se perde por causa
-de uma imagem. Um arquivo de regras de detecção também pode fazer
+avaliador veem as imagens ao lado do e-mail, até 4 por e-mail e 2 MB no
+total, lidas em todos os níveis. Antes, as imagens são recodificadas em
+JPEG, na posição certa, ajustadas a 1.120 px e completadas até pelo menos
+280 px de lado. Se o TypeSafe recusar as imagens, ou se a chamada com elas
+estourar o tempo ou falhar, o e-mail é avaliado de novo só pelo texto, com
+as imagens contadas como não lidas, e a amostra registra `vision_rejected`
+ou `vision_unavailable`; a avaliação nunca se perde por causa de uma
+imagem. Um arquivo de regras de detecção também pode fazer
 perguntas próprias sobre as imagens (`judge.vision.questions`, com
 `holdKeys`, `limit` e `category`); as regras embutidas não fazem nenhuma.
 Quando uma pergunta de retenção responde no limite ou acima dele, a

@@ -16,9 +16,11 @@ import {
   isPlatformLinkVerdict,
   isSharedInboxSender,
   type JudgeBlockInput,
+  JudgeError,
   type JudgeVerdict,
   judgeErrorClass,
   type Keyring,
+  type MediaFindings,
   type MediaIssue,
   type MonitorSettings,
   type MonitorTier,
@@ -212,24 +214,52 @@ async function judgePending(
     return unjudged("media_unavailable", undefined, issues);
   }
   // Links to destinations the team never cleared lead the judge's link table.
-  const block = buildJudgeBlock({
-    ...loaded.input,
-    novelDomains: new Set(destinations),
-    media: media?.findings,
-  });
+  const blockFor = (findings: MediaFindings | undefined) =>
+    buildJudgeBlock({ ...loaded.input, novelDomains: new Set(destinations), media: findings });
+  const block = blockFor(media?.findings);
   const timeoutMs = sample.screening
     ? SCREEN_JUDGE_TIMEOUT_MS
     : (deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const judge = deps.judge;
-  const images = media?.images;
-  const call = () => judge.judge(block, { signal: AbortSignal.timeout(timeoutMs), images });
+  const images = media?.images ?? [];
+  const call = (text: string, withImages: boolean) =>
+    judge.judge(text, {
+      signal: AbortSignal.timeout(timeoutMs),
+      images: withImages ? images : undefined,
+    });
+  // The block counted the sent images as read; asked again without them, it must not.
+  const unsentBlock = (why: string) => {
+    const f = media?.findings;
+    if (!f) return block;
+    const { read, notRead } = f.images;
+    return blockFor({
+      ...f,
+      images: {
+        ...f.images,
+        read: Math.max(0, read - images.length),
+        notRead: notRead + images.length,
+        why: [...f.images.why, why],
+      },
+    });
+  };
   const started = Date.now();
   let verdict: Awaited<ReturnType<AbuseJudge["judge"]>>;
   try {
     verdict = raiseImageLure(
-      await call().catch((err: unknown) => {
-        if (!sample.screening || !SCREEN_RETRYABLE.has(judgeErrorClass(err))) throw err;
-        return call();
+      await call(block, images.length > 0).catch((err: unknown) => {
+        if (!SCREEN_RETRYABLE.has(judgeErrorClass(err))) throw err;
+        // An image call never costs a verdict the text alone would get: a
+        // refused, slow or failed one is asked again as text, with its own time.
+        if (images.length > 0) {
+          const refused = err instanceof JudgeError && (err.status ?? 500) < 500;
+          issues.push(refused ? "vision_rejected" : "vision_unavailable");
+          return call(
+            unsentBlock(refused ? "refused by the judge" : "no answer from the judge"),
+            false,
+          );
+        }
+        if (!sample.screening) throw err;
+        return call(block, false);
       }),
       settings.holdScore,
     );
@@ -246,7 +276,6 @@ async function judgePending(
     return unjudged(errorClass, latencyMs, issues);
   }
   const latencyMs = Date.now() - started;
-  if (verdict.imagesRejected) issues.push("vision_rejected");
   const model = verdict.model ?? judge.model;
   // Only a destination that drew a phishing-type verdict is dated.
   const linkYoung =

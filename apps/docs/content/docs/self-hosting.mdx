@@ -1824,11 +1824,13 @@ the images to TypeSafe instead, inside the judge's own call for the sample,
 with `ABUSE_JUDGE_API_KEY`, `ABUSE_JUDGE_BASE_URL` and `ABUSE_JUDGE_MODEL`
 (one pinned model reads the text and the images), so it needs
 `ABUSE_JUDGE=typesafe`. Nothing is transcribed: the judge's questions see
-the images beside the email, up to 12 per email, read at every tier.
-Images are re-encoded as JPEG first, upright, fitted into 1,120 px and
-padded to at least 280 px a side. If TypeSafe refuses the images, the
-email is judged again on its text alone and the sample records
-`vision_rejected`; the verdict is never lost to an image. A detection rules
+the images beside the email, up to 4 per email and 2 MB in all, read at
+every tier. Images are re-encoded as JPEG first, upright, fitted into
+1,120 px and padded to at least 280 px a side. If TypeSafe refuses the
+images, or the call with them times out or fails, the email is judged
+again on its text alone, with the images counted as not read, and the
+sample records `vision_rejected` or `vision_unavailable`; the verdict is
+never lost to an image. A detection rules
 file can also ask its own questions about the images
 (`judge.vision.questions`, with `holdKeys`, `limit` and `category`); the
 built-in rules ask none. When a hold question answers at its limit or
