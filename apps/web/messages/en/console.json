@@ -925,7 +925,8 @@
           "payment_redirect": "Tries to redirect a payment: new bank details for an existing invoice, a Pix code, a boleto from a mismatched sender, a small parcel fee, or “pay somewhere else”.",
           "no_link_lure": "Carries the lure without a link: a Pix payload, changed bank details, a callback phone, “reply with your ID or password”, or an attached invoice or zip.",
           "unsolicited_bulk": "Reads as bulk mail to people who never opted in (spam-style promotion from a stranger) rather than opted-in marketing or cold B2B outreach. The model cannot see consent, so newsletters often land near this line.",
-          "prompt_injection": "The text tries to tell a reviewer or model to change its verdict or ignore the policy."
+          "prompt_injection": "The text tries to tell a reviewer or model to change its verdict or ignore the policy.",
+          "image_lure": "An image answered one of the rules file’s image hold questions at or above its limit; the image__ codes beside it name each image question that did."
         },
         "vouch": {
           "action": "Vouch for team",
@@ -1317,7 +1318,8 @@
         "vision_off": "image reading is off",
         "vision_refused": "the image reader declined",
         "vision_blocked": "blocked by Bedrock",
-        "vision_unavailable": "image reader unavailable"
+        "vision_unavailable": "image reader unavailable",
+        "vision_rejected": "TypeSafe refused the images; judged on the text alone"
       },
       "text": "Text read · credentials and one-time links redacted",
       "noText": "Nothing was read as text.",

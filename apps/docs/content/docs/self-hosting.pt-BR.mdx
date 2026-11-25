@@ -1892,6 +1892,25 @@ de Londres ou Zurique, as imagens também podem ser lidas em países da UE),
    região) e reinicie. Antes, inclua o Amazon Bedrock no aviso de
    privacidade da instância.
 
+**Leitura de imagens pelo avaliador (opcional).** `ABUSE_VISION=typesafe`
+manda as imagens para o TypeSafe, dentro da própria chamada do avaliador
+para a amostra, com `ABUSE_JUDGE_API_KEY`, `ABUSE_JUDGE_BASE_URL` e
+`ABUSE_JUDGE_MODEL` (um único modelo fixado lê o texto e as imagens), por
+isso precisa de `ABUSE_JUDGE=typesafe`. Nada é transcrito: as perguntas do
+avaliador veem as imagens ao lado do e-mail, até 12 por e-mail, lidas em
+todos os níveis. Antes, as imagens são recodificadas em JPEG, na posição
+certa, ajustadas a 1.120 px e completadas até pelo menos 280 px de lado. Se
+o TypeSafe recusar as imagens, o e-mail é avaliado de novo só pelo texto e
+a amostra registra `vision_rejected`; a avaliação nunca se perde por causa
+de uma imagem. Um arquivo de regras de detecção também pode fazer
+perguntas próprias sobre as imagens (`judge.vision.questions`, com
+`holdKeys`, `limit` e `category`); as regras embutidas não fazem nenhuma.
+Quando uma pergunta de retenção responde no limite ou acima dele, a
+avaliação ganha o motivo `image_lure`, que o arquivo precisa listar em
+`keys.holdReasons` para reter, e sobe para a pontuação de retenção do
+monitor. Antes, inclua o tratamento de imagens do TypeSafe no aviso de
+privacidade da instância.
+
 **Amostragem.** Depois de cada mensagem aceita, um sorteio com chave decide
 se ela é avaliada. Cada valor abaixo é editado no console em Confiança e
 segurança → Configurações de monitoramento, ou definido na variável de

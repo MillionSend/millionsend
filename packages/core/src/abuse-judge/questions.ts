@@ -1,4 +1,9 @@
-import { abuseRules, DEFAULT_ABUSE_RULES } from "../abuse-rules.js";
+import {
+  abuseRules,
+  DEFAULT_ABUSE_RULES,
+  IMAGE_LURE_REASON,
+  IMAGE_QUESTION_PREFIX,
+} from "../abuse-rules.js";
 import { SUBJECT_LABEL, VISIBLE_TEXT_LABEL } from "./block.js";
 import { JudgeError, type JudgeVerdict } from "./types.js";
 
@@ -46,6 +51,16 @@ export function judgeState(block: string): { policy: string; email: string } {
   return { policy: judgePolicy(block), email: block };
 }
 
+/** The rules' image questions under their outbound keys; none unless the rules file asks some. */
+export function imageQuestions(): Record<string, { type: "noul"; instructions: string }> {
+  return Object.fromEntries(
+    Object.entries(abuseRules().judge.vision.questions ?? {}).map(([key, q]) => [
+      `${IMAGE_QUESTION_PREFIX}${key}`,
+      q,
+    ]),
+  );
+}
+
 export function noulOf(answers: Record<string, unknown>, key: string): number | null {
   const raw = answers[key];
   if (!raw || typeof raw !== "object") return null;
@@ -66,7 +81,10 @@ function choiceOf(answers: Record<string, unknown>, key: "category" | "language"
  * Typed Jev answers → the 0–100 verdict the rest of the monitor already
  * stores. Missing is_abuse is a parse error; everything else degrades.
  */
-export function composeJudgeVerdict(answers: unknown): JudgeVerdict {
+export function composeJudgeVerdict(
+  answers: unknown,
+  opts: { images?: boolean } = {},
+): JudgeVerdict {
   if (answers === null || typeof answers !== "object" || Array.isArray(answers)) {
     throw new JudgeError("parse_error", "no answers object");
   }
@@ -85,12 +103,35 @@ export function composeJudgeVerdict(answers: unknown): JudgeVerdict {
   for (const key of rules.judge.outbound.reasonKeys) {
     if ((noulOf(map, key) ?? 0) >= lines.reasonNoul) reasons.push(key);
   }
+  const categories = category && category !== "clean" ? [category] : [];
+  // Image answers count only on a call that asked them: an unanswered key is no finding.
+  const vision = rules.judge.vision;
+  const limit = vision.limit;
+  if (opts.images && limit !== undefined) {
+    const fired = Object.keys(vision.questions ?? {}).filter(
+      (key) => (noulOf(map, `${IMAGE_QUESTION_PREFIX}${key}`) ?? 0) >= limit,
+    );
+    reasons.push(...fired.map((key) => `${IMAGE_QUESTION_PREFIX}${key}`));
+    if (fired.some((key) => vision.holdKeys?.includes(key))) {
+      reasons.push(IMAGE_LURE_REASON);
+      if (categories.length === 0 && vision.category) categories.push(vision.category);
+    }
+  }
   return {
     score,
     verdict: p >= lines.verdictNoul ? "abuse" : "clean",
-    categories: category && category !== "clean" ? [category] : [],
+    categories,
     impersonatedBrand: null,
     reasons,
     language,
   };
+}
+
+/**
+ * An image lure is held like any phishing-type verdict: abuse, at least at
+ * the monitor's hold score, whatever the text questions answered.
+ */
+export function raiseImageLure(verdict: JudgeVerdict, holdScore: number): JudgeVerdict {
+  if (!verdict.reasons.includes(IMAGE_LURE_REASON)) return verdict;
+  return { ...verdict, verdict: "abuse", score: Math.max(verdict.score, holdScore) };
 }

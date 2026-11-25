@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   abuseVisionConfig,
   abuseVisionProfile,
+  abuseVisionProvider,
   assertEnvConsistency,
   type Env,
 } from "../src/env.js";
@@ -76,4 +77,19 @@ it("refuses the boot for a region with no geographic profile, only while reading
   expect(() => abuseVisionConfig(outside)).toThrow(refusal);
   expect(() => assertEnvConsistency(outside)).toThrow(refusal);
   expect(() => assertEnvConsistency(fakeEnv({ ABUSE_VISION_REGION: "sa-east-1" }))).not.toThrow();
+});
+
+it("builds no Bedrock reader for typesafe, whose images ride the judge's own call", () => {
+  const typesafe = fakeEnv({
+    ABUSE_VISION: "typesafe",
+    ABUSE_VISION_REGION: "sa-east-1",
+    ABUSE_JUDGE: "typesafe",
+    ABUSE_JUDGE_API_KEY: "k",
+  });
+  expect(abuseVisionProvider(typesafe)).toBe("typesafe");
+  expect(abuseVisionConfig(typesafe)).toBeNull();
+  expect(() => assertEnvConsistency(typesafe)).not.toThrow();
+  expect(() => assertEnvConsistency(fakeEnv({ ABUSE_VISION: "typesafe" }))).toThrow(
+    "ABUSE_VISION=typesafe requires ABUSE_JUDGE=typesafe",
+  );
 });

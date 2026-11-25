@@ -18,6 +18,8 @@ export interface JudgeVerdict {
   language: string;
   /** The versioned model id that answered, when the provider reported one. */
   model?: string;
+  /** The provider refused the images, so this verdict read the text alone. */
+  imagesRejected?: boolean;
 }
 
 /** The inbound question set's answer for one received message (abuse-judge/inbound.ts). */
@@ -37,7 +39,11 @@ export interface InboundJudgeVerdict {
 export interface AbuseJudge {
   readonly provider: JudgeProvider;
   readonly model: string;
-  judge(block: string, opts: { signal: AbortSignal }): Promise<JudgeVerdict>;
+  /** `images` are JPEGs the call shows the judge beside the block (ABUSE_VISION=typesafe). */
+  judge(
+    block: string,
+    opts: { signal: AbortSignal; images?: readonly Uint8Array[] | undefined },
+  ): Promise<JudgeVerdict>;
   /** The inbound set on received mail; a judge without it screens nothing. */
   screen?(block: string, opts: { signal: AbortSignal }): Promise<InboundJudgeVerdict>;
 }
@@ -61,10 +67,17 @@ export type JudgeErrorClass = (typeof JUDGE_ERROR_CLASSES)[number];
 
 export class JudgeError extends Error {
   readonly class: JudgeErrorClass;
-  constructor(errorClass: JudgeErrorClass, message?: string, options?: { cause?: unknown }) {
+  /** The provider's HTTP status, when it answered with one. */
+  readonly status: number | undefined;
+  constructor(
+    errorClass: JudgeErrorClass,
+    message?: string,
+    options?: { cause?: unknown; status?: number },
+  ) {
     super(message ?? errorClass, options);
     this.name = "JudgeError";
     this.class = errorClass;
+    this.status = options?.status;
   }
 }
 

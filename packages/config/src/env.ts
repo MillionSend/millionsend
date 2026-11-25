@@ -54,7 +54,7 @@ export const ABUSE_JUDGE_MODEL_DEFAULT = "jev-1.13.0";
 export const ABUSE_JUDGE_TIMEOUT_MS_DEFAULT = 20_000;
 
 /** Who reads the text in an email's images for the judge; "off" is the default everywhere. */
-export const ABUSE_VISION_PROVIDERS = ["off", "bedrock"] as const;
+export const ABUSE_VISION_PROVIDERS = ["off", "bedrock", "typesafe"] as const;
 export type AbuseVisionProvider = (typeof ABUSE_VISION_PROVIDERS)[number];
 /** Claude Haiku 5.5's foundation model id on Amazon Bedrock. */
 export const ABUSE_VISION_MODEL = "anthropic.claude-haiku-5-5";
@@ -303,8 +303,10 @@ export const env = createEnv({
     // attachment pages that are images, with the worker's AWS credentials,
     // called from ABUSE_VISION_REGION through its geography's inference
     // profile (abuseVisionProfile), so images are read within that
-    // geography. Off by default; refusing program files, holding risky files
-    // and reading PDFs, Office files and QR codes all work without it.
+    // geography. Or typesafe: the images go to the judge itself, in the
+    // sample's own TypeSafe call, with ABUSE_JUDGE's key, URL and model.
+    // Off by default; refusing program files, holding risky files and
+    // reading PDFs, Office files and QR codes all work without it.
     ABUSE_VISION: z.enum(ABUSE_VISION_PROVIDERS).default("off"),
     ABUSE_VISION_REGION: z
       .string()
@@ -662,12 +664,18 @@ export interface AbuseVisionConfig {
   secretAccessKey: string | undefined;
 }
 
+/** ABUSE_VISION as set; raw-string safe as abuseJudgeConfig is. */
+export function abuseVisionProvider(e: Env = env): AbuseVisionProvider {
+  return ((e.ABUSE_VISION as unknown as string | undefined) || "off") as AbuseVisionProvider;
+}
+
 /**
- * The image reader the worker builds, or null when it is off; raw-string safe
- * as abuseJudgeConfig is. Throws for a region with no geographic profile.
+ * The Bedrock image reader the worker builds, or null when ABUSE_VISION is
+ * not bedrock (typesafe has no reader: the judge reads the images). Throws
+ * for a region with no geographic profile.
  */
 export function abuseVisionConfig(e: Env = env): AbuseVisionConfig | null {
-  if (((e.ABUSE_VISION as unknown as string | undefined) || "off") === "off") return null;
+  if (abuseVisionProvider(e) !== "bedrock") return null;
   const region = e.ABUSE_VISION_REGION || ABUSE_VISION_REGION_DEFAULT;
   const model = abuseVisionProfile(region);
   if (!model) {
@@ -891,6 +899,9 @@ export function assertEnvConsistency(e: Env): void {
   // Image reading from a region with no geographic profile would fail every
   // read: abuseVisionConfig throws for it, which refuses the boot here.
   abuseVisionConfig(e);
+  if (abuseVisionProvider(e) === "typesafe" && e.ABUSE_JUDGE !== "typesafe") {
+    throw new Error("ABUSE_VISION=typesafe requires ABUSE_JUDGE=typesafe");
+  }
   if (e.IS_CLOUD) {
     for (const key of [
       "KMS_KEY_ID",

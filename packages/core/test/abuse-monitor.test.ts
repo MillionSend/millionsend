@@ -738,6 +738,14 @@ describe("the review hold", () => {
       ]),
     ).toBe(false);
     expect(at({ ...RESET, reasons: ["no_link_lure"] }, 93, ["x.workers.dev"])).toBe(false);
+    // An image question's finding leaves the spare as the text made it; an image lure ends it.
+    // The image key is arbitrary.
+    expect(
+      at({ ...RESET, reasons: [...RESET.reasons, "image__shows_teapot"] }, 93, ["ref.supabase.co"]),
+    ).toBe(true);
+    expect(
+      at({ ...RESET, reasons: [...RESET.reasons, "image_lure"] }, 93, ["ref.supabase.co"]),
+    ).toBe(false);
     expect(at({ ...RESET, verdict: "clean" as "abuse" }, 40, ["ref.supabase.co"])).toBe(false);
 
     const teamId = await newTeam("platform-spared");

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { composeJudgeVerdict } from "../src/abuse-judge/questions.js";
+import { composeJudgeVerdict, raiseImageLure } from "../src/abuse-judge/questions.js";
 import {
   type AbuseRules,
   abuseRules,
@@ -23,6 +23,23 @@ function rulesWith(edit: (rules: AbuseRules) => void): AbuseRules {
   const rules = structuredClone(DEFAULT_ABUSE_RULES) as AbuseRules;
   edit(rules);
   return rules;
+}
+
+/** Arbitrary image questions and numbers, only for the schema and the composer: no real detection wording. */
+const FAKE_VISION = {
+  prompt: DEFAULT_ABUSE_RULES.judge.vision.prompt,
+  questions: {
+    shows_teapot: { type: "noul" as const, instructions: "Does `images` show a teapot?" },
+    shows_kettle: { type: "noul" as const, instructions: "Does `images` show a kettle?" },
+  },
+  holdKeys: ["shows_teapot"],
+  limit: 0.5,
+  category: "scam",
+};
+
+function withFakeVision(rules: AbuseRules): void {
+  rules.judge.vision = structuredClone(FAKE_VISION);
+  rules.keys.holdReasons = [...rules.keys.holdReasons, "image_lure"];
 }
 
 function errorOf(json: unknown): string {
@@ -126,6 +143,44 @@ describe("parseAbuseRules", () => {
     expect(message).toContain("limits.judge.verdictNoul: too_big");
   });
 
+  it("accepts image questions, and the image reason as a hold reason only beside them", () => {
+    expect(parseAbuseRules(rulesWith(withFakeVision)).judge.vision).toEqual(FAKE_VISION);
+    expect(
+      errorOf(
+        rulesWith((r) => {
+          r.keys.holdReasons = [...r.keys.holdReasons, "image_lure"];
+        }),
+      ),
+    ).toContain(`keys.holdReasons.${DEFAULT_ABUSE_RULES.keys.holdReasons.length}`);
+  });
+
+  it("checks image questions against the outbound set", () => {
+    const message = errorOf(
+      rulesWith((r) => {
+        withFakeVision(r);
+        r.judge.vision.holdKeys = ["shows_teapot", "no_such_image_key"];
+        r.judge.vision.category = "no_such_category";
+        r.judge.outbound.questions.image__shows_kettle = { type: "noul", instructions: "x" };
+      }),
+    );
+    for (const path of [
+      "judge.vision.holdKeys.1",
+      "judge.vision.category: not a known key",
+      "judge.vision.questions.shows_kettle: collides",
+    ]) {
+      expect(message).toContain(path);
+    }
+    const unset = errorOf(
+      rulesWith((r) => {
+        withFakeVision(r);
+        delete r.judge.vision.limit;
+        delete r.judge.vision.category;
+      }),
+    );
+    expect(unset).toContain("judge.vision.limit: required with questions");
+    expect(unset).toContain("judge.vision.category: required with questions");
+  });
+
   it("refuses warm-up tiers out of order", () => {
     const message = errorOf(
       rulesWith((r) => {
@@ -176,5 +231,31 @@ describe("abuseRules", () => {
     expect(composeJudgeVerdict(answers).verdict).toBe("clean");
     expect(imitatedBrandIn("Example Bank Support")).toBe("Example Bank");
     expect(imitatedBrandIn("PayPal")).toBeNull();
+  });
+
+  it("files a held image answer as an image lure, raised to the hold score", () => {
+    setAbuseRulesForTests(rulesWith(withFakeVision));
+    const answers = {
+      is_abuse: { noul: 0.1 },
+      category: { choice: "clean" },
+      image__shows_teapot: { noul: 0.9 },
+      image__shows_kettle: { noul: 0.6 },
+    };
+    const verdict = composeJudgeVerdict(answers, { images: true });
+    expect(verdict).toMatchObject({
+      verdict: "clean",
+      score: 10,
+      categories: ["scam"],
+      reasons: ["image__shows_teapot", "image__shows_kettle", "image_lure"],
+    });
+    expect(raiseImageLure(verdict, 90)).toMatchObject({ verdict: "abuse", score: 90 });
+    // Image answers on a call that sent no images, or under the limit, are no finding.
+    expect(composeJudgeVerdict(answers).reasons).toEqual([]);
+    const under = composeJudgeVerdict(
+      { ...answers, image__shows_teapot: { noul: 0.4 } },
+      { images: true },
+    );
+    expect(under).toMatchObject({ categories: [], reasons: ["image__shows_kettle"] });
+    expect(raiseImageLure(under, 90)).toBe(under);
   });
 });

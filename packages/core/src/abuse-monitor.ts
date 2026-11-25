@@ -5,7 +5,12 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from
 import type { JudgeBlockInput } from "./abuse-judge/block.js";
 import { opaqueFacts } from "./abuse-judge/body.js";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
-import { abuseRules, DEFAULT_ABUSE_RULES, fromAbuseRules } from "./abuse-rules.js";
+import {
+  abuseRules,
+  DEFAULT_ABUSE_RULES,
+  fromAbuseRules,
+  IMAGE_QUESTION_PREFIX,
+} from "./abuse-rules.js";
 import { recordAudit } from "./audit.js";
 import { countInvisible } from "./customer-text.js";
 import { isShortener } from "./email-insights.js";
@@ -680,6 +685,15 @@ export function namesHoldType(v: Pick<HoldVerdictFields, "categories" | "reasons
   );
 }
 
+/**
+ * The reasons the text questions gave: an image question's own finding
+ * neither widens nor narrows a spare, and a held one adds the image lure
+ * reason, which no spare allows.
+ */
+function textReasons(v: Pick<HoldVerdictFields, "reasons">): string[] {
+  return (v.reasons ?? []).filter((r) => !r.startsWith(IMAGE_QUESTION_PREFIX));
+}
+
 /** One verdict is a phishing-type abuse call from `holdScore`. */
 export function isHoldVerdict(v: HoldVerdictFields, holdScore: number): boolean {
   return v.verdict === "abuse" && v.score !== null && v.score >= holdScore && namesHoldType(v);
@@ -755,7 +769,7 @@ export function isPlatformLinkVerdict(
     v.verdict === "abuse" &&
     destinations.length > 0 &&
     (v.categories ?? []).every((c) => categories.has(c)) &&
-    (v.reasons ?? []).every((r) => reasons.has(r)) &&
+    textReasons(v).every((r) => reasons.has(r)) &&
     destinations.every((d) => isPlatformTenantName(d) || isLoopbackHost(d))
   );
 }
@@ -832,7 +846,7 @@ export function clientIdentitySite(
     destinations.length === 0 ||
     !destinations.every(named) ||
     !(v.categories ?? []).every((c) => c === "brand_impersonation") ||
-    !(v.reasons ?? []).every((r) => r === "impersonation") ||
+    !textReasons(v).every((r) => r === "impersonation") ||
     mail.attachments.length > 0
   ) {
     return null;

@@ -925,7 +925,8 @@
           "payment_redirect": "Tenta desviar um pagamento: novos dados bancários para uma fatura existente, um código Pix, um boleto de remetente divergente, uma pequena taxa de encomenda ou “pague em outro lugar”.",
           "no_link_lure": "Aplica o golpe sem link: um Pix copia e cola, dados bancários trocados, um telefone para retorno, “responda com seu documento ou senha”, ou uma fatura ou zip anexado.",
           "unsolicited_bulk": "Parece envio em massa para quem nunca consentiu (promoção no estilo spam de um desconhecido), e não marketing com consentimento ou prospecção B2B. O modelo não vê o consentimento, então newsletters costumam ficar perto desse limite.",
-          "prompt_injection": "O texto tenta instruir um revisor ou modelo a mudar a avaliação ou ignorar a política."
+          "prompt_injection": "O texto tenta instruir um revisor ou modelo a mudar a avaliação ou ignorar a política.",
+          "image_lure": "Uma imagem respondeu a uma das perguntas de retenção de imagem do arquivo de regras no limite ou acima dele; os códigos image__ ao lado indicam cada pergunta de imagem que respondeu assim."
         },
         "vouch": {
           "action": "Avalizar equipe",
@@ -1317,7 +1318,8 @@
         "vision_off": "a leitura de imagens está desligada",
         "vision_refused": "o leitor de imagens recusou",
         "vision_blocked": "bloqueado pelo Bedrock",
-        "vision_unavailable": "leitor de imagens indisponível"
+        "vision_unavailable": "leitor de imagens indisponível",
+        "vision_rejected": "o TypeSafe recusou as imagens; avaliado só pelo texto"
       },
       "text": "Texto lido · credenciais e links de uso único ocultados",
       "noText": "Nada foi lido como texto.",

@@ -67,6 +67,7 @@ export const MEDIA_ISSUES = [
   "vision_refused",
   "vision_blocked",
   "vision_unavailable",
+  "vision_rejected",
 ] as const;
 export type MediaIssue = (typeof MEDIA_ISSUES)[number];
 

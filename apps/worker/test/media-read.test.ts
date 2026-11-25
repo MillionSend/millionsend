@@ -14,9 +14,15 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb } from "@millionsend/test-utils";
 import { eq } from "drizzle-orm";
+import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MediaPool } from "../src/media/pool.js";
-import { type MediaReadDeps, readMediaForJudge, saveMediaReview } from "../src/media/read.js";
+import {
+  type MediaReadDeps,
+  prepareImage,
+  readMediaForJudge,
+  saveMediaReview,
+} from "../src/media/read.js";
 import {
   createBedrockVision,
   type VisionReader,
@@ -274,7 +280,54 @@ describe("createBedrockVision", () => {
   });
 });
 
+describe("prepareImage", () => {
+  const solid = (width: number, height: number) =>
+    sharp({ create: { width, height, channels: 3, background: "#336699" } })
+      .png()
+      .toBuffer();
+
+  it("pads an image under TypeSafe's least side onto white for the judge only", async () => {
+    const small = await solid(100, 100);
+    const forJudge = await prepareImage(small, { forJudge: true });
+    if (!Buffer.isBuffer(forJudge)) throw new Error(String(forJudge));
+    expect(await sharp(forJudge).metadata()).toMatchObject({ width: 280, height: 280 });
+    const forReader = await prepareImage(small);
+    if (!Buffer.isBuffer(forReader)) throw new Error(String(forReader));
+    expect(await sharp(forReader).metadata()).toMatchObject({ width: 100, height: 100 });
+    const wide = await prepareImage(await solid(900, 120), { forJudge: true });
+    if (!Buffer.isBuffer(wide)) throw new Error(String(wide));
+    expect(await sharp(wide).metadata()).toMatchObject({ width: 900, height: 280 });
+  });
+
+  it("turns an image upright by its EXIF orientation", async () => {
+    // Orientation 6: stored landscape, shown rotated a quarter turn.
+    const sideways = await sharp(await solid(400, 300))
+      .withMetadata({ orientation: 6 })
+      .jpeg()
+      .toBuffer();
+    const upright = await prepareImage(sideways);
+    if (!Buffer.isBuffer(upright)) throw new Error(String(upright));
+    expect(await sharp(upright).metadata()).toMatchObject({ width: 300, height: 400 });
+  });
+});
+
 describe("readMediaForJudge", () => {
+  it("hands the judge the prepared images when it reads them itself", async () => {
+    const media = await readMediaForJudge(
+      { attachments: [], bodyImages: [QR_DATA_URI], readBodyImages: true },
+      deps(null, { judgeImages: true }),
+    );
+    expect(media.images).toHaveLength(1);
+    expect(media.issues).not.toContain("vision_off");
+    expect(media.findings.images).toMatchObject({ read: 1, notRead: 0 });
+    const off = await readMediaForJudge(
+      { attachments: [], bodyImages: [QR_DATA_URI], readBodyImages: true },
+      deps(null),
+    );
+    expect(off.images).toEqual([]);
+    expect(off.issues).toContain("vision_off");
+  });
+
   it("reads attachments and body images, and the judge block carries what it found", async () => {
     const vision = fakeReader((count) => ({
       status: "ok",

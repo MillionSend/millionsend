@@ -50,11 +50,70 @@ it("posts state and typed questions, then composes the verdict", async () => {
     url: "https://api.typesafe.ai/v1/systemone",
     auth: "Bearer k",
   });
-  expect(posted?.body).toMatchObject({
+  expect(posted?.body).toEqual({
     model: "jev-latest",
     questions: ABUSE_JUDGE_QUESTIONS,
     state: { policy: ABUSE_JUDGE_POLICY, email: "Team name: Acme\nFrom: Bank <a@x.example>" },
   });
+});
+
+/** Records each request; answers the first `rejectFirst` with that status. */
+function recorder(rejectFirst?: number) {
+  const calls: { body: Record<string, unknown>; headers: Headers }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({
+      body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      headers: new Headers(init?.headers),
+    });
+    if (rejectFirst && calls.length === 1)
+      return new Response("bad image", { status: rejectFirst });
+    return new Response(JSON.stringify({ answers }), { status: 200 });
+  };
+  return { calls, fetch };
+}
+
+// Arbitrary bytes: the adapter base64-encodes them and never decodes them.
+const images = [Buffer.from("fake-jpeg-one"), Buffer.from("fake-jpeg-two")];
+
+it("sends images as assets the state names, with TypeSafe's image header", async () => {
+  const { calls, fetch } = recorder();
+  await withFetch(fetch).judge("block", { signal: signal(), images });
+  const call = calls[0];
+  if (!call) throw new Error("no call");
+  expect(call.headers.get("typesafe-danger-zone-images")).toBe("true");
+  const assets = call.body.assets as Record<string, unknown>;
+  const refs = Object.keys(assets);
+  expect(refs).toHaveLength(2);
+  expect(Object.values(assets)).toEqual(
+    images.map((jpeg) => ({ type: "image", format: "jpeg", data_base64: jpeg.toString("base64") })),
+  );
+  expect((call.body.state as Record<string, string>).images).toBe(refs.join(" "));
+  expect(call.body.questions).toEqual(ABUSE_JUDGE_QUESTIONS);
+});
+
+it("sends no assets or image header without images", async () => {
+  const { calls, fetch } = recorder();
+  await withFetch(fetch).judge("block", { signal: signal(), images: [] });
+  expect(calls[0]?.headers.has("typesafe-danger-zone-images")).toBe(false);
+  expect(Object.keys(calls[0]?.body ?? {}).sort()).toEqual(["model", "questions", "state"]);
+});
+
+it("asks once more as text alone when TypeSafe refuses the images", async () => {
+  for (const status of [400, 413, 415, 422]) {
+    const { calls, fetch } = recorder(status);
+    await expect(
+      withFetch(fetch).judge("block", { signal: signal(), images }),
+    ).resolves.toMatchObject({ score: 88, imagesRejected: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.body.assets).toBeUndefined();
+    expect(calls[1]?.headers.has("typesafe-danger-zone-images")).toBe(false);
+  }
+  // A throttle is not about the images: it is the sample's to retry.
+  const { calls, fetch } = recorder(429);
+  await expect(withFetch(fetch).judge("block", { signal: signal(), images })).rejects.toMatchObject(
+    { class: "throttled" },
+  );
+  expect(calls).toHaveLength(1);
 });
 
 const signal = () => new AbortController().signal;

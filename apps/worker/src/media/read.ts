@@ -53,6 +53,9 @@ const URL_HASH_TTL_MS = 10 * 60_000;
 /** 1,120 px a side keeps an image at 1,600 visual tokens or fewer. */
 const VISION_SIDE = 1_120;
 const VISION_MIN_SIDE = 48;
+/** TypeSafe refuses an image under 280 px or over 1,568 px a side, and with it the whole call. */
+const JUDGE_IMAGE_MIN_SIDE = 280;
+const JUDGE_IMAGE_MAX_SIDE = 1_568;
 const ANIMATION_FRAMES = 4;
 const PREVIEW_SIDE = 600;
 const IMAGE_KINDS: ReadonlySet<FileKind> = new Set([...IMAGE_TYPES, "svg"]);
@@ -85,6 +88,8 @@ export interface MediaReadInput {
 export interface MediaReadDeps extends MediaDeps {
   /** Null when ABUSE_VISION is off: the email is judged without image text, and that is noted. */
   vision: VisionReader | null;
+  /** ABUSE_VISION=typesafe: no reader, the images go to the judge with the sample's own call. */
+  judgeImages?: boolean | undefined;
   fetchImage?: typeof getImage;
 }
 
@@ -93,6 +98,8 @@ export interface MediaRead {
   findings: MediaFindings;
   /** What the gate parks or waits on. */
   issues: MediaIssue[];
+  /** The prepared JPEGs for the judge's call; empty unless `judgeImages`. */
+  images: Buffer[];
   /** What a person reviewing the email sees if it is held; draws previews from the same images. */
   review(): Promise<MediaReview>;
 }
@@ -117,11 +124,41 @@ const NOT_READ: Record<Exclude<Outcome["status"], "ok">, string> = {
 };
 
 /**
- * An image as the reader receives it: fitted into 1,120 px as JPEG, and an
- * animation as four evenly spaced frames stacked, since the model reads only
- * the first frame. "small" for an image under 48 px a side: decoration.
+ * An image as the reader receives it: upright, fitted into 1,120 px as JPEG,
+ * and an animation as four evenly spaced frames stacked, since the model
+ * reads only the first frame. "small" for an image under 48 px a side:
+ * decoration. `forJudge` pads a side under 280 px onto white, as TypeSafe
+ * needs, and is "unreadable" for one it would still refuse.
  */
-export function prepareImage(bytes: Uint8Array): Promise<Buffer | "small"> {
+export async function prepareImage(
+  bytes: Uint8Array,
+  opts: { forJudge?: boolean } = {},
+): Promise<Buffer | "small" | "unreadable"> {
+  const jpeg = await fitImage(bytes);
+  if (!opts.forJudge || !Buffer.isBuffer(jpeg)) return jpeg;
+  return sharpInTurn(async () => {
+    const meta = await sharp(jpeg).metadata();
+    const width = meta.width ?? 0;
+    const height = meta.height ?? 0;
+    const padded =
+      width >= JUDGE_IMAGE_MIN_SIDE && height >= JUDGE_IMAGE_MIN_SIDE
+        ? { data: jpeg, info: { width, height } }
+        : await sharp(jpeg)
+            .timeout(MEDIA_SHARP_TIMEOUT)
+            .resize(Math.max(width, JUDGE_IMAGE_MIN_SIDE), Math.max(height, JUDGE_IMAGE_MIN_SIDE), {
+              fit: "contain",
+              background: "#ffffff",
+            })
+            .jpeg({ quality: 85 })
+            .toBuffer({ resolveWithObject: true });
+    const sides = [padded.info.width, padded.info.height];
+    return sides.every((side) => side >= JUDGE_IMAGE_MIN_SIDE && side <= JUDGE_IMAGE_MAX_SIDE)
+      ? padded.data
+      : "unreadable";
+  });
+}
+
+function fitImage(bytes: Uint8Array): Promise<Buffer | "small"> {
   return sharpInTurn(async () => {
     const input = { limitInputPixels: MEDIA_IMAGE_MAX_PIXELS };
     const meta = await sharp(bytes, input).timeout(MEDIA_SHARP_TIMEOUT).metadata();
@@ -130,6 +167,7 @@ export function prepareImage(bytes: Uint8Array): Promise<Buffer | "small"> {
     const fitted = (image: Sharp) =>
       image
         .timeout(MEDIA_SHARP_TIMEOUT)
+        .rotate()
         .flatten({ background: "#ffffff" })
         .resize(VISION_SIDE, VISION_SIDE, { fit: "inside", withoutEnlargement: true });
     const pages = meta.pages ?? 1;
@@ -307,6 +345,24 @@ function attachmentItems(files: readonly ScannedFile[], deps: MediaDeps): Item[]
   return items;
 }
 
+/** An image the judge reads itself: nothing to report beyond its being read. */
+const NO_REPORT: VisionReport = {
+  text: "",
+  brands: [],
+  qrCodes: 0,
+  loginOrPaymentForm: false,
+  addressedToAi: false,
+};
+
+async function prepareForJudge(item: Item): Promise<Buffer | "small" | "unreadable"> {
+  try {
+    const bytes = await item.load();
+    return bytes ? await prepareImage(bytes, { forJudge: true }) : "unreadable";
+  } catch {
+    return "unreadable";
+  }
+}
+
 async function readImages(
   items: Item[],
   reader: VisionReader,
@@ -399,7 +455,16 @@ export async function readMediaForJudge(
   if (notRead.length > 0) issues.add("images_not_read");
 
   let outcome: Outcome | null = null;
-  if (items.length > 0 && deps.vision) {
+  const images: Buffer[] = [];
+  if (items.length > 0 && deps.judgeImages) {
+    const reads: ItemRead[] = [];
+    for (const item of items) {
+      const jpeg = await prepareForJudge(item);
+      if (Buffer.isBuffer(jpeg)) images.push(jpeg);
+      reads.push(Buffer.isBuffer(jpeg) ? NO_REPORT : jpeg);
+    }
+    outcome = { status: "ok", items: reads };
+  } else if (items.length > 0 && deps.vision) {
     const key = `vision:${items.map((item) => item.id).join(",")}`;
     const reader = deps.vision;
     outcome = await cache.get(key, () => readImages(items, reader, signal));
@@ -465,6 +530,7 @@ export async function readMediaForJudge(
   return {
     findings,
     issues: [...issues],
+    images,
     review: async () => ({
       text: [
         ...imageText.map((entry) => ({ source: entry.label, text: entry.text })),

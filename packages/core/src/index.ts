@@ -38,9 +38,11 @@ export {
   ABUSE_JUDGE_QUESTIONS,
   ABUSE_JUDGE_QUESTIONS_VERSION,
   composeJudgeVerdict,
+  imageQuestions,
   JUDGE_IMPERSONATION_NOUL,
   JUDGE_VERDICT_NOUL,
   judgeState,
+  raiseImageLure,
 } from "./abuse-judge/questions.js";
 export {
   type AbuseJudge,
@@ -127,6 +129,8 @@ export {
   abuseRulesSchema,
   checkAbuseRulesAtBoot,
   DEFAULT_ABUSE_RULES,
+  IMAGE_LURE_REASON,
+  IMAGE_QUESTION_PREFIX,
   loadAbuseRulesFile,
   parseAbuseRules,
 } from "./abuse-rules.js";

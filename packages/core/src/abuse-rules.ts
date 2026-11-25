@@ -50,6 +50,13 @@ const INBOUND_KEYS = {
 };
 /** One question per shared-name field (SharedNameReview's), each a noul. */
 const NAME_FIELDS = ["username", "from_name", "label"];
+/**
+ * The image questions ride the outbound call under this prefix, so a key
+ * of theirs can never answer for an outbound question.
+ */
+export const IMAGE_QUESTION_PREFIX = "image__";
+/** The outbound reason a held image question adds to the verdict. */
+export const IMAGE_LURE_REASON = "image_lure";
 
 export const abuseRulesSchema = z
   .strictObject({
@@ -67,7 +74,25 @@ export const abuseRulesSchema = z
         policy: z.string().min(1),
         questions: z.record(z.string(), question),
       }),
-      vision: z.strictObject({ prompt: z.string().min(1) }),
+      vision: z.strictObject({
+        /** The Bedrock reader's instructions. */
+        prompt: z.string().min(1),
+        /**
+         * Asked about all of an email's images in the judge's own call when
+         * ABUSE_VISION=typesafe; none by default. A noul at `limit` or more on
+         * a `holdKeys` question makes the verdict an image lure, filed under
+         * `category` when the judge chose none.
+         */
+        questions: z
+          .record(
+            z.string().min(1),
+            z.strictObject({ type: z.literal("noul"), instructions: z.string().min(1) }),
+          )
+          .optional(),
+        holdKeys: words.optional(),
+        limit: unit.optional(),
+        category: z.string().min(1).optional(),
+      }),
     }),
     lists: z.strictObject({
       imitatedBrands: words,
@@ -213,7 +238,28 @@ export const abuseRulesSchema = z
     subset(["keys", "holdCategories"], k.holdCategories, categories);
     subset(["keys", "platformLinkCategories"], k.platformLinkCategories, categories);
     subset(["keys", "loopbackLinkCategories"], k.loopbackLinkCategories, categories);
-    subset(["keys", "holdReasons"], k.holdReasons, reasons);
+    const vision = rules.judge.vision;
+    const imageKeys = Object.keys(vision.questions ?? {});
+    if (imageKeys.length > 0) {
+      for (const field of ["holdKeys", "limit", "category"] as const) {
+        if (vision[field] === undefined)
+          fail(["judge", "vision", field], "required with questions");
+      }
+    }
+    subset(["judge", "vision", "holdKeys"], vision.holdKeys ?? [], imageKeys);
+    if (vision.category !== undefined && !categories.includes(vision.category)) {
+      fail(["judge", "vision", "category"], "not a known key");
+    }
+    for (const key of imageKeys) {
+      if (`${IMAGE_QUESTION_PREFIX}${key}` in rules.judge.outbound.questions) {
+        fail(["judge", "vision", "questions", key], "collides with an outbound question");
+      }
+    }
+    subset(
+      ["keys", "holdReasons"],
+      k.holdReasons,
+      imageKeys.length > 0 ? [...reasons, IMAGE_LURE_REASON] : reasons,
+    );
     subset(["keys", "platformLinkReasons"], k.platformLinkReasons, reasons);
     subset(["keys", "loopbackLinkReasons"], k.loopbackLinkReasons, reasons);
     subset(["keys", "anomalyChecks"], k.anomalyChecks, CHECK_IDS);

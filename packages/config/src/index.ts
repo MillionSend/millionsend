@@ -16,6 +16,7 @@ export {
   abuseRulesFile,
   abuseVisionConfig,
   abuseVisionProfile,
+  abuseVisionProvider,
   accountEmailFrom,
   accountMailDeliverable,
   assertEnvConsistency,

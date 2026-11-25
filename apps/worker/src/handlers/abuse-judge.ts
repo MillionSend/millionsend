@@ -27,6 +27,7 @@ import {
   opaqueFacts,
   openAttachments,
   parseSingleSender,
+  raiseImageLure,
   revokeDestinations,
   SCREEN_JUDGE_TIMEOUT_MS,
   screeningTeam,
@@ -159,7 +160,7 @@ async function judgePending(
     vouched: teamVouched,
   } = await screeningTeam(db, settings, sample.teamId, now);
   const media = await readMedia(loaded.input, loaded.files, tier, deps.media);
-  const issues = media?.issues ?? [];
+  const issues = [...(media?.issues ?? [])];
   const standing = await teamDestinationStanding(db, {
     teamId: sample.teamId,
     html: loaded.input.html,
@@ -220,14 +221,18 @@ async function judgePending(
     ? SCREEN_JUDGE_TIMEOUT_MS
     : (deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const judge = deps.judge;
-  const call = () => judge.judge(block, { signal: AbortSignal.timeout(timeoutMs) });
+  const images = media?.images;
+  const call = () => judge.judge(block, { signal: AbortSignal.timeout(timeoutMs), images });
   const started = Date.now();
   let verdict: Awaited<ReturnType<AbuseJudge["judge"]>>;
   try {
-    verdict = await call().catch((err: unknown) => {
-      if (!sample.screening || !SCREEN_RETRYABLE.has(judgeErrorClass(err))) throw err;
-      return call();
-    });
+    verdict = raiseImageLure(
+      await call().catch((err: unknown) => {
+        if (!sample.screening || !SCREEN_RETRYABLE.has(judgeErrorClass(err))) throw err;
+        return call();
+      }),
+      settings.holdScore,
+    );
   } catch (err) {
     const errorClass = judgeErrorClass(err);
     const latencyMs = Date.now() - started;
@@ -241,6 +246,7 @@ async function judgePending(
     return unjudged(errorClass, latencyMs, issues);
   }
   const latencyMs = Date.now() - started;
+  if (verdict.imagesRejected) issues.push("vision_rejected");
   const model = verdict.model ?? judge.model;
   // Only a destination that drew a phishing-type verdict is dated.
   const linkYoung =
@@ -411,8 +417,9 @@ async function judgePending(
 
 /**
  * What the judge reads of a message's media: its files always, its body's
- * images while the team is new or the body is opaque. Null when there is
- * nothing to read.
+ * images while the team is new or the body is opaque, or at every tier when
+ * the judge reads the images itself (one call, so no reader to pay for).
+ * Null when there is nothing to read.
  */
 async function readMedia(
   input: JudgeBlockInput,
@@ -421,7 +428,7 @@ async function readMedia(
   deps: MediaReadDeps | undefined,
 ): Promise<MediaRead | null> {
   const facts = opaqueFacts({ html: input.html, text: input.text, attachments: files.length });
-  const readBodyImages = tier === "new" || facts.opaque;
+  const readBodyImages = tier === "new" || facts.opaque || deps?.judgeImages === true;
   if (files.length === 0 && (!readBodyImages || facts.imageRefs.length === 0)) return null;
   return readMediaForJudge(
     { attachments: files, bodyImages: facts.imageRefs.map((ref) => ref.src), readBodyImages },
