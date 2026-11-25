@@ -114,7 +114,29 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
   const filtered = hasFilters(filters);
   const base = { inboxId: inbox.id, folders: [folder], limit: 50, ...filterInput(filters) };
   const splitRef = useRef<HTMLDivElement>(null);
-  useFillViewport(splitRef, Boolean(threadId));
+  useFillViewport(splitRef, true);
+  // Opening or closing a thread resizes the list, and rows rewrap to one or two
+  // lines: the thread's row is held where it was in the list's view.
+  const listRef = useRef<HTMLDivElement>(null);
+  const anchor = useRef<{ id: string; top: number } | null>(null);
+  const rowTop = (id: string) => {
+    const list = listRef.current;
+    const row = list?.querySelector(`[data-thread="${CSS.escape(id)}"]`);
+    return list && row ? row.getBoundingClientRect().top - list.getBoundingClientRect().top : null;
+  };
+  const toggleThread = (id: string, next: string) => {
+    const top = rowTop(id);
+    anchor.current = top === null ? null : { id, top };
+    setThreadId(next);
+  };
+  const open = Boolean(threadId);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs on the open/closed switch only
+  useLayoutEffect(() => {
+    const held = anchor.current;
+    anchor.current = null;
+    const top = held && rowTop(held.id);
+    if (held && top !== null && listRef.current) listRef.current.scrollTop += top - held.top;
+  }, [open]);
   const listed = useInfiniteQuery(
     trpc.inboxes.threads.list.infiniteQueryOptions(base, {
       getNextPageParam: (page) => page.nextCursor,
@@ -191,8 +213,8 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
           {t("trashRetention", { days: TRASH_RETENTION_DAYS })}
         </p>
       ) : null}
-      <div ref={splitRef} className={threadId ? "ms-thread-split" : undefined}>
-        <div>
+      <div ref={splitRef} className={open ? "ms-thread-split open" : "ms-thread-split"}>
+        <div ref={listRef}>
           {active.isPending ? (
             <ul className="ms-thread-list" aria-hidden="true">
               {["58%", "42%", "66%"].map((width) => (
@@ -236,7 +258,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
                     agent={inbox.kind === "agent"}
                     sent={folder === "sent"}
                     selected={row.id === threadId}
-                    onOpen={() => setThreadId(row.id)}
+                    onOpen={() => (open ? setThreadId(row.id) : toggleThread(row.id, row.id))}
                   />
                 ))}
               </ul>
@@ -261,7 +283,7 @@ export function ThreadsTab({ inbox }: { inbox: InboxDetail }) {
             key={threadId}
             inbox={inbox}
             threadId={threadId}
-            onClose={() => setThreadId("")}
+            onClose={() => toggleThread(threadId, "")}
           />
         ) : null}
       </div>
@@ -290,7 +312,11 @@ export function ThreadListRow({
   const readLabel = t(row.read ? "read" : agent ? "unreadAgent" : "unread");
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: the row only widens its button's click; keyboard users reach the button
-    <li className={row.read ? "ms-thread-row" : "ms-thread-row unread"} onClick={onOpen}>
+    <li
+      className={row.read ? "ms-thread-row" : "ms-thread-row unread"}
+      data-thread={row.id}
+      onClick={onOpen}
+    >
       {/* A hollow ring when read, so every row keeps a mark in the dot column. */}
       <Tooltip inline text={readLabel}>
         <StatusDot
