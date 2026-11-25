@@ -1602,12 +1602,41 @@ one version's answers: move to a newer version deliberately, after checking
 its scores. Each sample records the versioned model id that answered.
 `ABUSE_JUDGE_BASE_URL` (default `https://api.typesafe.ai`) points the judge
 at another endpoint serving the same API; it posts to `<base>/v1/systemone`.
-The questions Jev answers ship in `packages/core/src/abuse-judge/questions.ts`,
-and those about names on the shared inbox domain in `names.ts` beside it. When the subject or the visible text names MillionSend as a word, one
+The questions Jev answers, and those about names on the shared inbox domain,
+are detection rules (below). When the subject or the visible text names MillionSend as a word, one
 sentence joins the policy: a team naming MillionSend as its own sending
 provider, as its setup tests do, is not impersonating it, and that mention
 clears nothing else in the mail. Every other message is judged on the policy
 as it stands.
+
+**Detection rules.** The judge's policies and questions, the lines its
+answers are read against, the brand, affix and host lists, the verdict
+categories and reasons the review hold acts on, and the numbers of the risk
+model, screening, campaign fingerprints, the warm-up's tiers and graduation
+and inbound spam scoring are one set of rules. The built-in set ships in
+`packages/core/src/abuse-rules-defaults.ts`. To run your own, point
+`ABUSE_RULES_FILE` at a JSON file mounted read-only (for example
+`/etc/millionsend/abuse-rules.json`, in every app container: web, api,
+worker and smtp). The file replaces the built-in set whole, so start from
+the built-in one:
+
+```sh
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts defaults > abuse-rules.json
+# edit it, then:
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts check abuse-rules.json
+```
+
+The question keys the code reads (`is_abuse`, `impersonation`, `category`
+and `language`, and the inbound set's) must stay; wording, extra questions
+and every number may change, and the check refuses a key that points at
+nothing. Each process reads the file once at boot and logs
+`abuse rules: <version> (file)`; a file that is missing or fails the check
+stops the boot, and its error names the file and the failing paths, never
+their contents. The Overview's Monitoring card shows the same version and
+source. A restart applies a new file. The thresholds are calibrated to the
+wording: re-measure on a labelled set after changing either. Instance
+settings (below) stay in the console. The hosted service runs its own
+rules.
 
 **Where the samples go.** Every sampled message is sent to TypeSafe, a
 sub-processor that hosts its service in the United States. Per its published

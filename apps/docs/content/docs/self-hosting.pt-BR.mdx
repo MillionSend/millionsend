@@ -1658,13 +1658,43 @@ propósito, depois de conferir as pontuações dela. Cada amostra registra o id
 versionado do modelo que respondeu. `ABUSE_JUDGE_BASE_URL` (padrão
 `https://api.typesafe.ai`) aponta o avaliador para outro endpoint que serve a
 mesma API; ele faz o POST em `<base>/v1/systemone`. As perguntas que o Jev
-responde estão em `packages/core/src/abuse-judge/questions.ts`, e as sobre os
-nomes no domínio compartilhado das caixas em `names.ts`, ao lado. Quando o
+responde, e as sobre os nomes no domínio compartilhado das caixas, são regras
+de detecção (abaixo). Quando o
 assunto ou o texto visível citam o MillionSend como palavra, uma frase entra
 na política: uma equipe que cita o MillionSend como o próprio provedor de
 envio, como fazem os testes de configuração, não está se passando por ele, e
 essa menção não libera mais nada no e-mail. Todas as outras mensagens são
 avaliadas pela política de sempre.
+
+**Regras de detecção.** As políticas e perguntas do avaliador, as linhas
+contra as quais as respostas são lidas, as listas de marcas, afixos e hosts,
+as categorias e os motivos de veredito sobre os quais a pausa para revisão
+age, e os números do modelo de risco, da triagem, das impressões digitais de
+campanha, das faixas e da graduação do aquecimento e da pontuação de spam de
+entrada formam um só conjunto de regras. O conjunto embutido está em
+`packages/core/src/abuse-rules-defaults.ts`. Para usar o seu, aponte
+`ABUSE_RULES_FILE` para um arquivo JSON montado como somente leitura (por
+exemplo `/etc/millionsend/abuse-rules.json`, em todo contêiner do app: web,
+api, worker e smtp). O arquivo substitui o conjunto embutido por inteiro,
+então comece pelo embutido:
+
+```sh
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts defaults > abuse-rules.json
+# edite e depois:
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts check abuse-rules.json
+```
+
+As chaves de pergunta que o código lê (`is_abuse`, `impersonation`,
+`category` e `language`, e as do conjunto de entrada) precisam ficar; a
+redação, perguntas extras e todos os números podem mudar, e a verificação
+recusa uma chave que não aponta para nada. Cada processo lê o arquivo uma vez
+ao iniciar e registra `abuse rules: <versão> (file)`; um arquivo ausente ou
+que não passa na verificação impede a inicialização, e o erro cita o arquivo
+e os caminhos que falharam, nunca o conteúdo. O card Monitoramento da Visão
+geral mostra a mesma versão e a origem. Um reinício aplica um arquivo novo.
+Os limites são calibrados para a redação: meça de novo em um conjunto
+rotulado depois de mudar qualquer um dos dois. As configurações da instância
+(abaixo) continuam no console. O serviço hospedado usa as próprias regras.
 
 **Para onde vão as amostras.** Toda mensagem sorteada é enviada à TypeSafe, um
 subprocessador que hospeda o serviço nos Estados Unidos. Pelos termos

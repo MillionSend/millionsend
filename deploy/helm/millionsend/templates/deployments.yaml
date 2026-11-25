@@ -18,6 +18,7 @@ listener's value differs from the one the dashboard shows.
 {{- $v := index $.Values $c.name }}
 {{- if $v.enabled }}
 {{- $smtpTls := and (eq $c.name "smtp") (not (empty $v.tlsSecretName)) }}
+{{- $rules := and (ne $c.name "docs") (not (empty $.Values.abuseRules.secretName)) }}
 {{- if and (eq $c.name "smtp") (not $smtpTls) (not $insecureSmtp) }}
 {{- fail "smtp.enabled needs smtp.tlsSecretName (a kubernetes.io/tls Secret): the relay refuses to start without a STARTTLS keypair, unless config.SMTP_ALLOW_INSECURE_AUTH is \"true\"" }}
 {{- end }}
@@ -95,6 +96,10 @@ spec:
             {{- if and (ne $c.name "docs") $.Values.aws.webIdentity.enabled }}
             {{- include "millionsend.awsWebIdentityEnv" $ | trim | nindent 12 }}
             {{- end }}
+            {{- if $rules }}
+            - name: ABUSE_RULES_FILE
+              value: /etc/millionsend/abuse-rules.json
+            {{- end }}
             {{- with $.Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -147,6 +152,11 @@ spec:
               mountPath: /certs
               readOnly: true
             {{- end }}
+            {{- if $rules }}
+            - name: abuse-rules
+              mountPath: /etc/millionsend
+              readOnly: true
+            {{- end }}
             {{- if and (ne $c.name "docs") $.Values.aws.webIdentity.enabled }}
             {{- include "millionsend.awsWebIdentityVolumeMount" $ | trim | nindent 12 }}
             {{- end }}
@@ -156,6 +166,14 @@ spec:
         - name: smtp-tls
           secret:
             secretName: {{ $v.tlsSecretName }}
+        {{- end }}
+        {{- if $rules }}
+        - name: abuse-rules
+          secret:
+            secretName: {{ $.Values.abuseRules.secretName }}
+            items:
+              - key: {{ $.Values.abuseRules.key }}
+                path: abuse-rules.json
         {{- end }}
         {{- if and (ne $c.name "docs") $.Values.aws.webIdentity.enabled }}
         {{- include "millionsend.awsWebIdentityVolume" $ | trim | nindent 8 }}

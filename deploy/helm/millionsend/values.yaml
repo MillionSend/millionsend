@@ -166,6 +166,14 @@ podDisruptionBudget:
   # Set (e.g. 1 or "50%") to use minAvailable instead of maxUnavailable.
   minAvailable: ""
 
+# Optional detection rules file (ABUSE_RULES_FILE, see SELF_HOSTING.md,
+# "Detection rules"): a Secret holding the JSON under `key`, mounted read-only
+# at /etc/millionsend/abuse-rules.json in web, api, worker and smtp. Empty
+# runs the built-in rules.
+abuseRules:
+  secretName: ""
+  key: abuse-rules.json
+
 # Extra env for every app container (list form, e.g. valueFrom).
 extraEnv: []
 extraEnvFrom: []
