@@ -25,5 +25,7 @@ ALTER TABLE "team_new_account_usage" ADD CONSTRAINT "team_new_account_usage_team
 -- inside its window before the column existed takes the team's pool only when
 -- the team was Free for the whole window: never billed, or its period ended
 -- before the window. A refund ends a plan without moving the period's end, so
--- a refunded team stays out and its paid-era mail never counts as Free.
-UPDATE "emails" SET "pool_owner_id" = "teams"."pool_owner_id" FROM "teams" WHERE "emails"."team_id" = "teams"."id" AND "emails"."sent_at" >= now() - interval '7 days' AND "teams"."pool_owner_id" IS NOT NULL AND "teams"."plan" <> 'system' AND (("teams"."plan" = 'free' AND "teams"."current_period_end" IS NULL) OR "teams"."current_period_end" < now() - interval '7 days');
+-- a refunded team stays out and its paid-era mail never counts as Free. The
+-- plan is compared as text: a fresh database adds 'system' in this same
+-- transaction, and Postgres refuses a new enum value before it commits.
+UPDATE "emails" SET "pool_owner_id" = "teams"."pool_owner_id" FROM "teams" WHERE "emails"."team_id" = "teams"."id" AND "emails"."sent_at" >= now() - interval '7 days' AND "teams"."pool_owner_id" IS NOT NULL AND "teams"."plan"::text <> 'system' AND (("teams"."plan"::text = 'free' AND "teams"."current_period_end" IS NULL) OR "teams"."current_period_end" < now() - interval '7 days');
