@@ -518,6 +518,22 @@ it("settles each team's shared subdomain under the team's key, later when asked,
   expect(queues.get("shared.subdomain")).toEqual({ policy: "short", notify: false });
 });
 
+it("queues one SES unsuppress per address, keyed by team and hashed address, polled only", async () => {
+  const queue = await Queue.start("postgres://unused");
+  await queue.enqueueSesUnsuppress([
+    { teamId: "t1", email: "a@example.com", sourceEmailId: null },
+    { teamId: "t1", email: "b@example.com", sourceEmailId: "e1" },
+  ]);
+  expect(inserted.map((i) => i.job.data)).toEqual([
+    { teamId: "t1", email: "a@example.com", sourceEmailId: null },
+    { teamId: "t1", email: "b@example.com", sourceEmailId: "e1" },
+  ]);
+  const keys = inserted.map((i) => String(i.job.singletonKey));
+  expect(keys[0]).toMatch(/^t1:[0-9a-f]{64}$/);
+  expect(keys[0]).not.toBe(keys[1]);
+  expect(queues.get("ses.unsuppress")).toEqual({ policy: "short", notify: false });
+});
+
 it("arms one drain per distinct endpoint, keyed and grouped by the endpoint so a created one absorbs the rest and passes run one at a time", async () => {
   const queue = await Queue.start("postgres://unused");
   const at = new Date(0);

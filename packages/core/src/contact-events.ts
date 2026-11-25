@@ -176,9 +176,21 @@ export interface SuppressionEventRow {
   createdAt?: Date | null | undefined;
 }
 
+/** An address a team removed from its list, to clear from SES's account-level list too. */
+export interface SesUnsuppressRequest {
+  teamId: string;
+  email: string;
+  sourceEmailId: string | null;
+}
+
+export type SesUnsuppressEnqueue = (requests: readonly SesUnsuppressRequest[]) => Promise<void>;
+
 /**
  * Publishes suppression list changes. `source` is absent for rows SES wrote
- * (bounces, complaints); `data.origin` speaks the API's vocabulary.
+ * (bounces, complaints); `data.origin` speaks the API's vocabulary. A
+ * removal also hands its rows to `unsuppressSes`: SES refuses a send to an
+ * address on its own list and the bounce re-suppresses it, so a removal
+ * that left SES's list alone could never be retried.
  */
 export async function emitSuppressionEvents(
   db: Db,
@@ -188,10 +200,27 @@ export async function emitSuppressionEvents(
     rows: readonly SuppressionEventRow[];
     source?: ContactEventSource | undefined;
     enqueue?: WebhookEnqueue | undefined;
+    unsuppressSes?: SesUnsuppressEnqueue | undefined;
     occurredAt?: Date;
   },
 ): Promise<void> {
   if (params.rows.length === 0) return;
+  if (params.type === "suppression.removed" && params.unsuppressSes) {
+    // A one-click opt-out never reaches SES's list (it holds bounces and
+    // complaints), and an erased row has no address to name.
+    const requests = params.rows.flatMap((row) =>
+      row.email !== null && row.reason !== "one_click_unsubscribe"
+        ? [{ teamId: params.teamId, email: row.email, sourceEmailId: row.sourceEmailId }]
+        : [],
+    );
+    if (requests.length > 0) {
+      try {
+        await params.unsuppressSes(requests);
+      } catch (err) {
+        console.error("ses.unsuppress enqueue failed", err);
+      }
+    }
+  }
   const occurredAt = params.occurredAt ?? new Date();
   try {
     await enqueueTeamWebhookEvents(db, {

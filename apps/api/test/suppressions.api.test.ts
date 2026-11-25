@@ -476,3 +476,48 @@ describe("permission confinement", () => {
     }
   });
 });
+
+describe("removal clears SES's account-level list", () => {
+  it("hands removed bounce, complaint and manual rows to the worker, never opt-outs or erased rows", async () => {
+    const requests: unknown[] = [];
+    const keyring = EnvKeyring.fromBase64(randomBytes(32).toString("base64"));
+    const sesApp = createApi({
+      db,
+      keyring,
+      isCloud: false,
+      enqueueEmailSend: async () => {},
+      enqueueSesUnsuppress: async (batch) => {
+        requests.push(...batch);
+      },
+    });
+    const req = (method: string, path: string, body?: unknown) =>
+      sesApp.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${fullKey}`,
+          ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+    const sourceEmailId = randomUUID();
+    await seedRow("ses-single@example.com", { sourceEmailId });
+    expect((await req("DELETE", "/suppressions/ses-single@example.com")).status).toBe(200);
+    expect(requests).toEqual([{ teamId, email: "ses-single@example.com", sourceEmailId }]);
+
+    requests.length = 0;
+    const ids = [
+      await seedRow("ses-bounce@example.com"),
+      await seedRow("ses-complaint@example.com", { reason: "complaint" }),
+      await seedRow("ses-optout@example.com", { reason: "one_click_unsubscribe" }),
+      await seedRow("ses-erased@example.com", { email: null }),
+    ];
+    expect((await req("POST", "/suppressions/batch/remove", { ids })).status).toBe(200);
+    expect(requests).toHaveLength(2);
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        { teamId, email: "ses-bounce@example.com", sourceEmailId: null },
+        { teamId, email: "ses-complaint@example.com", sourceEmailId: null },
+      ]),
+    );
+  });
+});
