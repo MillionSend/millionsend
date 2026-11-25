@@ -80,9 +80,9 @@
       "action": "Only resend if you have confirmed the mailbox is valid again."
     },
     "onAccountSuppressionList": {
-      "title": "On your account suppression list",
-      "body": "This address is suppressed for your account from a prior bounce or complaint.",
-      "action": "Remove the suppression only after the mailbox is confirmed valid."
+      "title": "On SES's suppression list",
+      "body": "Amazon SES refused this send without trying it: the address is on SES's own suppression list from an earlier bounce. It was added to your suppressions here too.",
+      "action": "Once the mailbox is confirmed valid, remove it from your suppressions: that also clears it from SES's list shortly after, so wait a few minutes before resending."
     },
     "transientGeneral": {
       "title": "Temporary bounce",

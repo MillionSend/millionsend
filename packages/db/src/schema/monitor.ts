@@ -78,6 +78,15 @@ export const teamMonitor = pgTable("team_monitor", {
   vouchedBy: text("vouched_by"),
   vouchReason: text("vouch_reason"),
   vouchUntil: timestamp("vouch_until", { withTimezone: true }),
+  // An operator lifted the new-account limit for the team, with the vouch's
+  // shape: active while limit_bypass_until is null or ahead.
+  limitBypassAt: timestamp("limit_bypass_at", { withTimezone: true }),
+  limitBypassBy: text("limit_bypass_by"),
+  limitBypassReason: text("limit_bypass_reason"),
+  limitBypassUntil: timestamp("limit_bypass_until", { withTimezone: true }),
+  // When the operator was told the team's mail first waited for the
+  // new-account limit: set once, so the alert goes out once.
+  newAccountAlertedAt: timestamp("new_account_alerted_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -136,6 +145,11 @@ export const monitorSamples = pgTable(
   },
   (t) => [
     index("monitor_samples_team_created_idx").on(t.teamId, t.createdAt),
+    // Screening counts a team's outstanding samples for every email it
+    // screens; without this it walks the team's whole history to find a few.
+    index("monitor_samples_team_pending_screening_idx")
+      .on(t.teamId)
+      .where(sql`${t.status} = 'pending' and ${t.screening}`),
     // The instance-wide daily cap and the retention prune count by age alone.
     index("monitor_samples_created_idx").on(t.createdAt),
     // The set-null foreign keys fire on every email and broadcast delete.
@@ -217,6 +231,15 @@ export const monitorSettingColumns = {
   sharedInboxOpen: boolean("shared_inbox_open"),
   sharedInboxTenants: boolean("shared_inbox_tenants"),
   sharedInboxTeamDailyCap: integer("shared_inbox_team_daily_cap"),
+  // The new-account limit and the send-burst alert.
+  newAccountFirstDay: integer("new_account_first_day"),
+  newAccountDaily: integer("new_account_daily"),
+  newAccountDays: integer("new_account_days"),
+  burstMinSent: integer("burst_min_sent"),
+  burstWindowHours: integer("burst_window_hours"),
+  burstTeamAgeDays: integer("burst_team_age_days"),
+  burstSingleShare: doublePrecision("burst_single_share"),
+  burstProviderShare: doublePrecision("burst_provider_share"),
 } as const;
 
 /**

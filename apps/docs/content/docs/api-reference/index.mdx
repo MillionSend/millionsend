@@ -167,9 +167,12 @@ remaining deltas are deliberate and loud:
   `sends_after`, the earliest it goes out. `GET /emails/{id}` and
   `GET /emails` keep `last_event: "queued"` for an email that waits, as
   Resend clients expect, and add `queued_reason` (`new_domain_limit`,
-  `warming_up`, `daily_quota`, `monthly_quota` or `capacity`, and `null` when it
-  isn't waiting) and `sends_after` (`null` when no time is known, as for
-  `capacity` and `warming_up`). Clients that don't know these fields ignore them.
+  `new_account_limit`, `warming_up`, `daily_quota`, `monthly_quota` or
+  `capacity`, and `null` when it isn't waiting) and `sends_after` (`null` when
+  no time is known, as for `capacity` and `warming_up`). `new_account_limit`
+  means the instance limits what a new account sends in its first days; it
+  goes out as that limit allows. Clients that don't know these fields ignore
+  them.
 - `POST /contacts`, `POST /contacts/batch` and the audience alias return
   `403 plan_limit_reached` when a new contact would take the team past its
   plan's contact cap (1,000 on Free; paid plans are unlimited). Existing

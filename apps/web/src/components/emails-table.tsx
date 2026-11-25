@@ -15,7 +15,7 @@ import { formatDateTime, formatDay, formatDayTime, formatTime } from "@/lib/form
 import { rowRelease } from "@/lib/new-domain-limit";
 
 /** A hold the team may know the reason of; capacity and every silent hold read as a plain wait. */
-export type WaitingFor = "domain_limit" | "warmup" | "warmup_paused" | "plan";
+export type WaitingFor = "domain_limit" | "warmup" | "warmup_paused" | "new_account" | "plan";
 
 export interface EmailRow {
   id: string;
@@ -108,6 +108,7 @@ export function EmailsTable({
     if (row.held) return t("held.body");
     if (waitingFor === "warmup") return t("list.waitingTip.warmup");
     if (waitingFor === "warmup_paused") return t("list.waitingTip.warmupPaused");
+    if (waitingFor === "new_account") return t("list.waitingTip.newAccount");
     if (waitingFor === "plan" && row.resumesAt) {
       return t("list.waitingTip.plan", { date: formatDayTime(row.resumesAt, locale) });
     }

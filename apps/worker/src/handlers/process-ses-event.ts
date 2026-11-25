@@ -139,6 +139,7 @@ export async function processSesEvent(
       bcc: schema.emails.bcc,
       subject: schema.emails.subject,
       tags: schema.emails.tags,
+      poolOwnerId: schema.emails.poolOwnerId,
       matchedByTag: sql<boolean>`false`,
     })
     .from(schema.emails)
@@ -155,6 +156,7 @@ export async function processSesEvent(
         bcc: schema.emails.bcc,
         subject: schema.emails.subject,
         tags: schema.emails.tags,
+        poolOwnerId: schema.emails.poolOwnerId,
         matchedByTag: sql<boolean>`true`,
       })
       .from(schema.emails)
@@ -277,13 +279,10 @@ export async function processSesEvent(
           )}
       `);
       await bumpHourlyUsage(txDb, { teamId: email.teamId, at: new Date(event.occurredAt), counts });
-      // The tag names the pool whose `sent` counted the send; untagged mail
-      // goes to the pool the team is in now.
-      await bumpFreePoolUsage(txDb, {
-        ...(event.poolOwnerId ? { ownerId: event.poolOwnerId } : { teamId: email.teamId }),
-        day,
-        counts,
-      });
+      // Only the pool whose `sent` counted the send: mail sent while paid
+      // never reaches a Free pool, even after the team drops to Free.
+      const poolOwnerId = event.poolOwnerId ?? email.poolOwnerId;
+      if (poolOwnerId) await bumpFreePoolUsage(txDb, { ownerId: poolOwnerId, day, counts });
     }
 
     // Auto-suppression: permanent bounces, full or abandoned mailboxes (as

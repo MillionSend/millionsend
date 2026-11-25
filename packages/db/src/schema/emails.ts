@@ -88,6 +88,8 @@ export const emailEventTypeEnum = pgEnum("email_event_type", [
  * holds a Free team's mail to a provider that reports complaints while the
  * Free fuse is tripped; the review list never releases it, and the drain only
  * once the operator has released the fuse. Never shown to the team.
+ * "new_account" waits for a new team's early-days limit (core
+ * new-account-limit): the drain sends it as the limit allows.
  */
 export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "warmup",
@@ -97,6 +99,7 @@ export const emailParkReasonEnum = pgEnum("email_park_reason", [
   "media",
   "recipient",
   "fuse",
+  "new_account",
 ]);
 
 /**
@@ -149,6 +152,10 @@ export const emails = pgTable(
     // bookFreeBurst): a wake-up reads it back instead of booking again,
     // until it is a burst window old (FREE_BURST_WINDOW_MS).
     freeBurstAt: timestamp("free_burst_at", { withTimezone: true }),
+    // The Free pool the send counted in (its SES pool tag), set at the send
+    // claim: null for paid, system and self-hosted mail. The Free fuse reads
+    // it, so a team's plan changing later never recasts what it sent.
+    poolOwnerId: text("pool_owner_id"),
     // An operator released it from the review list: no screening reason
     // stops it again.
     screenReleasedAt: timestamp("screen_released_at", { withTimezone: true }),

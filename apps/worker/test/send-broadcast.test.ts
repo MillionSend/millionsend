@@ -1519,3 +1519,40 @@ describe("new-domain warm-up", () => {
     expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
   });
 });
+
+describe("new-account limit", () => {
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await db.update(schema.instanceSettings).set({ newAccountFirstDay: null });
+  });
+
+  it("cloud fan-out sends up to a new team's first-day limit and parks the rest for it", async () => {
+    vi.stubEnv("IS_CLOUD", "true");
+    await db
+      .insert(schema.instanceSettings)
+      .values({ id: 1, newAccountFirstDay: 2 })
+      .onConflictDoUpdate({ target: schema.instanceSettings.id, set: { newAccountFirstDay: 2 } });
+    const { teamId: nTeamId } = await seedTeam("newacct", [
+      { email: "n1@example.com" },
+      { email: "n2@example.com" },
+      { email: "n3@example.com" },
+      { email: "n4@example.com" },
+    ]);
+    await db
+      .update(schema.domains)
+      .set({ warmupTrustedAt: new Date() })
+      .where(eq(schema.domains.teamId, nTeamId));
+    const broadcastId = await insertBroadcast({ teamId: nTeamId, from: "Acme <hi@newacct.dev>" });
+    const { deps, enqueued } = makeDeps({ isCloud: true });
+
+    expect(await sendBroadcast(db, deps, { broadcastId })).toBe("sent");
+    const rows = await emailsOf(broadcastId);
+    const queued = rows.filter((r) => r.latestStatus === "queued");
+    expect(queued).toHaveLength(2);
+    expect(rows.filter((r) => r.latestStatus === "queued_quota")).toMatchObject([
+      { parkReason: "new_account" },
+      { parkReason: "new_account" },
+    ]);
+    expect(enqueued.sort()).toEqual(queued.map((r) => r.id).sort());
+  });
+});

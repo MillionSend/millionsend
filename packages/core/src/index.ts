@@ -310,6 +310,8 @@ export {
   emitContactEvents,
   emitSuppressionEvents,
   loadContactSnapshots,
+  type SesUnsuppressEnqueue,
+  type SesUnsuppressRequest,
   type SuppressionEventRow,
   webhookEventForActivity,
 } from "./contact-events.js";
@@ -577,7 +579,11 @@ export {
   type MailPreferenceKey,
   mailPreferenceOf,
 } from "./mail-preferences.js";
-export { firstRecipientDomain, mailboxProviderSql } from "./mailbox-provider-sql.js";
+export {
+  firstRecipientDomain,
+  mailboxProviderSql,
+  providerFamilySql,
+} from "./mailbox-provider-sql.js";
 export {
   complaintReportingRecipients,
   INACTIVE_MAILBOX_PATTERN,
@@ -590,6 +596,7 @@ export {
 } from "./mailbox-providers.js";
 export {
   getMonitorSettingsRow,
+  instanceSettings,
   isValidMonitorSetting,
   MONITOR_SETTING_DEFAULTS,
   MONITOR_SETTING_KEYS,
@@ -605,6 +612,17 @@ export {
   monitorThresholdsOrdered,
   resolveMonitorSettings,
 } from "./monitor-settings.js";
+export {
+  admitNewAccount,
+  claimNewAccountAlerts,
+  limitBypassActive,
+  type NewAccountCap,
+  newAccountCap,
+  releaseNewAccount,
+  reserveNewAccount,
+  revokeTeamLimitBypass,
+  setTeamLimitBypass,
+} from "./new-account-limit.js";
 export {
   type NewDomainLimit,
   type NewDomainLimitEta,
@@ -828,6 +846,7 @@ export {
   segmentFilterSchema,
   segmentWhere,
 } from "./segment-filter.js";
+export { claimSendBursts, type SendBurst } from "./send-bursts.js";
 export {
   formatMailbox,
   type Mailbox,

@@ -11,6 +11,7 @@ import {
   SES_COMPLAINT_ALERT_RATE,
   SES_COMPLAINT_PAUSE_RATE,
   SES_COMPLAINT_REVIEW_RATE,
+  type SendBurst,
   type SesEnforcementChange,
 } from "@millionsend/core";
 
@@ -214,5 +215,21 @@ export function freeFuseMail(input: FreeFuseTrip & { url: string }): MailContent
     ],
     button: { label: "Open Trust & safety", url: input.url },
     footnote: "Sent to the instance operator when the Free fuse trips.",
+  });
+}
+
+export function sendBurstMail(
+  input: SendBurst & { windowHours: number; url: string },
+): MailContent {
+  const share = (n: number) => `${Math.round((n / input.sample) * 100)}%`;
+  return layout({
+    subject: `Send burst from a new team: ${inertText(input.name)}`,
+    paragraphs: [
+      `${inertText(input.name)}, created ${input.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC, sent ${input.sent.toLocaleString("en-US")} emails in the last ${input.windowHours} hours.`,
+      `Of its latest ${input.sample.toLocaleString("en-US")}: ${share(input.single)} to a single recipient each, ${share(input.familyCount)} to ${inertText(input.family)}, ${share(input.api)} through the API rather than a broadcast.`,
+      "Nothing was held. Open the team's review page to look at its mail and decide.",
+    ],
+    button: { label: "Open review", url: input.url },
+    footnote: "Sent to the instance operator once per team.",
   });
 }

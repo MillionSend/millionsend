@@ -5,6 +5,7 @@ import {
   extractAddrSpec,
   hashRecipient,
   normalizeAddress,
+  type SesUnsuppressEnqueue,
   type SuppressionEventRow,
   suppressionHashesFor,
   type WebhookEnqueue,
@@ -36,7 +37,10 @@ const ERASED_ROWS_NOTE =
 export function registerSuppressionRoutes(
   app: OpenAPIHono<Env>,
   db: Db,
-  events: { enqueue?: WebhookEnqueue | undefined } = {},
+  events: {
+    enqueue?: WebhookEnqueue | undefined;
+    unsuppressSes?: SesUnsuppressEnqueue | undefined;
+  } = {},
 ): void {
   const jsonErr = (description: string) => ({
     content: { "application/json": { schema: errorSchema } },
@@ -153,6 +157,7 @@ export function registerSuppressionRoutes(
       rows,
       source: "api",
       enqueue: events.enqueue,
+      unsuppressSes: events.unsuppressSes,
     });
   };
 

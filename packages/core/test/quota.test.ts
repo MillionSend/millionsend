@@ -367,16 +367,10 @@ describe("a Free pool", () => {
     expect(await readDailyUsage(db, h, quota, POOL_DAY)).toBe(10);
   });
 
-  it("adds a pooled team's deliverability counts to its pool, and nothing for any other team", async () => {
-    const pooled = await createTeam(db, "pool-counts", { poolOwnerId: "u-counts" });
-    const paid = await createTeam(db, "pool-paid", { poolOwnerId: "u-counts" });
-    await db.update(schema.teams).set({ plan: "starter" }).where(eq(schema.teams.id, paid));
-    const alone = await createTeam(db, "pool-none");
+  it("adds deliverability counts to the pool it names", async () => {
     const counts = { sent: 1, sent_no_feedback: 1, hard_bounced: 1, complained: 1 };
-    for (const teamId of [pooled, paid, alone]) {
-      await bumpFreePoolUsage(db, { teamId, day: POOL_DAY, counts });
-    }
-    await bumpFreePoolUsage(db, { teamId: pooled, day: POOL_DAY, counts: { complained: 1 } });
+    await bumpFreePoolUsage(db, { ownerId: "u-counts", day: POOL_DAY, counts });
+    await bumpFreePoolUsage(db, { ownerId: "u-counts", day: POOL_DAY, counts: { complained: 1 } });
     expect(
       await db
         .select()

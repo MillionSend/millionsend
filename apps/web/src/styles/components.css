@@ -573,8 +573,11 @@ table.ms-table {
   color: var(--ms-bone);
   cursor: pointer;
 }
+/* The open thread's row: a full step above the ground and a bone edge, so it
+   reads at a glance beside the pane. */
 .ms-thread-row:has([aria-current="true"]) {
-  background: color-mix(in srgb, var(--ms-panel-raised) 60%, transparent);
+  background: var(--ms-line-strong);
+  box-shadow: inset 2px 0 0 var(--ms-bone);
 }
 .ms-thread-row:has(.ms-thread-open:focus-visible) {
   position: relative;
@@ -673,21 +676,27 @@ table.ms-table {
 .ms-thread-split > section {
   min-height: 100dvh;
 }
-/* Side by side, the list and the pane scroll each on its own, the split
-   filling the viewport under its top (useFillViewport) above main's bottom
-   padding. The 2px padding, given back by the margin, keeps a row's focus
-   ring inside the scroller's clip. */
+/* With room for both, the list scrolls on its own whether a thread is open or
+   not, so opening and closing one never swaps which box scrolls (and the row
+   in view with it). The split runs to the viewport's bottom edge
+   (useFillViewport), its negative margin taking back main's bottom padding.
+   The 2px side and top padding, given back by the margin, keeps a row's focus
+   ring inside the scroller's clip; none at the bottom, which would overflow
+   the page by 2px. */
 @container (min-width: 760px) {
   .ms-thread-split {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
     align-items: stretch;
-    height: max(360px, calc(100dvh - var(--ms-fill-top, 0px) - var(--ms-fill-gap, 32px)));
+    height: max(360px, calc(100dvh - var(--ms-fill-top, 0px)));
+    margin-bottom: calc(-1 * var(--ms-fill-gap, 32px));
+  }
+  .ms-thread-split.open {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   }
   .ms-thread-split > *,
   .ms-thread-split > section {
     min-height: 0;
-    margin: -2px;
-    padding: 2px;
+    margin: -2px -2px 0;
+    padding: 2px 2px 0;
     overflow-y: auto;
     overscroll-behavior: contain;
   }

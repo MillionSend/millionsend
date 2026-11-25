@@ -672,10 +672,11 @@ async function complainedSend(
   sentAt: Date,
   complainedAt = sentAt,
   to = ["r@example.com"],
+  poolOwnerId: string | null = null,
 ): Promise<string> {
   const [email] = await db
     .insert(schema.emails)
-    .values({ teamId, domainId, from: "f@example.com", to, subject: "s", sentAt })
+    .values({ teamId, domainId, from: "f@example.com", to, subject: "s", sentAt, poolOwnerId })
     .returning({ id: schema.emails.id });
   if (!email) throw new Error("seed failed");
   await db.insert(schema.emailEvents).values({
@@ -687,6 +688,11 @@ async function complainedSend(
     data: { complaint: { complainedRecipients: to.map((emailAddress) => ({ emailAddress })) } },
   });
   return email.id;
+}
+
+/** complainedSend for mail sent in the team's own Free pool. */
+function freeSend(team: { teamId: string; domainId: string }, sentAt: Date, complainedAt = sentAt) {
+  return complainedSend(team.teamId, team.domainId, sentAt, complainedAt, undefined, team.teamId);
 }
 
 async function teamOn(slug: string, plan: "free" | "pro", region: string) {
@@ -1024,14 +1030,14 @@ it("holds a Free team with a complaint for review once, and after its release on
   expect(await holdComplaintTeams(db, await reviewTeams(later), later)).toEqual([free.teamId]);
 });
 
-it("trips the Free fuse at 3 complaints on Free teams' mail in 7 days, counts nothing sent before a release, and parks only Free mail a provider can report", async () => {
+it("trips the Free fuse at 3 complaints on mail sent in a Free pool in 7 days, counts nothing sent before a release, and parks only Free mail a provider can report", async () => {
   await clearTraffic();
   await db.delete(schema.regionBreakers);
   const R = "eu-central-1";
   const freeA = await teamOn("fuse-a", "free", R);
   const freeB = await teamOn("fuse-b", "free", R);
   const paid = await teamOn("fuse-paid", "pro", R);
-  // A paid plan past its grace window is limited as Free.
+  // A paid plan past its grace window is limited as Free: its sends were tagged.
   const lapsed = await teamOn("fuse-lapsed", "pro", R);
   await db
     .update(schema.teams)
@@ -1043,15 +1049,15 @@ it("trips the Free fuse at 3 complaints on Free teams' mail in 7 days, counts no
       freeFuseComplaints: null,
     };
 
-  await complainedSend(freeA.teamId, freeA.domainId, hoursAgo(30));
-  await complainedSend(freeB.teamId, freeB.domainId, hoursAgo(20));
+  await freeSend(freeA, hoursAgo(30));
+  await freeSend(freeB, hoursAgo(20));
   // Mail sent before the window never counts, whenever its complaint came.
-  await complainedSend(freeB.teamId, freeB.domainId, hoursAgo(8 * 24), hoursAgo(1));
+  await freeSend(freeB, hoursAgo(8 * 24), hoursAgo(1));
   for (let i = 0; i < 5; i++) await complainedSend(paid.teamId, paid.domainId, hoursAgo(10));
   expect(await evaluateFreeFuse(db, NOW)).toBeNull();
   expect((await fuse()).freeFuseTrippedAt).toBeNull();
 
-  await complainedSend(lapsed.teamId, lapsed.domainId, hoursAgo(5));
+  await freeSend(lapsed, hoursAgo(5));
   expect(await evaluateFreeFuse(db, NOW)).toEqual({
     complaints: 3,
     teams: [
@@ -1098,12 +1104,39 @@ it("trips the Free fuse at 3 complaints on Free teams' mail in 7 days, counts no
   // The window starts over at the release: the week's three complaints are spent.
   const after = (h: number) => new Date(released.getTime() + h * 3_600_000);
   expect(await evaluateFreeFuse(db, after(1))).toBeNull();
-  await complainedSend(freeA.teamId, freeA.domainId, after(1), after(2));
-  await complainedSend(freeA.teamId, freeA.domainId, after(1), after(2));
+  await freeSend(freeA, after(1), after(2));
+  await freeSend(freeA, after(1), after(2));
   expect(await evaluateFreeFuse(db, after(3))).toBeNull();
-  await complainedSend(freeB.teamId, freeB.domainId, after(1), after(3));
+  await freeSend(freeB, after(1), after(3));
   expect(await evaluateFreeFuse(db, after(4))).toMatchObject({ complaints: 3 });
   await releaseFreeFuse(db, after(5));
+});
+
+it("counts toward the Free fuse only mail sent in a Free pool, whatever the team's plan is now", async () => {
+  await clearTraffic();
+  await db
+    .update(schema.instanceSettings)
+    .set({ freeFuseTrippedAt: null, freeFuseReleasedAt: null });
+  const R = "eu-central-1";
+  // Sent while paid, then refunded down to Free and suspended.
+  const fallen = await teamOn("fuse-fallen", "pro", R);
+  for (let i = 0; i < 3; i++) await complainedSend(fallen.teamId, fallen.domainId, hoursAgo(10));
+  await db
+    .update(schema.teams)
+    .set({ plan: "free", suspendedAt: NOW })
+    .where(eq(schema.teams.id, fallen.teamId));
+  expect(await evaluateFreeFuse(db, NOW)).toBeNull();
+
+  // Sent while Free, upgraded since.
+  const risen = await teamOn("fuse-risen", "free", R);
+  for (let i = 0; i < 3; i++) await freeSend(risen, hoursAgo(10));
+  await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, risen.teamId));
+  expect(await evaluateFreeFuse(db, NOW)).toEqual({
+    complaints: 3,
+    teams: [{ teamName: "fuse-risen", complaints: 3 }],
+    deleted: 0,
+  });
+  await releaseFreeFuse(db, NOW);
 });
 
 it("counts toward the Free fuse the complaints about the mail of Free teams deleted since, named by their send's pool tag", async () => {
@@ -1114,7 +1147,7 @@ it("counts toward the Free fuse the complaints about the mail of Free teams dele
     .update(schema.instanceSettings)
     .set({ freeFuseTrippedAt: null, freeFuseReleasedAt: null });
   const kept = await teamOn("fuse-kept", "free", "eu-central-1");
-  await complainedSend(kept.teamId, kept.domainId, hoursAgo(5));
+  await freeSend(kept, hoursAgo(5));
   const orphan = (sesMessageId: string, extra: Partial<typeof u.$inferInsert> = {}) => ({
     sesMessageId,
     type: "complained" as const,

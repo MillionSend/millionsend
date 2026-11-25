@@ -9,6 +9,7 @@ import {
   hashRecipient,
   heldByNewDomainLimit,
   type NewDomainLimit,
+  newAccountCap,
   newDomainLimitEta,
   newDomainLimitEtas,
   newDomainLimitStatus,
@@ -142,10 +143,13 @@ function fullMailboxSql(teamId: string): SQL<boolean> {
  * plain wait, or the plan's while that binds. The paused warm-up's lookup
  * is spelled out like HELD_SQL.
  */
-const WAITING_FOR_SQL = sql<"domain_limit" | "warmup" | "warmup_paused" | "quota" | null>`case
+const WAITING_FOR_SQL = sql<
+  "domain_limit" | "warmup" | "warmup_paused" | "new_account" | "quota" | null
+>`case
   when ${heldByNewDomainLimit()} then 'domain_limit'
   when ${schema.emails.latestStatus} = 'queued_quota' and ${schema.emails.parkReason} = 'warmup' then
     case when exists (select 1 from domain_warmups dw where dw.domain_id = emails.domain_id and dw.status = 'paused') then 'warmup_paused' else 'warmup' end
+  when ${schema.emails.latestStatus} = 'queued_quota' and ${schema.emails.parkReason} = 'new_account' then 'new_account'
   when ${schema.emails.latestStatus} = 'queued_quota' then 'quota'
 end`;
 
@@ -160,6 +164,7 @@ type PendingSend =
   | { kind: "waiting" }
   | { kind: "warmup" }
   | { kind: "warmupPaused" }
+  | { kind: "newAccount"; resetsAt: Date | null }
   | {
       kind: "newDomainLimit";
       domainId: string;
@@ -221,6 +226,10 @@ async function pendingSend(
       sendsAfter: eta.sendsAfter,
       resetsAt: limit.resetsAt,
     };
+  }
+  if (email.parkReason === "new_account") {
+    const cap = await newAccountCap(db, { teamId, at: now, readOnly: true });
+    return { kind: "newAccount", resetsAt: cap?.resetsAt ?? null };
   }
   // A hold by the team's own cap outranks capacity: its reset is the date.
   const hold = await planHoldUntil(db, teamId, now);
@@ -701,6 +710,7 @@ export const emailsRouter = router({
         rows: [row],
         source: "dashboard",
         enqueue: ctx.enqueueWebhookDeliveries,
+        unsuppressSes: ctx.enqueueSesUnsuppress,
       });
       return { id: row.id };
     }),

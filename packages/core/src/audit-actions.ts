@@ -68,6 +68,9 @@ export const AUDIT_ACTIONS = [
   // An operator's vouch for a team's content; the instance's rows, never the team's.
   "monitor.vouched",
   "monitor.vouch_revoked",
+  // An operator's bypass of a team's new-account limit; the instance's rows too.
+  "monitor.limit_bypassed",
+  "monitor.limit_bypass_revoked",
   "monitor.broadcasts_paused",
   "monitor.broadcasts_resumed",
   "warmup.trust_granted",

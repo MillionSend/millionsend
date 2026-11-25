@@ -151,6 +151,56 @@ export const MONITOR_SETTINGS = {
     kind: "count",
     default: 1000,
   },
+  // The new-account limit (see new-account-limit.ts): recipients a team may
+  // send in its first 24 hours and in each later day of its first
+  // newAccountDays. Zero caps nothing, so it is off until the operator sets it.
+  newAccountFirstDay: {
+    column: "newAccountFirstDay",
+    env: "NEW_ACCOUNT_FIRST_DAY",
+    kind: "count",
+    default: 0,
+  },
+  newAccountDaily: {
+    column: "newAccountDaily",
+    env: "NEW_ACCOUNT_DAILY",
+    kind: "count",
+    default: 0,
+  },
+  newAccountDays: {
+    column: "newAccountDays",
+    env: "NEW_ACCOUNT_DAYS",
+    kind: "count",
+    default: 7,
+  },
+  // The send-burst alert (see send-bursts.ts): a team younger than
+  // burstTeamAgeDays that sent burstMinSent emails in burstWindowHours, at
+  // least burstSingleShare of them to one recipient each and burstProviderShare
+  // to one provider family. A zero burstMinSent turns it off.
+  burstMinSent: { column: "burstMinSent", env: "BURST_MIN_SENT", kind: "count", default: 0 },
+  burstWindowHours: {
+    column: "burstWindowHours",
+    env: "BURST_WINDOW_HOURS",
+    kind: "count",
+    default: 24,
+  },
+  burstTeamAgeDays: {
+    column: "burstTeamAgeDays",
+    env: "BURST_TEAM_AGE_DAYS",
+    kind: "count",
+    default: 7,
+  },
+  burstSingleShare: {
+    column: "burstSingleShare",
+    env: "BURST_SINGLE_SHARE",
+    kind: "rate",
+    default: 0,
+  },
+  burstProviderShare: {
+    column: "burstProviderShare",
+    env: "BURST_PROVIDER_SHARE",
+    kind: "rate",
+    default: 0,
+  },
 } as const satisfies Record<
   string,
   {

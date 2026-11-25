@@ -504,7 +504,7 @@ describe("console.monitor", () => {
   it("reads every setting with its source, and the judge as off by default", async () => {
     const got = await operator().console.monitor.settings.get();
     expect(got.judge).toEqual({ on: false });
-    expect(got.settings).toHaveLength(30);
+    expect(got.settings).toHaveLength(38);
     expect(got.settings.find((s) => s.key === "firstSends")).toEqual({
       key: "firstSends",
       value: 1000,
@@ -809,6 +809,49 @@ describe("console.monitor.vouch", () => {
     expect((await operator().console.safety.review({ teamId: vouched })).vouch?.active).toBe(false);
     expect(await listed()).toBe(false);
     expect(await operator().console.monitor.revokeVouch({ teamId: vouched })).toEqual({
+      revoked: false,
+    });
+  });
+});
+
+describe("console.monitor.bypassLimit", () => {
+  it("lifts a team's new-account limit, kicks the drain, audited on the instance's log, operator only", async () => {
+    const fresh = await createTeam(db, "bypass-team");
+    await db.insert(schema.teamMembers).values({ teamId: fresh, userId: MEMBER, role: "owner" });
+    await expect(
+      callerFor(MEMBER, fresh, "owner").console.monitor.bypassLimit({
+        teamId: fresh,
+        reason: "mine",
+        lasts: "forever",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    h.crons.length = 0;
+    const { until } = await operator().console.monitor.bypassLimit({
+      teamId: fresh,
+      reason: " known sender ",
+      lasts: "30d",
+    });
+    expect(until).toBeInstanceOf(Date);
+    expect(h.crons).toContain("quota.drain");
+    expect((await auditRows("monitor.limit_bypassed"))[0]).toMatchObject({
+      teamId: null,
+      target: `team:${fresh}`,
+      data: { team: "bypass-team", reason: "known sender" },
+    });
+    const review = await operator().console.safety.review({ teamId: fresh });
+    expect(review.newAccount.bypass).toMatchObject({ reason: "known sender", active: true });
+
+    expect(await operator().console.monitor.revokeLimitBypass({ teamId: fresh })).toEqual({
+      revoked: true,
+    });
+    expect((await auditRows("monitor.limit_bypass_revoked"))[0]).toMatchObject({
+      teamId: null,
+      data: { team: "bypass-team", reason: "known sender" },
+    });
+    expect(
+      (await operator().console.safety.review({ teamId: fresh })).newAccount.bypass?.active,
+    ).toBe(false);
+    expect(await operator().console.monitor.revokeLimitBypass({ teamId: fresh })).toEqual({
       revoked: false,
     });
   });

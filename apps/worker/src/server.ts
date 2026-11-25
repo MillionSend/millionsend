@@ -125,8 +125,10 @@ import { processSesEvent } from "./handlers/process-ses-event.js";
 import { runSafetyFlags } from "./handlers/safety-flags.js";
 import { screenReceived } from "./handlers/screen-received.js";
 import { finalizeBroadcast, sendBroadcast } from "./handlers/send-broadcast.js";
+import { alertSendBursts } from "./handlers/send-bursts.js";
 import { failQueuedEmail, sendEmail } from "./handlers/send-email.js";
 import { createRegionSendControls } from "./handlers/ses-regions.js";
+import { runSesUnsuppress } from "./handlers/ses-unsuppress.js";
 import {
   queueMissingSharedSubdomains,
   runSharedSubdomainJob,
@@ -606,6 +608,11 @@ await queue.scheduleCrons({
       txParkedAt: (region) => sendControls.txParkedAt(region),
     });
   },
+  "safety.bursts": async () => {
+    if (!env.IS_CLOUD) return;
+    const alerted = await alertSendBursts(db, { mailer, appBaseUrl: env.APP_BASE_URL });
+    if (alerted > 0) console.log(`safety.bursts: alerted=${alerted}`);
+  },
   "safety.flags": async () => {
     const settings = judge ? await monitorSettings() : null;
     const result = await runSafetyFlags(db, {
@@ -1025,6 +1032,16 @@ if (sharedDomain) {
     { concurrency: 2, batchSize: 10 },
   );
 }
+
+// One lane: the handler paces SES's account-wide throttle. One job per fetch,
+// since a handler throw fails every job fetched with it.
+// ponytail: the pacing is per process; a second worker process doubles the
+// call rate (the SDK's throttling retries and pg-boss's backoff absorb it).
+await queue.work(
+  "ses.unsuppress",
+  (job) => runSesUnsuppress(db, { regions, clientForRegion }, job),
+  { batchSize: 1 },
+);
 
 // Erasure scans a team's whole history; it runs here so the request that
 // asked for it returns at once.

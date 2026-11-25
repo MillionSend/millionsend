@@ -13,8 +13,10 @@ import {
   monitorThresholdsOrdered,
   resolveMonitorSettings,
   resumeMonitorPause,
+  revokeTeamLimitBypass,
   revokeTeamVouch,
   setMonitorOverride,
+  setTeamLimitBypass,
   setTeamVouch,
 } from "@millionsend/core";
 import { schema } from "@millionsend/db";
@@ -205,6 +207,59 @@ export const consoleMonitorRouter = router({
         metadata: {
           team: team.name,
           vouchedAt: ended.vouchedAt.toISOString(),
+          reason: ended.reason,
+        },
+      });
+      return { revoked: true };
+    }),
+
+  /**
+   * Lift a team's new-account limit, audited like a vouch; the mail it held
+   * goes out with the drain this kicks.
+   */
+  bypassLimit: operatorProcedure
+    .input(
+      z.object({
+        teamId: z.uuid(),
+        reason: z.string().trim().min(1).max(500),
+        lasts: z.enum(["30d", "90d", "forever"]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const now = new Date();
+      const days = VOUCH_DAYS[input.lasts];
+      const until = days === null ? null : new Date(now.getTime() + days * DAY_MS);
+      await setTeamLimitBypass(ctx.db, {
+        teamId: team.id,
+        by: ctx.operator.id,
+        reason: input.reason,
+        until,
+        now,
+      });
+      await auditOperator(ctx, {
+        teamId: null,
+        action: "monitor.limit_bypassed",
+        target: { type: "team", id: team.id },
+        metadata: { team: team.name, reason: input.reason, until: until?.toISOString() ?? null },
+      });
+      await kickQuotaDrain();
+      return { until };
+    }),
+
+  revokeLimitBypass: operatorProcedure
+    .input(z.object({ teamId: z.uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const team = await loadTeam(ctx.db, input.teamId);
+      const ended = await revokeTeamLimitBypass(ctx.db, { teamId: team.id, now: new Date() });
+      if (!ended) return { revoked: false };
+      await auditOperator(ctx, {
+        teamId: null,
+        action: "monitor.limit_bypass_revoked",
+        target: { type: "team", id: team.id },
+        metadata: {
+          team: team.name,
+          bypassedAt: ended.bypassedAt.toISOString(),
           reason: ended.reason,
         },
       });

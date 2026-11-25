@@ -58,6 +58,7 @@ export const ACCOUNT_MAIL_KINDS = [
   "monitor.broadcasts_paused",
   "monitor.team_held",
   "monitor.team_linked",
+  "monitor.new_account_held",
   "monitor.degraded",
   "monitor.media_blocked",
   "monitor.digest",

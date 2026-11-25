@@ -3,6 +3,7 @@ import {
   type MonitorSettings,
   monitorSettingsReader,
   recordSupportViewRead,
+  type SesUnsuppressEnqueue,
   unstorableValueMessage,
   type WebhookEnqueue,
 } from "@millionsend/core";
@@ -15,7 +16,12 @@ import superjson from "superjson";
 import { getAuth } from "./auth";
 import { isInstanceOperator } from "./instance-operator";
 import { ACTIVE_TEAM_COOKIE, getActiveMembership, type SessionRole } from "./membership";
-import { enqueueEmailSend, enqueueWebhookDeliveries, getQueue } from "./queue";
+import {
+  enqueueEmailSend,
+  enqueueSesUnsuppress,
+  enqueueWebhookDeliveries,
+  getQueue,
+} from "./queue";
 import { retryAfterSecOf } from "./retry-after";
 import { resolveSupportView, SUPPORT_VIEW_COOKIE } from "./support-view";
 
@@ -68,6 +74,11 @@ export interface Context {
    */
   enqueueWebhookDeliveries?: WebhookEnqueue;
   /**
+   * Clears an address the team removed from its suppression list from SES's
+   * account-level list, in the worker. Absent in tests.
+   */
+  enqueueSesUnsuppress?: SesUnsuppressEnqueue;
+  /**
    * The trust & safety settings, cached for a minute (monitorSettingsReader,
    * one per process as in the API and the worker). Absent in tests, where
    * each read goes to the row.
@@ -103,6 +114,7 @@ export async function createContext({ headers }: { headers: Headers }): Promise<
     enqueueBroadcastSend,
     enqueueEmailSend,
     enqueueWebhookDeliveries,
+    enqueueSesUnsuppress,
     setActiveTeamCookie: (teamId: string) =>
       cookieStore.set(ACTIVE_TEAM_COOKIE, teamId, {
         httpOnly: true,
