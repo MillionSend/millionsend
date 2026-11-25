@@ -1,5 +1,6 @@
 import { isCloudDeployment, sharedInboxDomain } from "@millionsend/config";
 import {
+  abuseRules,
   applyStatusCas,
   buildUnsubscribeHeaders,
   buildUnsubscribeUrl,
@@ -29,7 +30,6 @@ import {
   judgeAfterSend,
   type Keyring,
   linkTeam,
-  MONITOR_ANOMALY_CHECKS,
   type MonitorDeps,
   type MonitorSettings,
   makeUnsubscribeToken,
@@ -1298,8 +1298,7 @@ async function sendQueued(
           probation,
           anomalies:
             (insights?.checks.filter(
-              (c) =>
-                c.status === "fail" && (MONITOR_ANOMALY_CHECKS as readonly string[]).includes(c.id),
+              (c) => c.status === "fail" && abuseRules().keys.anomalyChecks.includes(c.id),
             ).length ?? 0) +
             (media?.opaque ? 1 : 0) +
             (media && media.attachments > 0 ? 1 : 0),

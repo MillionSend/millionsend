@@ -5,6 +5,12 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from
 import type { JudgeBlockInput } from "./abuse-judge/block.js";
 import { opaqueFacts } from "./abuse-judge/body.js";
 import type { JudgeVerdict } from "./abuse-judge/types.js";
+import {
+  abuseRules,
+  DEFAULT_ABUSE_RULES,
+  fromAbuseRules,
+  IMAGE_QUESTION_PREFIX,
+} from "./abuse-rules.js";
 import { recordAudit } from "./audit.js";
 import { countInvisible } from "./customer-text.js";
 import { isShortener } from "./email-insights.js";
@@ -40,57 +46,55 @@ export type MonitorSampleStatus = (typeof schema.monitorSampleStatusEnum.enumVal
 export type MonitorTier = "new" | "probation" | "established" | "trusted" | "exempt";
 export const MONITOR_TIERS = ["new", "probation", "established", "trusted", "exempt"] as const;
 
-/** Day 30 after the first send ends Probation. */
-export const MONITOR_PROBATION_DAYS = 30;
-/** Trusted: this old, this many lifetime sends, and no flag in the clean window. */
-export const MONITOR_TRUSTED_DAYS = 120;
-export const MONITOR_TRUSTED_SENDS = 50_000;
-export const MONITOR_TRUSTED_CLEAN_DAYS = 90;
-/** Verdicts halve in weight every week; a fresh team starts closer to "unknown" than a settled one. */
-export const MONITOR_RISK_HALF_LIFE_MS = 7 * DAY_MS;
-export const MONITOR_PRIOR_WEIGHT = 3;
-export const MONITOR_PRIOR_NEW = 0.35;
-export const MONITOR_PRIOR_SETTLED = 0.15;
-/** A flagged team is sampled this much more until its risk decays under the line. */
-export const MONITOR_FLAGGED_RATE_MULTIPLIER = 4;
-/** The pause policy also wants one verdict this strong within a day. */
-export const MONITOR_PAUSE_VERDICT_SCORE = 90;
+/**
+ * The risk model's numbers come from the detection rules
+ * (`limits.monitor`): Probation's length, Trusted's age, sends and clean
+ * window, the risk's half-life and its prior, the flagged team's sampling
+ * multiplier and the pause policy's verdict score. The exports are the
+ * built-in values.
+ */
+const BUILT_IN = DEFAULT_ABUSE_RULES.limits.monitor;
+export const MONITOR_PROBATION_DAYS = BUILT_IN.probationDays;
+export const MONITOR_TRUSTED_DAYS = BUILT_IN.trustedDays;
+export const MONITOR_TRUSTED_SENDS = BUILT_IN.trustedSends;
+export const MONITOR_TRUSTED_CLEAN_DAYS = BUILT_IN.trustedCleanDays;
+export const MONITOR_RISK_HALF_LIFE_MS = BUILT_IN.riskHalfLifeDays * DAY_MS;
+export const MONITOR_PRIOR_WEIGHT = BUILT_IN.priorWeight;
+export const MONITOR_PRIOR_NEW = BUILT_IN.priorNew;
+export const MONITOR_PRIOR_SETTLED = BUILT_IN.priorSettled;
+export const MONITOR_FLAGGED_RATE_MULTIPLIER = BUILT_IN.flaggedRateMultiplier;
+export const MONITOR_PAUSE_VERDICT_SCORE = BUILT_IN.pauseVerdictScore;
+const limits = () => abuseRules().limits.monitor;
 export const MONITOR_PAUSE_VERDICT_WINDOW_MS = DAY_MS;
 export const MONITOR_ALERT_INTERVAL_MS = DAY_MS;
 /**
- * The phishing-type verdicts the review hold acts on: the category the judge
- * chose, or a reason it gave. Any other abuse stays alert-only. Not
+ * The phishing-type verdicts the review hold acts on (`keys.holdCategories`,
+ * `keys.holdReasons`): the category the judge chose, or a reason it gave.
+ * Any other abuse stays alert-only. Not
  * off_domain_lure: a link elsewhere is common in legitimate mail, so it
  * counts only beside a phishing category or reason.
  */
-export const MONITOR_HOLD_CATEGORIES = [
-  "phishing_credentials",
-  "brand_impersonation",
-  "payment_redirect",
-] as const;
-export const MONITOR_HOLD_REASONS = ["impersonation", "harvests_secrets"] as const;
+export const MONITOR_HOLD_CATEGORIES: readonly string[] = DEFAULT_ABUSE_RULES.keys.holdCategories;
+export const MONITOR_HOLD_REASONS: readonly string[] = DEFAULT_ABUSE_RULES.keys.holdReasons;
 /**
- * The repeat hold counts the verdicts of the last 7 days, whenever they fall
+ * The repeat hold counts the verdicts of the last holdRepeatDays, whenever they fall
  * while the team is new: one early send followed by a week's wait disarms
  * nothing, and a team stays new until its first window and ramp are behind it.
  */
-export const MONITOR_HOLD_REPEAT_DAYS = 7;
+export const MONITOR_HOLD_REPEAT_DAYS = BUILT_IN.holdRepeatDays;
 /** Samples are metadata on the probes' clock. */
 export const MONITOR_SAMPLE_RETENTION_DAYS = 90;
 /** A pending sample older than this had its job lost; pg-boss's last retry lands well inside it. */
 export const MONITOR_LOST_AFTER_MS = 3 * 3600_000;
 
 /**
- * The insight checks whose failure is an anomaly for the draw: the ones that
+ * The insight checks whose failure is an anomaly for the draw
+ * (`keys.anomalyChecks`; the export is the built-in list): the ones that
  * speak to deception in the content itself. A missing DMARC record or a
  * large body is a configuration finding and would only burn the judge's
  * budget on every send of a team that has it.
  */
-export const MONITOR_ANOMALY_CHECKS = [
-  "link_domains_match",
-  "no_shorteners",
-  "phishing_links",
-] as const;
+export const MONITOR_ANOMALY_CHECKS: readonly string[] = DEFAULT_ABUSE_RULES.keys.anomalyChecks;
 
 const HKDF_INFO = "abuse-judge-sampling";
 
@@ -130,10 +134,10 @@ export function monitorTier(state: MonitorTeamState, s: MonitorSettings, now: Da
   const days = daysSince(state.firstSendAt, now);
   if (inFirstWindow(state, s, now)) return "new";
   if (state.sentTotal <= s.rampSends && days < s.rampDays) return "new";
-  if (days < MONITOR_PROBATION_DAYS) return "probation";
+  if (days < limits().probationDays) return "probation";
   if (
-    days >= MONITOR_TRUSTED_DAYS &&
-    state.sentTotal >= MONITOR_TRUSTED_SENDS &&
+    days >= limits().trustedDays &&
+    state.sentTotal >= limits().trustedSends &&
     !state.flaggedRecently
   ) {
     return "trusted";
@@ -230,7 +234,7 @@ export function monitorRate(
     if (kind === "tier" || kind === "ramp") kind = "anomaly";
   }
   if (state.risk !== null && state.risk >= s.flagRisk) {
-    rate *= MONITOR_FLAGGED_RATE_MULTIPLIER;
+    rate *= limits().flaggedRateMultiplier;
     elevated.push("flagged");
   }
   return { tier, base, rate: Math.min(1, Math.max(0, rate)), kind, elevated };
@@ -265,7 +269,7 @@ export function foldRisk(
   now: Date,
 ): { riskNum: number; riskDen: number; risk: number } {
   const elapsed = state.riskUpdatedAt ? now.getTime() - state.riskUpdatedAt.getTime() : 0;
-  const decay = 2 ** (-Math.max(0, elapsed) / MONITOR_RISK_HALF_LIFE_MS);
+  const decay = 2 ** (-Math.max(0, elapsed) / (limits().riskHalfLifeDays * DAY_MS));
   const riskNum = state.riskNum * decay + score / 100;
   const riskDen = state.riskDen * decay + 1;
   return { riskNum, riskDen, risk: riskOf(riskNum, riskDen, state.firstSendAt, now) };
@@ -273,10 +277,10 @@ export function foldRisk(
 
 function riskOf(riskNum: number, riskDen: number, firstSendAt: Date | null, now: Date): number {
   const prior =
-    daysSince(firstSendAt, now) < MONITOR_PROBATION_DAYS
-      ? MONITOR_PRIOR_NEW
-      : MONITOR_PRIOR_SETTLED;
-  return (riskNum + prior * MONITOR_PRIOR_WEIGHT) / (riskDen + MONITOR_PRIOR_WEIGHT);
+    daysSince(firstSendAt, now) < limits().probationDays
+      ? limits().priorNew
+      : limits().priorSettled;
+  return (riskNum + prior * limits().priorWeight) / (riskDen + limits().priorWeight);
 }
 
 /**
@@ -288,7 +292,9 @@ function riskOf(riskNum: number, riskDen: number, firstSendAt: Date | null, now:
 export function riskAt(state: RiskState, now: Date): number | null {
   if (state.riskUpdatedAt === null) return null;
   const decay =
-    2 ** (-Math.max(0, now.getTime() - state.riskUpdatedAt.getTime()) / MONITOR_RISK_HALF_LIFE_MS);
+    2 **
+    (-Math.max(0, now.getTime() - state.riskUpdatedAt.getTime()) /
+      (limits().riskHalfLifeDays * DAY_MS));
   return riskOf(state.riskNum * decay, state.riskDen * decay, state.firstSendAt, now);
 }
 
@@ -451,8 +457,8 @@ export async function loadMonitorState(
     .from(schema.teams)
     .where(eq(schema.teams.id, row.teamId));
   const couldBeTrusted =
-    row.sentTotal >= MONITOR_TRUSTED_SENDS &&
-    daysSince(row.firstSendAt, now) >= MONITOR_TRUSTED_DAYS;
+    row.sentTotal >= limits().trustedSends &&
+    daysSince(row.firstSendAt, now) >= limits().trustedDays;
   // A vouch stops monitor flags from opening, so a vouched team would turn
   // Trusted by default and be sampled at a fraction of its rate.
   let flaggedRecently = vouchActive(row, now);
@@ -464,7 +470,7 @@ export async function loadMonitorState(
       .where(
         and(
           eq(f.teamId, row.teamId),
-          gte(f.openedAt, new Date(now.getTime() - MONITOR_TRUSTED_CLEAN_DAYS * DAY_MS)),
+          gte(f.openedAt, new Date(now.getTime() - limits().trustedCleanDays * DAY_MS)),
         ),
       )
       .limit(1);
@@ -679,12 +685,12 @@ export type HoldRule =
   | { rule: "repeat"; verdicts: number };
 
 /**
- * Under this many days old, or of unknown age, a sending domain makes one
+ * Under youngDomainDays old, or of unknown age, a sending domain makes one
  * phishing-type verdict from `holdRepeatScore` enough to hold a new team: a
  * real business's new domain outgrows it within a week, a phisher must buy
  * an aged one.
  */
-export const YOUNG_DOMAIN_DAYS = 7;
+export const YOUNG_DOMAIN_DAYS = BUILT_IN.youngDomainDays;
 
 /** A verdict as the judge returns it or as its sample stores it. */
 interface HoldVerdictFields {
@@ -694,86 +700,75 @@ interface HoldVerdictFields {
   reasons: readonly string[] | null;
 }
 
-/** One verdict is a phishing-type abuse call from `holdScore`. */
-export function isHoldVerdict(v: HoldVerdictFields, holdScore: number): boolean {
+/** Whether a verdict names a category or reason the review hold acts on. */
+export function namesHoldType(v: Pick<HoldVerdictFields, "categories" | "reasons">): boolean {
+  const { holdCategories, holdReasons } = abuseRules().keys;
   return (
-    v.verdict === "abuse" &&
-    v.score !== null &&
-    v.score >= holdScore &&
-    ((v.categories ?? []).some((c) => (MONITOR_HOLD_CATEGORIES as readonly string[]).includes(c)) ||
-      (v.reasons ?? []).some((r) => (MONITOR_HOLD_REASONS as readonly string[]).includes(r)))
+    (v.categories ?? []).some((c) => holdCategories.includes(c)) ||
+    (v.reasons ?? []).some((r) => holdReasons.includes(r))
   );
 }
 
 /**
- * The parents under which app platforms hand a product its own name, where
+ * The reasons the text questions gave: an image question's own finding
+ * neither widens nor narrows a spare, and a held one adds the image lure
+ * reason, which no spare allows.
+ */
+function textReasons(v: Pick<HoldVerdictFields, "reasons">): string[] {
+  return (v.reasons ?? []).filter((r) => !r.startsWith(IMAGE_QUESTION_PREFIX));
+}
+
+/** One verdict is a phishing-type abuse call from `holdScore`. */
+export function isHoldVerdict(v: HoldVerdictFields, holdScore: number): boolean {
+  return v.verdict === "abuse" && v.score !== null && v.score >= holdScore && namesHoldType(v);
+}
+
+/**
+ * The parents under which app platforms hand a product its own name
+ * (`lists.platformHostParents`), where
  * a small product's reset, one-time code and sign-in pages live. A curated
  * subset of the free hosts isFreeHostName knows: dynamic DNS, tunnels,
  * buckets and site builders stay out.
  */
-export const PLATFORM_HOST_PARENTS: ReadonlySet<string> = new Set([
-  "supabase.co",
-  "railway.app",
-  "workers.dev",
-  "pages.dev",
-  "vercel.app",
-  "netlify.app",
-  "fly.dev",
-  "onrender.com",
-  "herokuapp.com",
-  "web.app",
-  "firebaseapp.com",
-  "github.io",
-  "appspot.com",
-  "run.app",
-  "azurewebsites.net",
-  "amplifyapp.com",
-  "lovable.app",
-  "replit.app",
-]);
+const ruleSets = fromAbuseRules(({ lists, keys }) => ({
+  platformHostParents: new Set(lists.platformHostParents),
+  sharedContentHosts: new Set(lists.sharedContentHosts),
+  platformLinkReasons: new Set(keys.platformLinkReasons),
+  platformLinkCategories: new Set(keys.platformLinkCategories),
+  loopbackLinkReasons: new Set(keys.loopbackLinkReasons),
+  loopbackLinkCategories: new Set(keys.loopbackLinkCategories),
+}));
 
-/** A product's own name on an app platform: a free host's name under one of PLATFORM_HOST_PARENTS. */
+/** A product's own name on an app platform: a free host's name under one of lists.platformHostParents. */
 export function isPlatformTenantName(hostname: string): boolean {
-  return isFreeHostName(hostname) && PLATFORM_HOST_PARENTS.has(registrableDomain(hostname));
+  return (
+    isFreeHostName(hostname) && ruleSets().platformHostParents.has(registrableDomain(hostname))
+  );
 }
 
-/** What the judge says of a sign-in or billing link to a page off the verified domains, and nothing more. */
-const PLATFORM_LINK_REASONS: ReadonlySet<string> = new Set(["off_domain_lure", "harvests_secrets"]);
-/**
- * The classes a product's own sign-in, reset or billing page draws. A
- * payment class counts only without a payment instrument: the reasons above
- * leave out payment_redirect and no_link_lure, which a Pix code, changed bank
- * details or a callback name, and the caller checks for a decoded Pix code.
+/*
+ * keys.platformLinkReasons: what the judge says of a sign-in or billing link
+ * to a page off the verified domains, and nothing more. keys.platformLinkCategories:
+ * the classes a product's own sign-in, reset or billing page draws; a payment
+ * class counts only without a payment instrument, since the reasons leave out
+ * the ones a Pix code, changed bank details or a callback name, and the
+ * caller checks for a decoded Pix code. keys.loopbackLink*: mail that leads
+ * its reader nowhere but their own machine (isLocalOnlyMail) may also read
+ * as another brand's, since a framework's default template signs with the
+ * framework's name under the product's, and such a link opens no page anyone
+ * serves.
  */
-const PLATFORM_LINK_CATEGORIES: ReadonlySet<string> = new Set([
-  "phishing_credentials",
-  "payment_redirect",
-]);
-/**
- * Mail that leads its reader nowhere but their own machine (isLocalOnlyMail)
- * may also read as another brand's: a framework's default template signs
- * with the framework's name under the product's. Such a link opens no page
- * anyone serves.
- */
-const LOOPBACK_LINK_REASONS: ReadonlySet<string> = new Set([
-  ...PLATFORM_LINK_REASONS,
-  "impersonation",
-]);
-const LOOPBACK_LINK_CATEGORIES: ReadonlySet<string> = new Set([
-  ...PLATFORM_LINK_CATEGORIES,
-  "brand_impersonation",
-]);
 
 /**
  * A phishing-type verdict that rests on nothing but a sign-in, reset or
  * billing link to a product's own name on an app platform, or to a loopback
  * address (a developer's build left pointing at its own machine), on mail
  * that poses as no other brand: phishing_credentials or payment_redirect
- * at most for a category (PLATFORM_LINK_CATEGORIES), reasons saying only
+ * at most for a category (keys.platformLinkCategories), reasons saying only
  * that the link is off the verified domains and asks for a secret, and
  * every destination such a name. Mail that leads nowhere but the reader's own
  * machine (`localMail`, isLocalOnlyMail) may pose as a brand too
- * (LOOPBACK_LINK_CATEGORIES, LOOPBACK_LINK_REASONS). The judge cannot tell such a
+ * (keys.loopbackLinkCategories, keys.loopbackLinkReasons). The judge cannot tell such a
  * page from a lure, so the hold policy spares the team the hold such a
  * verdict meets (applyJudgedSample's `platformLink`): the mail waits for the
  * review list instead, with the team's other mail waiting on a
@@ -791,13 +786,14 @@ export function isPlatformLinkVerdict(
   opts: { localMail?: boolean } = {},
 ): boolean {
   const local = opts.localMail === true && destinations.every((d) => isLoopbackHost(d));
-  const categories = local ? LOOPBACK_LINK_CATEGORIES : PLATFORM_LINK_CATEGORIES;
-  const reasons = local ? LOOPBACK_LINK_REASONS : PLATFORM_LINK_REASONS;
+  const sets = ruleSets();
+  const categories = local ? sets.loopbackLinkCategories : sets.platformLinkCategories;
+  const reasons = local ? sets.loopbackLinkReasons : sets.platformLinkReasons;
   return (
     v.verdict === "abuse" &&
     destinations.length > 0 &&
     (v.categories ?? []).every((c) => categories.has(c)) &&
-    (v.reasons ?? []).every((r) => reasons.has(r)) &&
+    textReasons(v).every((r) => reasons.has(r)) &&
     destinations.every((d) => isPlatformTenantName(d) || isLoopbackHost(d))
   );
 }
@@ -823,38 +819,16 @@ export function isLocalOnlyMail(
   );
 }
 
-/**
- * Hosts whose every user's pages sit under one registered name the suffix
- * list does not split: file shares, forms, site builders, link pages and
- * chat links. A name clears by its owner domain, so one release of such a
- * host would cover every page on it.
+/*
+ * lists.sharedContentHosts: hosts whose every user's pages sit under one
+ * registered name the suffix list does not split (file shares, forms, site
+ * builders, link pages and chat links). A name clears by its owner domain, so
+ * one release of such a host would cover every page on it.
  */
-const SHARED_CONTENT_HOSTS: ReadonlySet<string> = new Set([
-  "sharepoint.com",
-  "live.com",
-  "1drv.ms",
-  "office.com",
-  "wetransfer.com",
-  "we.tl",
-  "forms.gle",
-  "jotform.com",
-  "typeform.com",
-  "wordpress.com",
-  "weebly.com",
-  "godaddysites.com",
-  "hs-sites.com",
-  "notion.site",
-  "notion.so",
-  "github.com",
-  "telegra.ph",
-  "linktr.ee",
-  "wa.me",
-  "t.me",
-]);
 
-/** Whether every user of this host's pages shares its registered name (SHARED_CONTENT_HOSTS). */
+/** Whether every user of this host's pages shares its registered name (lists.sharedContentHosts). */
 export function isSharedContentHost(domain: string): boolean {
-  return SHARED_CONTENT_HOSTS.has(domain);
+  return ruleSets().sharedContentHosts.has(domain);
 }
 
 /**
@@ -869,7 +843,7 @@ export function isSharedContentHost(domain: string): boolean {
  * least one web link sit under it. Every destination, the site or another
  * beside it (a carrier's tracking page), is a registered name: no free host's
  * tenant, no IDN, no shortener, no loopback address, no name every user of a
- * host shares (SHARED_CONTENT_HOSTS); the caller dates them all and vouches
+ * host shares (lists.sharedContentHosts); the caller dates them all and vouches
  * only once an operator released every one. No brand
  * IMITATED_BRANDS lists in the name, the subject or a destination, no
  * invisible character in the name, no link that opens anything but a web
@@ -889,14 +863,14 @@ export function clientIdentitySite(
     !d.includes("xn--") &&
     !isShortener(d) &&
     !isLoopbackHost(d) &&
-    !SHARED_CONTENT_HOSTS.has(d) &&
+    !ruleSets().sharedContentHosts.has(d) &&
     registeredName(d) !== null;
   if (
     v.verdict !== "abuse" ||
     destinations.length === 0 ||
     !destinations.every(named) ||
     !(v.categories ?? []).every((c) => c === "brand_impersonation") ||
-    !(v.reasons ?? []).every((r) => r === "impersonation") ||
+    !textReasons(v).every((r) => r === "impersonation") ||
     mail.attachments.length > 0
   ) {
     return null;
@@ -970,7 +944,7 @@ async function repeatHold(
         gte(ms.score, s.holdRepeatScore),
         gte(
           ms.judgedAt,
-          new Date(countsSince(row, now.getTime() - MONITOR_HOLD_REPEAT_DAYS * DAY_MS, now)),
+          new Date(countsSince(row, now.getTime() - limits().holdRepeatDays * DAY_MS, now)),
         ),
         lte(ms.judgedAt, now),
       ),
@@ -1195,13 +1169,13 @@ export async function applyJudgedSample(
             and(
               eq(ms.teamId, input.teamId),
               eq(ms.status, "judged"),
-              gte(ms.score, MONITOR_PAUSE_VERDICT_SCORE),
+              gte(ms.score, limits().pauseVerdictScore),
               gte(ms.judgedAt, since),
             ),
           );
         return (count?.n ?? 0) > 0;
       };
-      if (broadcastLure || input.score >= MONITOR_PAUSE_VERDICT_SCORE || (await hot())) {
+      if (broadcastLure || input.score >= limits().pauseVerdictScore || (await hot())) {
         // A team the operator already holds is theirs; the policy only
         // stamps a team nothing else holds, so its Resume lifts its own hold.
         const stamped = await t

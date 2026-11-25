@@ -1,5 +1,6 @@
 import { env } from "@millionsend/config";
 import {
+  abuseRulesInfo,
   clearMonitorOverride,
   getMonitorSettingsRow,
   isValidMonitorSetting,
@@ -49,6 +50,8 @@ export const consoleMonitorRouter = router({
     // one that samples, and its rows are the truth.
     return {
       judge,
+      // The version and where it came from only: the rules themselves never reach a page.
+      rules: abuseRulesInfo(),
       today: await monitorDayCounts(ctx.db, settings),
       openFlags: flags?.n ?? 0,
       flagScore: settings.flagScore,

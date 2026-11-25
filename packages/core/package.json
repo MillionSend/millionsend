@@ -8,6 +8,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./abuse-rules": {
+      "types": "./src/abuse-rules.ts",
+      "default": "./src/abuse-rules.ts"
+    },
     "./audit-actions": {
       "types": "./src/audit-actions.ts",
       "default": "./src/audit-actions.ts"

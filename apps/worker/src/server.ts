@@ -10,6 +10,7 @@ import {
   ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
   abuseJudgeConfig,
   abuseVisionConfig,
+  abuseVisionProvider,
   disposableEmailsBlocked,
   env,
   ipGeolocationEnabled,
@@ -25,6 +26,7 @@ import {
   anyYoungLinkDomain,
   backfillPoolOwners,
   bookFreeBurst,
+  checkAbuseRulesAtBoot,
   committedDailyVolume,
   createDomainAgeResolver,
   createSharedNameReview,
@@ -154,6 +156,7 @@ if (!env.MASTER_ENCRYPTION_KEY) {
 
 const db = getDb();
 const keyring = createKeyringFromEnv(env);
+console.log(checkAbuseRulesAtBoot());
 // Days whole email rows (recipients, subject, events) are kept; bodies age
 // out earlier on EMAIL_RETENTION_DAYS. Read here until it joins the env schema.
 const metadataRetentionDays = env.EMAIL_METADATA_RETENTION_DAYS;
@@ -314,8 +317,10 @@ const mailer = createSystemMailer({ db, keyring, enqueueSend });
 // the settings row is re-read once a minute.
 const judgeConfig = abuseJudgeConfig();
 const judge = createAbuseJudge(judgeConfig);
-// The image reader the judge's media read hands images to; null while ABUSE_VISION is off.
+// The image reader the judge's media read hands images to; null unless ABUSE_VISION=bedrock.
 const vision = createAbuseVision(abuseVisionConfig());
+// ABUSE_VISION=typesafe: the judge reads the images in its own call.
+const judgeImages = abuseVisionProvider() === "typesafe";
 // The parsing threads boot now, WASM compiled, so the first email with a file never waits on them.
 mediaPool().warm();
 const monitorSettings = monitorSettingsReader(db, env as unknown as Record<string, unknown>);
@@ -884,7 +889,7 @@ await queue.work(
           anyYoungLinkDomain(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
         linkDomainAged: (domains, at) =>
           linkDomainsAged(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
-        media: { vision },
+        media: { vision, judgeImages },
       },
       { sampleId },
     );

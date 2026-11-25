@@ -16,6 +16,9 @@ config:
   TRUSTED_PROXIES: "203.0.113.10"
   S3_BACKUP_BUCKET: millionsend-backups
 
+abuseRules:
+  secretName: millionsend-abuse-rules
+
 secrets:
   mode: existingSecret
   existingSecret:

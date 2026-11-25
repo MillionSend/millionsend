@@ -1,3 +1,4 @@
+import { abuseRules, DEFAULT_ABUSE_RULES } from "../abuse-rules.js";
 import { redactRevealedText } from "../content-reveal-render.js";
 import { countInvisible, dropInvisible } from "../customer-text.js";
 import { PADDING_MARKS } from "../html.js";
@@ -42,16 +43,17 @@ import { type MediaFindings, renderMediaLines } from "./media.js";
  * change them together.
  */
 
-/** The visible text's cap, kept as its first two thirds and its last third. */
-export const JUDGE_TEXT_MAX_CHARS = 6000;
+/**
+ * The visible text's cap, kept as its first two thirds and its last third:
+ * the rules' `limits.judge.textMaxChars`; the export is the built-in value.
+ */
+export const JUDGE_TEXT_MAX_CHARS = DEFAULT_ABUSE_RULES.limits.judge.textMaxChars;
 export const JUDGE_LINK_ROWS_MAX = 30;
 const ANCHOR_TEXT_MAX = 80;
 export const JUDGE_HIDDEN_TEXT_MAX_CHARS = 1000;
 export const JUDGE_PLAIN_TEXT_MAX_CHARS = 1500;
 /** About what an inbox lists of a preview line; past it the line is hidden text like any other. */
 export const JUDGE_PREVIEW_MAX_CHARS = 200;
-/** A plain-text part with fewer of its words in the HTML's visible text says something else. */
-const PLAIN_TEXT_SHARED_WORDS = 0.8;
 
 export interface JudgeBlockInput {
   team: {
@@ -192,7 +194,9 @@ export function plainTextDiffers(text: string, visible: string): boolean {
   const words = text.replace(URL_IN_TEXT, " ").toLowerCase().match(WORD);
   if (!words) return false;
   const seen = new Set(visible.toLowerCase().match(WORD));
-  return words.filter((w) => seen.has(w)).length < PLAIN_TEXT_SHARED_WORDS * words.length;
+  // Fewer of its words in the HTML's visible text than this share: the plain part says something else.
+  const shared = abuseRules().limits.judge.plainTextSharedWords;
+  return words.filter((w) => seen.has(w)).length < shared * words.length;
 }
 
 /**
@@ -260,7 +264,10 @@ export function buildJudgeBlock(input: JudgeBlockInput): string {
       `  ${preview.slice(0, JUDGE_PREVIEW_MAX_CHARS)}`,
     );
   }
-  lines.push(VISIBLE_TEXT_LABEL, `  ${clip(redacted(body.visible), JUDGE_TEXT_MAX_CHARS)}`);
+  lines.push(
+    VISIBLE_TEXT_LABEL,
+    `  ${clip(redacted(body.visible), abuseRules().limits.judge.textMaxChars)}`,
+  );
   if (hidden) {
     lines.push(
       "Hidden text (not shown to the reader):",

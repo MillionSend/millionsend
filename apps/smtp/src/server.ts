@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { env, sharedInboxDomain } from "@millionsend/config";
-import { deriveInboxKeys } from "@millionsend/core";
+import { checkAbuseRulesAtBoot, deriveInboxKeys } from "@millionsend/core";
 import { getDb } from "@millionsend/db";
 import { EMAIL_SEND_PRIORITY, Queue } from "@millionsend/queue";
 import { createKeyringFromEnv } from "@millionsend/ses";
@@ -9,6 +9,7 @@ import { createSmtpServer } from "./smtp.js";
 // Throws on missing encryption configuration, so boot fails before any
 // listener starts.
 const keyring = createKeyringFromEnv(env);
+console.log(checkAbuseRulesAtBoot());
 
 // The relay is an email.send producer, so the queue is unconditional.
 const queue = await Queue.start(env.DATABASE_URL);

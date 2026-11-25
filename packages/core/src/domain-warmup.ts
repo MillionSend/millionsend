@@ -3,13 +3,8 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { and, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import {
-  loadMonitorState,
-  MONITOR_HOLD_CATEGORIES,
-  MONITOR_HOLD_REASONS,
-  monitorTier,
-  teamMonitorRow,
-} from "./abuse-monitor.js";
+import { loadMonitorState, monitorTier, namesHoldType, teamMonitorRow } from "./abuse-monitor.js";
+import { abuseRules } from "./abuse-rules.js";
 import { firstRow } from "./driver-result.js";
 import { SES_MAILBOX_SIMULATOR_DOMAIN } from "./mailbox-providers.js";
 import {
@@ -31,20 +26,22 @@ import { DAY_MS, utcDay } from "./utc-day.js";
  * that, no cap.
  */
 
-/** Tier i applies while the domain is younger than WARMUP_TIER_DAYS[i] days; past the last, none. */
-const WARMUP_TIER_DAYS = [1, 7, 30] as const;
-export const WARMUP_FULL_TIER = WARMUP_TIER_DAYS.length;
+/**
+ * Tier i applies while the domain is younger than the rules' `tierDays[i]`
+ * days (abuse-rules.ts `limits.warmup`); past the last, none. One tier per
+ * cap setting, so the count is fixed.
+ */
+const tierDays = () => abuseRules().limits.warmup.tierDays;
+export const WARMUP_FULL_TIER = 3;
 /** An unknown age reads as the 1–7 day tier for a team the monitor still counts as new. */
 const UNKNOWN_AGE_TIER = 1;
 
 /**
- * Early graduation (the SES, Mailjet and Brevo pattern): this many delivered
- * sends since the last tier change, under these hard-bounce and complaint
- * rates, move a domain up one tier ahead of the calendar.
+ * Early graduation (the SES, Mailjet and Brevo pattern): the rules'
+ * `graduationSends` delivered sends since the last tier change, under their
+ * hard-bounce and complaint rates, move a domain up one tier ahead of the
+ * calendar.
  */
-const WARMUP_GRADUATION_SENDS = 50;
-const WARMUP_GRADUATION_MAX_BOUNCE_RATE = 0.02;
-const WARMUP_GRADUATION_MAX_COMPLAINT_RATE = 0.001;
 /** A send counts toward graduation once its bounce has had time to come back. */
 const WARMUP_GRADUATION_SETTLE_MS = 3600_000;
 /**
@@ -58,13 +55,13 @@ const WARMUP_GRADUATION_MIN_SPAN_MS = DAY_MS;
 /** The registration age's tier at `at`. */
 export function ageTier(registeredAt: Date, at: Date): number {
   const days = (at.getTime() - registeredAt.getTime()) / DAY_MS;
-  const tier = WARMUP_TIER_DAYS.findIndex((limit) => days < limit);
+  const tier = tierDays().findIndex((limit) => days < limit);
   return tier === -1 ? WARMUP_FULL_TIER : tier;
 }
 
 /** When the calendar put a domain registered at `registeredAt` into `tier`. */
 function tierStart(registeredAt: Date, tier: number): Date {
-  return new Date(registeredAt.getTime() + (WARMUP_TIER_DAYS[tier - 1] ?? 0) * DAY_MS);
+  return new Date(registeredAt.getTime() + (tierDays()[tier - 1] ?? 0) * DAY_MS);
 }
 
 function capOf(s: MonitorSettings, tier: number): number {
@@ -87,7 +84,7 @@ export function mayWarmUp(at: Date): SQL | undefined {
     isNull(d.warmupTrustedAt),
     or(
       isNull(d.registeredAt),
-      gte(d.registeredAt, new Date(at.getTime() - WARMUP_TIER_DAYS[2] * DAY_MS)),
+      gte(d.registeredAt, new Date(at.getTime() - tierDays()[2] * DAY_MS)),
     ),
     or(isNull(d.warmupTier), lt(d.warmupTier, WARMUP_FULL_TIER)),
   );
@@ -348,7 +345,7 @@ export async function admitWarmup(
 /**
  * Early graduation, run by the safety cron: a domain still warming up moves
  * one tier up when its settled sends since its last tier change are clean —
- * at least WARMUP_GRADUATION_SENDS delivered, the first a day old, hard
+ * at least the rules' graduationSends delivered, the first a day old, hard
  * bounces and complaints under their lines, and no phishing-type verdict from
  * the content monitor on its team. Rows sharing a registrable domain move
  * together, on their pooled sends, as they share a counter. Returns the
@@ -436,9 +433,10 @@ async function cleanSince(
         sql`not exists (select 1 from (${recipientDomains}) d where d.domain = ${SES_MAILBOX_SIMULATOR_DOMAIN})`,
       ),
     );
-  if (!sends || sends.delivered < WARMUP_GRADUATION_SENDS || !sends.dayOld) return false;
-  if (sends.bounced / sends.deliveredOrBounced >= WARMUP_GRADUATION_MAX_BOUNCE_RATE) return false;
-  if (sends.complained / sends.delivered >= WARMUP_GRADUATION_MAX_COMPLAINT_RATE) return false;
+  const rules = abuseRules().limits.warmup;
+  if (!sends || sends.delivered < rules.graduationSends || !sends.dayOld) return false;
+  if (sends.bounced / sends.deliveredOrBounced >= rules.graduationMaxBounceRate) return false;
+  if (sends.complained / sends.delivered >= rules.graduationMaxComplaintRate) return false;
   const ms = schema.monitorSamples;
   const verdicts = await db
     .select({ categories: ms.categories, reasons: ms.reasons })
@@ -450,15 +448,11 @@ async function cleanSince(
         eq(ms.verdict, "abuse"),
         // The whole warm-up, not only since the last step: a calendar step
         // must not wash out a lure the judge saw on the first day.
-        gte(ms.judgedAt, new Date(now.getTime() - WARMUP_TIER_DAYS[2] * DAY_MS)),
+        gte(ms.judgedAt, new Date(now.getTime() - tierDays()[2] * DAY_MS)),
       ),
     );
   // A phishing-type verdict, the kinds the review hold acts on, blocks graduation.
-  return !verdicts.some(
-    (v) =>
-      v.categories?.some((c) => (MONITOR_HOLD_CATEGORIES as readonly string[]).includes(c)) ||
-      v.reasons?.some((r) => (MONITOR_HOLD_REASONS as readonly string[]).includes(r)),
-  );
+  return !verdicts.some(namesHoldType);
 }
 
 /** Counters of days gone: only today and future delivery days are ever reserved against. */

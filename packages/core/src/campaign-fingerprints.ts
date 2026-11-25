@@ -1,5 +1,6 @@
 import type { CampaignFingerprintKind } from "@millionsend/db/schema";
 import { decodeEntities, stripHiddenElements } from "./abuse-judge/body.js";
+import { abuseRules, DEFAULT_ABUSE_RULES, fromAbuseRules } from "./abuse-rules.js";
 import { stripInvisible } from "./customer-text.js";
 import { extractAnchors, visibleText } from "./email-insights.js";
 import { sha256Hex } from "./hash.js";
@@ -20,26 +21,40 @@ export interface Fingerprint {
   value: string;
 }
 
-/** Display names: both need this many distinctive words... */
-export const DISPLAY_NAME_MIN_WORDS = 2;
-/** ...the shorter's all in the longer, which may carry this many more ("Service Facture Vexto"). */
-export const DISPLAY_NAME_MAX_EXTRA_WORDS = 1;
-/** Subjects: both need this many words, numbers left out... */
-export const SUBJECT_MIN_WORDS = 4;
-/** ...and this much overlap between their word sets (shared over all), so only near-identical lines meet. */
-export const SUBJECT_MIN_SIMILARITY = 0.75;
-/** Domains: one name's distinctive words, at least this many... */
-export const DOMAIN_MIN_WORDS = 2;
-/** ...all found in the other name, making up this share of its letters. */
-export const DOMAIN_MIN_COVERAGE = 0.8;
-/** Shorter words in a domain name (fr, bnp, app) tell nothing apart. */
-export const DOMAIN_MIN_WORD_LENGTH = 4;
-/** Two sending domains with one name under different suffixes match from this length. */
-export const DOMAIN_SAME_NAME_MIN_LENGTH = 8;
-/** A phone number is compared by its last digits: the same line with or without its country code or trunk 0. */
+/*
+ * The fuzzy rules' numbers come from the detection rules
+ * (`limits.fingerprints`); the exports are the built-in values.
+ * - displayNameMinWords, displayNameMaxExtraWords: display names both need
+ *   this many distinctive words, the shorter's all in the longer, which may
+ *   carry this many more ("Service Facture Vexto").
+ * - subjectMinWords, subjectMinSimilarity: subjects both need this many
+ *   words, numbers left out, and this much overlap between their word sets
+ *   (shared over all), so only near-identical lines meet.
+ * - domainMinWords, domainMinCoverage: one name's distinctive words, at
+ *   least this many, all found in the other name, making up this share of
+ *   its letters. domainMinWordLength: shorter words in a domain name (fr,
+ *   bnp, app) tell nothing apart. domainSameNameMinLength: two sending
+ *   domains with one name under different suffixes match from this length.
+ * - textHashMinLetters: visible text shorter than this, in letters, is not
+ *   a template worth a hash.
+ */
+const BUILT_IN = DEFAULT_ABUSE_RULES.limits.fingerprints;
+export const DISPLAY_NAME_MIN_WORDS = BUILT_IN.displayNameMinWords;
+export const DISPLAY_NAME_MAX_EXTRA_WORDS = BUILT_IN.displayNameMaxExtraWords;
+export const SUBJECT_MIN_WORDS = BUILT_IN.subjectMinWords;
+export const SUBJECT_MIN_SIMILARITY = BUILT_IN.subjectMinSimilarity;
+export const DOMAIN_MIN_WORDS = BUILT_IN.domainMinWords;
+export const DOMAIN_MIN_COVERAGE = BUILT_IN.domainMinCoverage;
+export const DOMAIN_MIN_WORD_LENGTH = BUILT_IN.domainMinWordLength;
+export const DOMAIN_SAME_NAME_MIN_LENGTH = BUILT_IN.domainSameNameMinLength;
+/**
+ * A phone number is compared by its last digits: the same line with or
+ * without its country code or trunk 0. Stored fingerprints are keyed by it,
+ * so it is no rule: changing it would orphan every stored phone.
+ */
 export const PHONE_KEY_DIGITS = 9;
-/** Visible text shorter than this, in letters, is not a template worth a hash. */
-export const TEXT_HASH_MIN_LETTERS = 60;
+export const TEXT_HASH_MIN_LETTERS = BUILT_IN.textHashMinLetters;
+const limits = () => abuseRules().limits.fingerprints;
 
 /**
  * The longest value kept or compared, per kind: free text (sender names,
@@ -71,120 +86,17 @@ export function fingerprint(kind: CampaignFingerprintKind, value: string): Finge
   };
 }
 
-/**
- * Words that name a role rather than a sender, folded as fingerprintWords
- * folds them: "Support", "Equipe Financeiro" or "No reply" says nothing
- * about who sent the mail.
+/*
+ * lists.roleWords: words that name a role rather than a sender, folded as
+ * fingerprintWords folds them ("Support", "Equipe Financeiro" or "No reply"
+ * says nothing about who sent the mail). lists.hostnameWords: words every
+ * platform, mailer and lure puts in its hostnames; a domain made of them
+ * says nothing about who holds it.
  */
-const ROLE_WORDS = new Set([
-  "no",
-  "reply",
-  "noreply",
-  "donotreply",
-  "do",
-  "not",
-  "nao",
-  "responda",
-  "team",
-  "equipe",
-  "support",
-  "suporte",
-  "service",
-  "servico",
-  "customer",
-  "client",
-  "cliente",
-  "care",
-  "help",
-  "contact",
-  "contato",
-  "info",
-  "news",
-  "newsletter",
-  "notification",
-  "notificacao",
-  "notificacoe",
-  "alert",
-  "alerta",
-  "billing",
-  "cobranca",
-  "financeiro",
-  "account",
-  "conta",
-  "admin",
-  "sale",
-  "venda",
-  "marketing",
-  "hello",
-  "ola",
-  "the",
-  "de",
-  "da",
-  "du",
-  "la",
-  "le",
-  "et",
-  "and",
-  "of",
-]);
-
-/**
- * Words every platform, mailer and lure puts in its hostnames: a domain made
- * of them says nothing about who holds it.
- */
-const HOSTNAME_WORDS = new Set([
-  "mail",
-  "email",
-  "mailer",
-  "mailing",
-  "news",
-  "info",
-  "inbox",
-  "send",
-  "sender",
-  "secure",
-  "login",
-  "signin",
-  "account",
-  "verify",
-  "verification",
-  "update",
-  "support",
-  "service",
-  "online",
-  "shop",
-  "store",
-  "official",
-  "group",
-  "cloud",
-  "link",
-  "click",
-  "track",
-  "tracking",
-  "page",
-  "home",
-  "portal",
-  "docs",
-  "drive",
-  "form",
-  "file",
-  "download",
-  "office",
-  "live",
-  "mobile",
-  "auth",
-  "static",
-  "image",
-  "site",
-  "list",
-  "manage",
-  "notify",
-  "alert",
-  "client",
-  "cliente",
-  "conta",
-  "acesso",
-]);
+const ruleSets = fromAbuseRules(({ lists }) => ({
+  roleWords: new Set(lists.roleWords),
+  hostnameWords: new Set(lists.hostnameWords),
+}));
 
 /** Digits joined by the spaces, dots, dashes and brackets numbers are written with. */
 const PHONE_RUN = /\+?\(?\d[\d\s().-]{6,}\d/g;
@@ -219,7 +131,7 @@ function fingerprintWords(text: string): string[] {
 function senderWords(name: string): Set<string> {
   return new Set(
     fingerprintWords(name).filter(
-      (word) => word.length > 1 && !/^\d+$/.test(word) && !ROLE_WORDS.has(word),
+      (word) => word.length > 1 && !/^\d+$/.test(word) && !ruleSets().roleWords.has(word),
     ),
   );
 }
@@ -234,8 +146,8 @@ export function displayNamesMatch(a: string, b: string): boolean {
     Set<string>,
   ];
   return (
-    small.size >= DISPLAY_NAME_MIN_WORDS &&
-    large.size - small.size <= DISPLAY_NAME_MAX_EXTRA_WORDS &&
+    small.size >= limits().displayNameMinWords &&
+    large.size - small.size <= limits().displayNameMaxExtraWords &&
     [...small].every((word) => large.has(word))
   );
 }
@@ -253,9 +165,9 @@ function subjectWords(subject: string): Set<string> {
 export function subjectsMatch(a: string, b: string): boolean {
   const x = subjectWords(a);
   const y = subjectWords(b);
-  if (x.size < SUBJECT_MIN_WORDS || y.size < SUBJECT_MIN_WORDS) return false;
+  if (x.size < limits().subjectMinWords || y.size < limits().subjectMinWords) return false;
   const shared = [...x].filter((word) => y.has(word)).length;
-  return shared / (x.size + y.size - shared) >= SUBJECT_MIN_SIMILARITY;
+  return shared / (x.size + y.size - shared) >= limits().subjectMinSimilarity;
 }
 
 function nameWords(name: string): string[] {
@@ -263,7 +175,9 @@ function nameWords(name: string): string[] {
     ...new Set(
       fingerprintWords(name).filter(
         (word) =>
-          word.length >= DOMAIN_MIN_WORD_LENGTH && !/\d/.test(word) && !HOSTNAME_WORDS.has(word),
+          word.length >= limits().domainMinWordLength &&
+          !/\d/.test(word) &&
+          !ruleSets().hostnameWords.has(word),
       ),
     ),
   ];
@@ -271,11 +185,11 @@ function nameWords(name: string): string[] {
 
 /** Whether `words` all appear in `letters` and make up enough of them. */
 function covers(words: string[], letters: string): boolean {
-  if (words.length < DOMAIN_MIN_WORDS || !words.every((word) => letters.includes(word))) {
+  if (words.length < limits().domainMinWords || !words.every((word) => letters.includes(word))) {
     return false;
   }
   const length = words.reduce((sum, word) => sum + word.length, 0);
-  return length >= DOMAIN_MIN_COVERAGE * letters.length;
+  return length >= limits().domainMinCoverage * letters.length;
 }
 
 /**
@@ -295,7 +209,7 @@ export function domainsMatch(a: Fingerprint, b: Fingerprint): boolean {
   return (
     a.kind === "sending_domain" &&
     b.kind === "sending_domain" &&
-    lettersA.length >= DOMAIN_SAME_NAME_MIN_LENGTH &&
+    lettersA.length >= limits().domainSameNameMinLength &&
     lettersA === lettersB
   );
 }
@@ -335,7 +249,7 @@ export function visibleTextHash(text: string): string | null {
     .replace(/https?:\/\/\S+|\S+@\S+/g, " ")
     .replace(/[^\p{L}]+/gu, " ")
     .trim();
-  return words.replace(/ /g, "").length >= TEXT_HASH_MIN_LETTERS ? sha256Hex(words) : null;
+  return words.replace(/ /g, "").length >= limits().textHashMinLetters ? sha256Hex(words) : null;
 }
 
 function linkDomain(href: string): string | null {

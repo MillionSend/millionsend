@@ -1263,7 +1263,7 @@ with a link domain under 7 days old or of an age not known, and the operator's d
 automatically. A phishing-type verdict that rests only on a sign-in, reset,
 one-time-code or billing link to a product's own name on an app platform
 (`ref.supabase.co`, `app.up.railway.app`, `x.workers.dev`: the parents are
-`PLATFORM_HOST_PARENTS` in `packages/core`) or to a loopback address, on a
+`lists.platformHostParents` in the detection rules, see **Detection rules**) or to a loopback address, on a
 message judged before SES that is not a broadcast, poses as no other brand
 (it may when every link in it, one read from its images included, goes to a
 loopback address and it has no Reply-To: a framework's default template signs
@@ -1374,13 +1374,41 @@ one version's answers: move to a newer version deliberately, after checking
 its scores. Each sample records the versioned
 model id that answered. `ABUSE_JUDGE_BASE_URL` (default
 `https://api.typesafe.ai`) points the judge at another endpoint serving the
-same API; it posts to `<base>/v1/systemone`. The questions Jev answers ship in
-`packages/core/src/abuse-judge/questions.ts`, and those about names on the
-shared inbox domain in `names.ts` beside it. When the subject or the visible text names MillionSend as a word, one
+same API; it posts to `<base>/v1/systemone`. The questions Jev answers, and
+those about names on the shared inbox domain, are detection rules (below). When the subject or the visible text names MillionSend as a word, one
 sentence joins the policy: a team naming MillionSend as its own sending
 provider, as its setup tests do, is not impersonating it, and that mention
 clears nothing else in the mail. Every other message is judged on the policy
 as it stands.
+
+**Detection rules.** The judge's policies and questions, the lines its
+answers are read against, the brand, affix and host lists, the verdict
+categories and reasons the review hold acts on, and the numbers of the risk
+model, screening, campaign fingerprints, the warm-up's tiers and graduation
+and inbound spam scoring are one set of rules. The built-in set ships in
+`packages/core/src/abuse-rules-defaults.ts`. To run your own, point
+`ABUSE_RULES_FILE` at a JSON file mounted read-only (for example
+`/etc/millionsend/abuse-rules.json`, in every app container: web, api,
+worker and smtp). The file replaces the built-in set whole, so start from
+the built-in one:
+
+```sh
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts defaults > abuse-rules.json
+# edit it, then:
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts check abuse-rules.json
+```
+
+The question keys the code reads (`is_abuse`, `impersonation`, `category`
+and `language`, and the inbound set's) must stay; wording, extra questions
+and every number may change, and the check refuses a key that points at
+nothing. Each process reads the file once at boot and logs
+`abuse rules: <version> (file)`; a file that is missing or fails the check
+stops the boot, and its error names the file and the failing paths, never
+their contents. The Overview's Monitoring card shows the version and source the web
+container read, so mount the same file in every container. A restart applies a new file. The thresholds are calibrated to the
+wording: re-measure on a labelled set after changing either. Instance
+settings (below) stay in the console. The hosted service runs its own
+rules.
 
 **Where the samples go.** Every sampled message is sent to TypeSafe, a
 sub-processor that hosts its service in the United States. Per its published
@@ -1545,6 +1573,26 @@ be read in the EU too), `ap-southeast-2` and `ap-southeast-4` (Australia),
 4. Set `ABUSE_VISION=bedrock` (and `ABUSE_VISION_REGION` for another
    region) and restart. Add Amazon Bedrock to the instance's privacy notice
    first.
+
+**Image reading by the judge (optional).** `ABUSE_VISION=typesafe` sends
+the images to TypeSafe instead, inside the judge's own call for the sample,
+with `ABUSE_JUDGE_API_KEY`, `ABUSE_JUDGE_BASE_URL` and `ABUSE_JUDGE_MODEL`
+(one pinned model reads the text and the images), so it needs
+`ABUSE_JUDGE=typesafe`. Nothing is transcribed: the judge's questions see
+the images beside the email, up to 4 per email and 2 MB in all, read at
+every tier. Images are re-encoded as JPEG first, upright, fitted into
+1,120 px and padded to at least 280 px a side. If TypeSafe refuses the
+images, or the call with them times out or fails, the email is judged
+again on its text alone, with the images counted as not read, and the
+sample records `vision_rejected` or `vision_unavailable`; the verdict is
+never lost to an image. A detection rules
+file can also ask its own questions about the images
+(`judge.vision.questions`, with `holdKeys`, `limit` and `category`); the
+built-in rules ask none. When a hold question answers at its limit or
+above, the verdict gains the reason `image_lure`, which a file must list
+in `keys.holdReasons` for it to hold, and is raised to the monitor's hold
+score. Add TypeSafe's image handling to the instance's privacy notice
+first.
 
 **Sampling.** After each accepted message, a keyed draw
 (HMAC of the team and message ids under a key derived from

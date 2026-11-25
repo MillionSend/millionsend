@@ -14,22 +14,20 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import type { MediaIssue } from "./abuse-judge/media.js";
 import {
   inFirstWindow,
   isHoldVerdict,
   isSharedContentHost,
   loadMonitorState,
-  MONITOR_HOLD_CATEGORIES,
-  MONITOR_HOLD_REASONS,
   type MonitorDeps,
   type MonitorTier,
   monitorRowWithHistory,
   monitorTier,
+  namesHoldType,
   recordMonitorSample,
   vouchActive,
-  YOUNG_DOMAIN_DAYS,
 } from "./abuse-monitor.js";
+import { abuseRules, DEFAULT_ABUSE_RULES, fromAbuseRules } from "./abuse-rules.js";
 import { countDistinctRecipients } from "./accept-email.js";
 import { disposableDomains, isDisposableDomain } from "./disposable-domains.js";
 import type { DomainAgeResolver } from "./domain-age.js";
@@ -104,31 +102,37 @@ export const SCREEN_RETRIES = 3;
 export const SCREEN_JUDGE_TIMEOUT_MS = 5_000;
 /** A screening sample still pending after this lost its job; the next pass queues it again. */
 const SCREEN_STALE_MS = 10 * 60_000;
-/** A team's screening samples waiting on the judge at once; past it more mail waits its turn. */
-export const SCREEN_OUTSTANDING_MAX = 20;
-/** More new destinations than this in one message are not judged: an operator decides. */
-export const NOVEL_DESTINATIONS_MAX = 20;
-/**
- * The sets of new destinations a team's mail has screened today, which
- * bounds the judge calls its mail to new destinations can force. Past it
- * mail to a set not screened today is sent and judged after sending for an
- * established or trusted team with no flag opened in PAST_CAP_CLEAN_DAYS,
- * no hold-type verdict today and no revoked destination in the set, and
- * parks for an operator otherwise.
+/*
+ * The screening numbers come from the detection rules (`limits.screening`);
+ * the exports are the built-in values.
+ * - outstandingMax: a team's screening samples waiting on the judge at once;
+ *   past it more mail waits its turn.
+ * - novelDestinationsMax: more new destinations than this in one message
+ *   are not judged: an operator decides.
+ * - destinationScreensPerDay: the sets of new destinations a team's mail has
+ *   screened today, which bounds the judge calls its mail to new
+ *   destinations can force. Past it mail to a set not screened today is sent
+ *   and judged after sending for an established or trusted team with no flag
+ *   opened in pastCapCleanDays, no hold-type verdict today and no revoked
+ *   destination in the set, and parks for an operator otherwise.
+ * - destinationClearBelow, destinationsClearedMax: a verdict clears a
+ *   message's new destinations only under this score, naming nothing
+ *   phishing-type, and only when they are this many at most.
+ * - destinationProbationDays: for this long after a destination clears,
+ *   every email to it is judged after sending.
+ * - destinationRevokeScore: a verdict on mail to a destination in its
+ *   probation takes its clearance back from this score.
  */
-export const DESTINATION_SCREENS_PER_DAY = 200;
-/** A flag of any reason opened this recently parks a team's mail past DESTINATION_SCREENS_PER_DAY. */
-export const PAST_CAP_CLEAN_DAYS = 30;
-/**
- * A verdict clears a message's new destinations only under this score,
- * naming nothing phishing-type, and only when they are this many at most.
- */
-export const DESTINATION_CLEAR_BELOW = 70;
-export const DESTINATIONS_CLEARED_MAX = 5;
-/** For this long after a destination clears, every email to it is judged after sending. */
-export const DESTINATION_PROBATION_DAYS = 7;
-/** A verdict on mail to a destination in its probation takes its clearance back from this score. */
-export const DESTINATION_REVOKE_SCORE = 90;
+const BUILT_IN = DEFAULT_ABUSE_RULES.limits.screening;
+export const SCREEN_OUTSTANDING_MAX = BUILT_IN.outstandingMax;
+export const NOVEL_DESTINATIONS_MAX = BUILT_IN.novelDestinationsMax;
+export const DESTINATION_SCREENS_PER_DAY = BUILT_IN.destinationScreensPerDay;
+export const PAST_CAP_CLEAN_DAYS = BUILT_IN.pastCapCleanDays;
+export const DESTINATION_CLEAR_BELOW = BUILT_IN.destinationClearBelow;
+export const DESTINATIONS_CLEARED_MAX = BUILT_IN.destinationsClearedMax;
+export const DESTINATION_PROBATION_DAYS = BUILT_IN.destinationProbationDays;
+export const DESTINATION_REVOKE_SCORE = BUILT_IN.destinationRevokeScore;
+const limits = () => abuseRules().limits.screening;
 /** Link-age lookups one verdict waits on; the rest are looked up in the background. */
 export const LINK_AGE_LOOKUPS_PER_VERDICT = 3;
 /** A failed link-age lookup is not asked again for this long. */
@@ -139,23 +143,23 @@ const LINK_AGE_BACKLOG_MAX = 1_000;
 export const OPERATOR_PARK_REASONS = ["screening", "destination", "media", "recipient"] as const;
 export type ScreenParkReason = (typeof OPERATOR_PARK_REASONS)[number];
 
-const MEDIA_PARKS_NEW: ReadonlySet<string> = new Set<MediaIssue>([
-  "risky_file",
-  "refused_file",
-  "unreadable_file",
-  "qr_undecoded",
-  "vision_refused",
-]);
+const ruleSets = fromAbuseRules(({ lists, keys }) => ({
+  mediaParksNew: new Set(keys.mediaParksNew),
+  majorPlatforms: new Set([...PUBLIC_MAILBOX_DOMAINS, ...lists.majorPlatformDomains]),
+  revocablePlatforms: new Set(lists.revocablePlatforms),
+}));
 
 /**
  * Whether what the judge could not clear in an email's images and files
  * parks the mail waiting on its verdict: for a team in new, a flagged,
  * refused or unreadable file, a QR code seen but not decoded, or a refused
- * read; for any team, images the reader's provider blocked.
+ * read (`keys.mediaParksNew`); for any team, images the reader's provider
+ * blocked.
  */
 export function mediaParks(issues: readonly string[] | null, tier: MonitorTier): boolean {
   return (issues ?? []).some(
-    (issue) => issue === "vision_blocked" || (tier === "new" && MEDIA_PARKS_NEW.has(issue)),
+    (issue) =>
+      issue === "vision_blocked" || (tier === "new" && ruleSets().mediaParksNew.has(issue)),
   );
 }
 
@@ -220,21 +224,12 @@ export function messageDestinations(input: {
  * social icons, a WhatsApp button, a store badge, a support Gmail behind a
  * mailto). Mail to them is still screened, since many of them host pages
  * and files anyone publishes, but a team never loses a clearance over them
- * nor counts one of them as its own.
+ * nor counts one of them as its own. The public mailbox domains, and the
+ * rules' `lists.majorPlatformDomains`; the export is the built-in set.
  */
 export const MAJOR_PLATFORM_DOMAINS: ReadonlySet<string> = new Set([
   ...PUBLIC_MAILBOX_DOMAINS,
-  "facebook.com",
-  "instagram.com",
-  "wa.me",
-  "whatsapp.com",
-  "youtube.com",
-  "linkedin.com",
-  "x.com",
-  "twitter.com",
-  "tiktok.com",
-  "google.com",
-  "apple.com",
+  ...DEFAULT_ABUSE_RULES.lists.majorPlatformDomains,
 ]);
 
 const UNREACHABLE_TLDS: ReadonlySet<string> = new Set(["test", "invalid", "local", "internal"]);
@@ -254,14 +249,14 @@ function isUnreachableName(domain: string): boolean {
   );
 }
 
-const isMajorPlatform = (domain: string) => MAJOR_PLATFORM_DOMAINS.has(ownerDomain(domain));
+const isMajorPlatform = (domain: string) => ruleSets().majorPlatforms.has(ownerDomain(domain));
 
-/**
- * Major platforms whose own name serves pages anyone publishes (Google's
- * docs, drive, sites and forms are common credential-harvest hosts): unlike
- * the rest of MAJOR_PLATFORM_DOMAINS, a lure to one takes its clearance back.
+/*
+ * lists.revocablePlatforms: major platforms whose own name serves pages
+ * anyone publishes (a docs, drive, sites or forms host is a common
+ * credential-harvest host): unlike the rest of the major platforms, a lure
+ * to one takes its clearance back.
  */
-const REVOCABLE_PLATFORMS: ReadonlySet<string> = new Set(["google.com"]);
 
 const PUBLIC_MAILBOXES: ReadonlySet<string> = new Set(PUBLIC_MAILBOX_DOMAINS);
 
@@ -357,7 +352,7 @@ export async function destinationStanding(
     .where(and(eq(td.teamId, teamId), inArray(td.domain, [...destinations]), isNull(td.revokedAt)));
   const cleared = new Map(rows.map((row) => [row.domain, row.clearedAt.getTime()]));
   const vouched = new Set(rows.filter((row) => row.operatorClearedAt).map((row) => row.domain));
-  const since = now.getTime() - DESTINATION_PROBATION_DAYS * DAY_MS;
+  const since = now.getTime() - limits().destinationProbationDays * DAY_MS;
   const reachable = destinations.filter((d) => !isLoopbackHost(d));
   return {
     novel: reachable.filter((d) => isShortener(d) || !cleared.has(d)),
@@ -432,10 +427,9 @@ export function verdictClearsDestinations(
   destinations: number,
 ): boolean {
   return (
-    v.score < DESTINATION_CLEAR_BELOW &&
-    destinations <= DESTINATIONS_CLEARED_MAX &&
-    !v.categories.some((c) => (MONITOR_HOLD_CATEGORIES as readonly string[]).includes(c)) &&
-    !v.reasons.some((r) => (MONITOR_HOLD_REASONS as readonly string[]).includes(r))
+    v.score < limits().destinationClearBelow &&
+    destinations <= limits().destinationsClearedMax &&
+    !namesHoldType(v)
   );
 }
 
@@ -530,7 +524,7 @@ export async function revokeDestinations(
 ): Promise<string[]> {
   const domains = destinations.filter(
     (d) =>
-      (!isMajorPlatform(d) || REVOCABLE_PLATFORMS.has(ownerDomain(d))) &&
+      (!isMajorPlatform(d) || ruleSets().revocablePlatforms.has(ownerDomain(d))) &&
       !isUnreachableName(d) &&
       !isLoopbackHost(d),
   );
@@ -567,7 +561,8 @@ export function destinationVerdictParks(
 }
 
 const young = (registeredAt: Date | null, at: Date) =>
-  registeredAt !== null && at.getTime() - registeredAt.getTime() < YOUNG_DOMAIN_DAYS * DAY_MS;
+  registeredAt !== null &&
+  at.getTime() - registeredAt.getTime() < abuseRules().limits.monitor.youngDomainDays * DAY_MS;
 
 /** Link-age lookups in flight, by domain: verdicts that ask at once share one. */
 const linkAgeLookups = new Map<string, Promise<boolean | null>>();
@@ -806,7 +801,7 @@ export async function sendingDomainYoung(
   if (!row) return null;
   return (
     row.registeredAt === null ||
-    at.getTime() - row.registeredAt.getTime() < YOUNG_DOMAIN_DAYS * DAY_MS
+    at.getTime() - row.registeredAt.getTime() < abuseRules().limits.monitor.youngDomainDays * DAY_MS
   );
 }
 
@@ -1111,7 +1106,7 @@ async function pastCapSends(
     .where(
       and(
         eq(f.teamId, teamId),
-        gte(f.openedAt, new Date(now.getTime() - PAST_CAP_CLEAN_DAYS * DAY_MS)),
+        gte(f.openedAt, new Date(now.getTime() - limits().pastCapCleanDays * DAY_MS)),
       ),
     )
     .limit(1);
@@ -1150,7 +1145,8 @@ async function startScreening(
   },
 ): Promise<ScreenDecision> {
   const { email, read, now } = input;
-  if (read.novel.length > NOVEL_DESTINATIONS_MAX) return { action: "park", reason: "destination" };
+  if (read.novel.length > limits().novelDestinationsMax)
+    return { action: "park", reason: "destination" };
   const unsafe = read.reasons.includes("media") && input.unsafe;
   const sameDay = and(
     eq(ms.teamId, email.teamId),
@@ -1221,7 +1217,7 @@ async function startScreening(
     .select({ n: sql<number>`count(*)::int` })
     .from(ms)
     .where(and(eq(ms.teamId, email.teamId), eq(ms.status, "pending"), eq(ms.screening, true)));
-  const full = (outstanding?.n ?? 0) >= SCREEN_OUTSTANDING_MAX;
+  const full = (outstanding?.n ?? 0) >= limits().outstandingMax;
   if (full && !unsafe) return { action: "wait", until: new Date(now.getTime() + SCREEN_RETRY_MS) };
   let destination = read.reasons.includes("destination");
   if (destination && !full && !counted) {
@@ -1232,7 +1228,7 @@ async function startScreening(
       })
       .from(ms)
       .where(today);
-    if ((screened?.n ?? 0) >= DESTINATION_SCREENS_PER_DAY) {
+    if ((screened?.n ?? 0) >= limits().destinationScreensPerDay) {
       if (destinationOnly) {
         if (await pastCapSends(db, s, { teamId: email.teamId, tier: input.tier, revoked, now })) {
           return { action: "send", sample: null, afterSend: true };

@@ -13,6 +13,7 @@ import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { createTeam, createTestDb, digestCounts } from "@millionsend/test-utils";
 import { desc, eq } from "drizzle-orm";
+import sharp from "sharp";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
   JUDGE_THROTTLE_RETRIES,
@@ -214,6 +215,44 @@ it("records every judge failure as unjudged and moves nothing", async () => {
   expect(await sample(off)).toMatchObject({ status: "unjudged", errorClass: "off", model: null });
   expect(await monitor()).toEqual(before);
   expect(sends).toEqual([]);
+});
+
+it("asks again as text alone when the image call fails, and says the images went unread", async () => {
+  const png = await sharp({
+    create: { width: 300, height: 300, channels: 3, background: "#336699" },
+  })
+    .png()
+    .toBuffer();
+  const html = `<p>Hello</p><img src="data:image/png;base64,${png.toString("base64")}">`;
+  for (const [thrown, issue, why] of [
+    [Object.assign(new Error("t"), { name: "TimeoutError" }), "vision_unavailable", "no answer"],
+    [new JudgeError("upstream", "413", { status: 413 }), "vision_rejected", "refused"],
+  ] as const) {
+    const id = await insertSample({ emailId: await insertEmail(html) });
+    const calls: { block: string; images: number }[] = [];
+    const judge: AbuseJudge = {
+      provider: "typesafe",
+      model: "fake-model",
+      judge: async (block, { images }) => {
+        calls.push({ block, images: images?.length ?? 0 });
+        if (images?.length) throw thrown;
+        return {
+          score: 10,
+          verdict: "clean",
+          categories: [],
+          impersonatedBrand: null,
+          reasons: [],
+          language: "en",
+        };
+      },
+    };
+    const media = { vision: null, judgeImages: true };
+    expect(await judgeSample(db, deps(judge, { media }), { sampleId: id })).toBe("judged");
+    expect(calls.map((c) => c.images)).toEqual([1, 0]);
+    expect(calls[0]?.block).toContain("1 read, 0 not read");
+    expect(calls[1]?.block).toContain(`0 read, 1 not read (${why}`);
+    expect((await sample(id))?.mediaIssues).toContain(issue);
+  }
 });
 
 it("retries a throttle through the queue a few times, then gives the sample up", async () => {

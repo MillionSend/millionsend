@@ -1658,13 +1658,44 @@ propósito, depois de conferir as pontuações dela. Cada amostra registra o id
 versionado do modelo que respondeu. `ABUSE_JUDGE_BASE_URL` (padrão
 `https://api.typesafe.ai`) aponta o avaliador para outro endpoint que serve a
 mesma API; ele faz o POST em `<base>/v1/systemone`. As perguntas que o Jev
-responde estão em `packages/core/src/abuse-judge/questions.ts`, e as sobre os
-nomes no domínio compartilhado das caixas em `names.ts`, ao lado. Quando o
+responde, e as sobre os nomes no domínio compartilhado das caixas, são regras
+de detecção (abaixo). Quando o
 assunto ou o texto visível citam o MillionSend como palavra, uma frase entra
 na política: uma equipe que cita o MillionSend como o próprio provedor de
 envio, como fazem os testes de configuração, não está se passando por ele, e
 essa menção não libera mais nada no e-mail. Todas as outras mensagens são
 avaliadas pela política de sempre.
+
+**Regras de detecção.** As políticas e perguntas do avaliador, as linhas
+contra as quais as respostas são lidas, as listas de marcas, afixos e hosts,
+as categorias e os motivos de veredito sobre os quais a pausa para revisão
+age, e os números do modelo de risco, da triagem, das impressões digitais de
+campanha, das faixas e da graduação do aquecimento e da pontuação de spam de
+entrada formam um só conjunto de regras. O conjunto embutido está em
+`packages/core/src/abuse-rules-defaults.ts`. Para usar o seu, aponte
+`ABUSE_RULES_FILE` para um arquivo JSON montado como somente leitura (por
+exemplo `/etc/millionsend/abuse-rules.json`, em todo contêiner do app: web,
+api, worker e smtp). O arquivo substitui o conjunto embutido por inteiro,
+então comece pelo embutido:
+
+```sh
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts defaults > abuse-rules.json
+# edite e depois:
+pnpm --filter @millionsend/core exec tsx scripts/abuse-rules.ts check abuse-rules.json
+```
+
+As chaves de pergunta que o código lê (`is_abuse`, `impersonation`,
+`category` e `language`, e as do conjunto de entrada) precisam ficar; a
+redação, perguntas extras e todos os números podem mudar, e a verificação
+recusa uma chave que não aponta para nada. Cada processo lê o arquivo uma vez
+ao iniciar e registra `abuse rules: <versão> (file)`; um arquivo ausente ou
+que não passa na verificação impede a inicialização, e o erro cita o arquivo
+e os caminhos que falharam, nunca o conteúdo. O card Monitoramento da Visão
+geral mostra a versão e a origem que o contêiner web leu, então monte o mesmo
+arquivo em todo contêiner. Um reinício aplica um arquivo novo.
+Os limites são calibrados para a redação: meça de novo em um conjunto
+rotulado depois de mudar qualquer um dos dois. As configurações da instância
+(abaixo) continuam no console. O serviço hospedado usa as próprias regras.
 
 **Para onde vão as amostras.** Toda mensagem sorteada é enviada à TypeSafe, um
 subprocessador que hospeda o serviço nos Estados Unidos. Pelos termos
@@ -1860,6 +1891,27 @@ de Londres ou Zurique, as imagens também podem ser lidas em países da UE),
 4. Defina `ABUSE_VISION=bedrock` (e `ABUSE_VISION_REGION` para outra
    região) e reinicie. Antes, inclua o Amazon Bedrock no aviso de
    privacidade da instância.
+
+**Leitura de imagens pelo avaliador (opcional).** `ABUSE_VISION=typesafe`
+manda as imagens para o TypeSafe, dentro da própria chamada do avaliador
+para a amostra, com `ABUSE_JUDGE_API_KEY`, `ABUSE_JUDGE_BASE_URL` e
+`ABUSE_JUDGE_MODEL` (um único modelo fixado lê o texto e as imagens), por
+isso precisa de `ABUSE_JUDGE=typesafe`. Nada é transcrito: as perguntas do
+avaliador veem as imagens ao lado do e-mail, até 4 por e-mail e 2 MB no
+total, lidas em todos os níveis. Antes, as imagens são recodificadas em
+JPEG, na posição certa, ajustadas a 1.120 px e completadas até pelo menos
+280 px de lado. Se o TypeSafe recusar as imagens, ou se a chamada com elas
+estourar o tempo ou falhar, o e-mail é avaliado de novo só pelo texto, com
+as imagens contadas como não lidas, e a amostra registra `vision_rejected`
+ou `vision_unavailable`; a avaliação nunca se perde por causa de uma
+imagem. Um arquivo de regras de detecção também pode fazer
+perguntas próprias sobre as imagens (`judge.vision.questions`, com
+`holdKeys`, `limit` e `category`); as regras embutidas não fazem nenhuma.
+Quando uma pergunta de retenção responde no limite ou acima dele, a
+avaliação ganha o motivo `image_lure`, que o arquivo precisa listar em
+`keys.holdReasons` para reter, e sobe para a pontuação de retenção do
+monitor. Antes, inclua o tratamento de imagens do TypeSafe no aviso de
+privacidade da instância.
 
 **Amostragem.** Depois de cada mensagem aceita, um sorteio com chave decide
 se ela é avaliada. Cada valor abaixo é editado no console em Confiança e
