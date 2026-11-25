@@ -80,10 +80,22 @@ it to bounces only: a hard-bounced mailbox is dead for everyone, so SES may
 refuse it account-wide, but a spam report is about one sender's mail and
 stays on that team's list here. A send SES refuses because of its own list
 shows as a permanent bounce with the subtype `OnAccountSuppressionList`, and
-only the SES console can remove such an entry. SES never tried to deliver
-such a send, so it doesn't count as a hard bounce in your rates, the same as
-in SES's own bounce rate. The same goes for any bounce or complaint SES
-reports about mail it didn't attempt.
+the address lands on the team's list here like any hard bounce. SES never
+tried to deliver such a send, so it doesn't count as a hard bounce in your
+rates, the same as in SES's own bounce rate. The same goes for any bounce or
+complaint SES reports about mail it didn't attempt.
+
+Removing an address from your list here (in the dashboard, the API or MCP)
+also removes it from SES's list, in every region the instance serves. That
+happens in the background, usually within seconds (a bulk removal of
+thousands takes a few minutes), and then the next send goes through. If the
+mailbox still bounces, both lists get it back. Removing an unsubscribe entry
+never touches SES's list, since it was never there.
+
+Self-hosted instances need the `ses:DeleteSuppressedDestination` action in
+their IAM policy for this. A deployment set up before it existed re-runs the
+setup wizard, or adds the action to the `millionsend-ses` policy; until then
+the address leaves only the list here and the worker logs the denied call.
 
 ## API
 

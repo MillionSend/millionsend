@@ -85,11 +85,25 @@ hard bounce está morta para todo mundo, então o SES pode recusá-la para a
 conta inteira, mas uma denúncia de spam diz respeito ao e-mail de um remetente
 e fica só na lista daquela equipe aqui. Um envio que o SES recusa por causa da
 própria lista aparece como bounce permanente com o subtipo
-`OnAccountSuppressionList`, e só o console do SES remove essa entrada. O SES
-nem tentou entregar esse envio, então ele não conta como hard bounce nas suas
-taxas, assim como na taxa de bounce do próprio SES. O mesmo vale para
-qualquer bounce ou reclamação que o SES informe sobre um e-mail que ele não
-tentou entregar.
+`OnAccountSuppressionList`, e o endereço entra na lista da equipe aqui como
+qualquer hard bounce. O SES nem tentou entregar esse envio, então ele não
+conta como hard bounce nas suas taxas, assim como na taxa de bounce do
+próprio SES. O mesmo vale para qualquer bounce ou reclamação que o SES
+informe sobre um e-mail que ele não tentou entregar.
+
+Remover um endereço da sua lista aqui (pelo painel, pela API ou pelo MCP)
+também o remove da lista do SES, em todas as regiões que a instância atende.
+Isso acontece em segundo plano, normalmente em poucos segundos (uma remoção
+em massa de milhares de endereços leva alguns minutos), e aí o próximo envio
+passa. Se a caixa postal continuar dando bounce, o endereço volta para as
+duas listas. Remover uma entrada de descadastro nunca mexe na lista do SES,
+porque ela nunca esteve lá.
+
+Instâncias auto-hospedadas precisam da ação `ses:DeleteSuppressedDestination`
+na política IAM para isso. Uma implantação configurada antes dessa ação
+existir roda o assistente de configuração de novo, ou adiciona a ação à
+política `millionsend-ses`; até lá, o endereço sai só da lista daqui e o
+worker registra no log a chamada negada.
 
 ## API
 

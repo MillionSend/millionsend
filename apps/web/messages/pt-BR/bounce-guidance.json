@@ -80,9 +80,9 @@
       "action": "Só reenvie se tiver confirmado que a caixa postal voltou a ser válida."
     },
     "onAccountSuppressionList": {
-      "title": "Na lista de supressão da sua conta",
-      "body": "Este endereço está suprimido na sua conta por um bounce ou reclamação anterior.",
-      "action": "Remova a supressão só depois de confirmar que a caixa postal é válida."
+      "title": "Na lista de supressão do SES",
+      "body": "O Amazon SES recusou este envio sem tentar entregar: o endereço está na lista de supressão do próprio SES por um bounce anterior. Ele também foi adicionado às suas supressões aqui.",
+      "action": "Depois de confirmar que a caixa postal é válida, remova o endereço das suas supressões: isso também o tira da lista do SES, e o próximo envio passa."
     },
     "transientGeneral": {
       "title": "Bounce temporário",
