@@ -483,6 +483,8 @@
       "monitor_override_cleared": "Desativou a amostragem total do monitor",
       "monitor_vouched": "Avalizou a equipe",
       "monitor_vouch_revoked": "Revogou o aval",
+      "monitor_limit_bypassed": "Liberou o limite de conta nova",
+      "monitor_limit_bypass_revoked": "Revogou a liberação do limite",
       "monitor_broadcasts_paused": "O monitor de conteúdo pausou transmissões",
       "monitor_broadcasts_resumed": "Retomou transmissões após pausa do monitor",
       "warmup_trust_granted": "Dispensou o aquecimento de domínio novo",

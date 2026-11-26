@@ -5,7 +5,7 @@ import type { PauseLiftRefusal } from "@millionsend/core/deliverability";
 import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
-import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { regionFlag, regionName } from "@/app/(dashboard)/domains/regions";
 import { CopyChip } from "@/components/copy-chip";
 import { DotParts } from "@/components/dot-parts";
 import { KV_SENTENCE, KvRow } from "@/components/kv-row";
@@ -204,7 +204,7 @@ export function ReviewView({ teamId }: { teamId: string }) {
   const proofValues = {
     plan: planLabel(team.plan, team.planQuota),
     region: team.region
-      ? `${regionFlag(team.region)} ${domains(`regions.${team.region as DomainRegion}`)}`
+      ? `${regionFlag(team.region)} ${regionName(team.region, domains)}`
       : common("unknownRegion"),
     domains: team.domains,
     owner,
