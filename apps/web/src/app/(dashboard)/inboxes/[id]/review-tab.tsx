@@ -13,7 +13,7 @@ import { Tooltip } from "@/components/tooltip";
 import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { StateCard } from "../../emails/list-parts";
-import { approvalReasonList, type InboxDetail, TrustTile } from "../parts";
+import { approvalReasonList, confirmDiscard, type InboxDetail, TrustTile } from "../parts";
 import { ReleaseButton } from "../release-dialog";
 
 const heading: React.CSSProperties = { margin: "0 0 10px" };
@@ -66,6 +66,7 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
   // each goes through every server check; one toast sums them up.
   const runBulk = async (action: "approve" | "reject") => {
     if (bulkBusy || chosen.length === 0) return;
+    if (action === "reject" && !(await confirmDiscard(t, chosen.length))) return;
     setBulkBusy(true);
     const tally = { sent: 0, draft: 0, discarded: 0, failed: 0 };
     let firstError: string | undefined;
@@ -170,7 +171,11 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
                         type="button"
                         className="ms-btn ms-btn-destructive"
                         disabled={busy}
-                        onClick={() => reject.mutate({ inboxId: inbox.id, draftId: draft.id })}
+                        onClick={async () => {
+                          if (await confirmDiscard(t, 1)) {
+                            reject.mutate({ inboxId: inbox.id, draftId: draft.id });
+                          }
+                        }}
                       >
                         {t("draft.discard")}
                       </button>

@@ -247,6 +247,8 @@
     "title": "Draft · waiting for approval",
     "created": "created {time}",
     "discard": "Discard",
+    "discardTitle": "{count, plural, one {Discard this draft?} other {Discard # drafts?}}",
+    "discardBody": "{count, plural, one {It won't be sent, and it can't be recovered.} other {They won't be sent, and they can't be recovered.}}",
     "edit": "Edit",
     "save": "Save draft",
     "approve": "Approve and send"

@@ -5,6 +5,7 @@ import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useLocale, useTranslations } from "next-intl";
 import type { ReactNode } from "react";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { EnvelopeGlyph } from "@/components/email-status-icon";
 import { Select } from "@/components/select";
 import type { BadgeTone } from "@/components/status-badge";
@@ -410,4 +411,17 @@ export function FromLine({
       )}
     </p>
   );
+}
+
+/** Asks before discarding held drafts, which nothing brings back. */
+export function confirmDiscard(
+  t: ReturnType<typeof useTranslations>,
+  count: number,
+): Promise<boolean> {
+  return confirmDialog({
+    title: t("draft.discardTitle", { count }),
+    message: t("draft.discardBody", { count }),
+    confirmLabel: t("draft.discard"),
+    danger: true,
+  });
 }

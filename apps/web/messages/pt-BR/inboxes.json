@@ -247,6 +247,8 @@
     "title": "Rascunho · aguardando aprovação",
     "created": "criado {time}",
     "discard": "Descartar",
+    "discardTitle": "{count, plural, one {Descartar este rascunho?} other {Descartar # rascunhos?}}",
+    "discardBody": "{count, plural, one {Ele não será enviado e não poderá ser recuperado.} other {Eles não serão enviados e não poderão ser recuperados.}}",
     "edit": "Editar",
     "save": "Salvar rascunho",
     "approve": "Aprovar e enviar"
