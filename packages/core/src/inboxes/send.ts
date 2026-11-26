@@ -23,7 +23,7 @@ import { firstRow } from "../driver-result.js";
 import { beginIdempotent, completeIdempotent, releaseIdempotent } from "../idempotency.js";
 import { imitatedBrandIn } from "../imitated-brands.js";
 import { instanceSettings, type MonitorSettings } from "../monitor-settings.js";
-import { registrableDomain } from "../org-domain.js";
+import { registrableDomain, vouchedRegistrableDomain } from "../org-domain.js";
 import { effectivePlan, monthlyQuotaMessage, type Plan, type QuotaTeamRow } from "../plans.js";
 import { outgoingSecretValues } from "../receiving/codes.js";
 import { inboxKey, resolveThread, teamMemberEmails } from "../receiving/inbox-routing.js";
@@ -203,25 +203,57 @@ export function sharedRecipientsExceeded(
 }
 
 const TRUSTED_TIERS: ReadonlySet<string> = new Set(["owner", "allowlisted", "known_thread"]);
+/** Tiers stored only for mail that passed DMARC alignment. */
+const ALIGNED_TIERS: ReadonlySet<string> = new Set(["owner", "allowlisted", "external"]);
+
+const orgOf = (address: string) => registrableDomain(address.slice(address.lastIndexOf("@") + 1));
+
+/**
+ * The organization of a custom-domain inbox's address; null on the shared
+ * domain, which is every team's, and under a free host (shop.eu.org), whose
+ * ICANN name strangers share.
+ */
+export function inboxOrg(inbox: Pick<InboxRow, "domainId" | "emailAddress"> | null): string | null {
+  return inbox && inbox.domainId !== null
+    ? vouchedRegistrableDomain(inbox.emailAddress.slice(inbox.emailAddress.lastIndexOf("@") + 1))
+    : null;
+}
 
 /**
  * A Reply-To counts as its message's own only at the From's organization,
- * or when that message came from someone the inbox already trusts (a null
- * tier trusts no one): anything else could steer a reply to a third party.
+ * when that message came from someone the inbox already trusts (a null
+ * tier trusts no one), or when it is aligned mail from the inbox's own
+ * organization (`ownOrg`): the team controls that domain's DKIM and SPF, so
+ * a Reply-To there (a web form relaying its visitor's address) is the team's
+ * own choice. Anything else could steer a reply to a third party.
  */
-function replyToTrusted(replyTo: string, from: string, senderTrust: string | null): boolean {
-  const org = (a: string) => registrableDomain(a.slice(a.lastIndexOf("@") + 1));
-  return (senderTrust !== null && TRUSTED_TIERS.has(senderTrust)) || org(replyTo) === org(from);
+function replyToTrusted(
+  replyTo: string,
+  from: string,
+  senderTrust: string | null,
+  ownOrg: string | null,
+): boolean {
+  if (senderTrust === null) return orgOf(replyTo) === orgOf(from);
+  return (
+    TRUSTED_TIERS.has(senderTrust) ||
+    orgOf(replyTo) === orgOf(from) ||
+    (ownOrg !== null && ALIGNED_TIERS.has(senderTrust) && orgOf(from) === ownOrg)
+  );
 }
 
 /**
  * The answered message's Reply-To entries it does not vouch for. On the
  * shared domain no sender's tier vouches, as in threadSenders.
  */
-export function untrustedReplyTos(target: SendTarget, shared: boolean): string[] {
+export function untrustedReplyTos(
+  target: SendTarget,
+  inbox: Pick<InboxRow, "domainId" | "emailAddress"> | null,
+): string[] {
   if (target.direction !== "inbound") return [];
+  const shared = inbox?.domainId === null;
   return target.row.replyTo.filter(
-    (rt) => !replyToTrusted(rt, target.row.from, shared ? null : target.senderTrust),
+    (rt) =>
+      !replyToTrusted(rt, target.row.from, shared ? null : target.senderTrust, inboxOrg(inbox)),
   );
 }
 
@@ -231,10 +263,11 @@ export function untrustedReplyTos(target: SendTarget, shared: boolean): string[]
  * forged From would make a "reply" a first message to whoever it names, and
  * a Reply-To only at its From's organization: an owner or allowlisted
  * sender is someone the team named, not someone who proved the address.
+ * `ownOrg` is inboxOrg of the thread's inbox (see replyToTrusted).
  */
 export async function threadSenders(
   db: Db,
-  p: { inboxId: string; threadId: string; shared: boolean },
+  p: { inboxId: string; threadId: string; shared: boolean; ownOrg: string | null },
 ): Promise<Set<string>> {
   const m = schema.receivedEmailInboxes;
   const r = schema.receivedEmails;
@@ -254,7 +287,9 @@ export async function threadSenders(
   for (const row of rows) {
     if (row.from) out.add(addressKey(row.from));
     for (const rt of row.replyTo) {
-      if (replyToTrusted(rt, row.from, p.shared ? null : row.trust)) out.add(addressKey(rt));
+      if (replyToTrusted(rt, row.from, p.shared ? null : row.trust, p.ownOrg)) {
+        out.add(addressKey(rt));
+      }
     }
   }
   return out;
@@ -286,7 +321,12 @@ async function classifyRecipients(
   const [logins, senders, known] = await Promise.all([
     teamMemberEmails(db, p.teamId),
     p.threadId
-      ? threadSenders(db, { inboxId: p.inbox.id, threadId: p.threadId, shared })
+      ? threadSenders(db, {
+          inboxId: p.inbox.id,
+          threadId: p.threadId,
+          shared,
+          ownOrg: inboxOrg(p.inbox),
+        })
       : new Set<string>(),
     p.recipients.length > 0
       ? db
@@ -1635,7 +1675,7 @@ function prepareReply(
     approved: directlyApproved(c.actor),
     requiresApproval: body.requires_approval === true,
     replyTarget: { automated: target.direction === "inbound" ? target.row.automated : null },
-    untrustedReplyTo: untrustedReplyTos(target, c.inbox?.domainId === null),
+    untrustedReplyTo: untrustedReplyTos(target, c.inbox),
     forwardedSecret: false,
     hold: { type: "reply", forward: false, targetId: target.row.id, fromName: c.fromName },
     now: c.now,

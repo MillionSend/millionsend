@@ -556,6 +556,15 @@ describe("inbox screens", () => {
     );
   });
 
+  it("names the sender a Reply-To redirect sidestepped, and words it without one", () => {
+    expect(approvalReasonWords(t, ["reply_to_redirect"], "ping@sender.example")).toBe(
+      "replies to the Reply-To, not the sender ping@sender.example",
+    );
+    expect(approvalReasonWords(t, ["reply_to_redirect"])).toBe(
+      "replies to the Reply-To, not the sender",
+    );
+  });
+
   it("offers a shared address only replies, within its 50 sends a day", () => {
     const html = form({ shared: true });
     expect(html).toContain("Addresses on the shared domain only reply inside their threads.");
@@ -1327,6 +1336,37 @@ describe("where held mail is released", () => {
     expect(review(true)).toContain(
       '<button type="button" class="ms-btn ms-btn-secondary" disabled="">Release</button>',
     );
+  });
+
+  it("lists every reason a draft waits on its own line, with a box to select it", () => {
+    const html = answered(
+      {
+        "inboxes.drafts.list.queryOptions": {
+          items: [
+            {
+              id: "d1",
+              status: "pending_approval",
+              to: ["x@other.example"],
+              subject: "Re: Hi",
+              snippet: null,
+              thread_id: "t1",
+              approval_reasons: ["reply_to_redirect", "ramp"],
+              answered_from: "ping@sender.example",
+            },
+          ],
+        },
+        "inboxes.quarantine.list.queryOptions": { items: [] },
+      },
+      () =>
+        renderToStaticMarkup(
+          createElement(ReviewTab, {
+            inbox: { id: "i1", kind: "agent", expired: false } as InboxDetail,
+          }),
+        ),
+    );
+    expect(html).toContain("replies to the Reply-To, not the sender ping@");
+    expect(html).toContain("<div>too many new recipients today</div>");
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2);
   });
 
   it("keeps Release out of the Received page's header, in the banner that says why", () => {

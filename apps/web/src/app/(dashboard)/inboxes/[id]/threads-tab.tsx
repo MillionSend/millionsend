@@ -42,6 +42,7 @@ import { useLocalDraft } from "@/lib/use-local-draft";
 import { SearchBox, StateCard } from "../../emails/list-parts";
 import {
   approvalReasonWords,
+  confirmDiscard,
   FromLine,
   heldWhy,
   holdOf,
@@ -862,7 +863,9 @@ function DraftCard({
           type="button"
           className="ms-btn ms-btn-destructive"
           disabled={busy}
-          onClick={() => reject.mutate({ inboxId, draftId })}
+          onClick={async () => {
+            if (await confirmDiscard(t, 1)) reject.mutate({ inboxId, draftId });
+          }}
         >
           {t("draft.discard")}
         </button>

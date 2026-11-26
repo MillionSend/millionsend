@@ -700,6 +700,13 @@ table.ms-table {
     overflow-y: auto;
     overscroll-behavior: contain;
   }
+  /* An overlay scrollbar draws over content: the open thread's scroller
+     reaches 14px into main's side padding (16px at its narrowest) so its
+     bar runs there, beside the close button instead of over it. */
+  .ms-thread-split > section {
+    margin-right: -14px;
+    padding-right: 14px;
+  }
 }
 /* A label's pill, in thread rows and under the open thread's title: the
    neutral badge led by the label's color dot (inboxes/[id]/labels.tsx). */

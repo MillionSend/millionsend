@@ -29,7 +29,7 @@ import {
 } from "@millionsend/core";
 import { type Db, schema } from "@millionsend/db";
 import { TRPCError } from "@trpc/server";
-import { and, count, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNotNull, lte } from "drizzle-orm";
 import { getKeyring } from "./keyring";
 import type { SessionRole } from "./membership";
 import { enqueueInboxForward, enqueueSharedSubdomain } from "./queue";
@@ -206,6 +206,71 @@ export async function actorNames(db: Db, teamId: string, encoded: string[]) {
             : "";
     return { kind: a.kind, name: names.get(key) ?? null };
   });
+}
+
+/** The From of each answered received email, by id: who a reply_to_redirect hold sidestepped. */
+export async function answeredSenders(
+  db: Db,
+  teamId: string,
+  ids: readonly string[],
+): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const r = schema.receivedEmails;
+  const rows = await db
+    .select({ id: r.id, from: r.from })
+    .from(r)
+    .where(and(eq(r.teamId, teamId), inArray(r.id, [...new Set(ids)])));
+  return new Map(rows.map((row) => [row.id, row.from]));
+}
+
+/**
+ * Why a sent email waited for approval and who approved it, when it went out
+ * from a held inbox draft. The draft's own reasons clear on send, so they are
+ * read back from the email.drafted activity that held it last.
+ */
+export async function approvedDraftOf(db: Db, teamId: string, emailId: string) {
+  const d = schema.inboxDrafts;
+  const [draft] = await db
+    .select({
+      id: d.id,
+      inboxId: d.inboxId,
+      replyToEmailId: d.replyToEmailId,
+      decidedBy: d.decidedBy,
+      decidedAt: d.decidedAt,
+      createdAt: d.createdAt,
+    })
+    .from(d)
+    .where(and(eq(d.teamId, teamId), eq(d.emailId, emailId), isNotNull(d.decidedBy)))
+    .limit(1);
+  if (!draft?.decidedBy || !draft.decidedAt) return null;
+  const a = schema.inboxActivity;
+  const [drafted] = await db
+    .select({ decision: a.decision })
+    .from(a)
+    .where(
+      and(
+        eq(a.teamId, teamId),
+        eq(a.inboxId, draft.inboxId),
+        eq(a.draftId, draft.id),
+        eq(a.action, "email.drafted"),
+        gte(a.createdAt, draft.createdAt),
+        lte(a.createdAt, draft.decidedAt),
+      ),
+    )
+    .orderBy(desc(a.createdAt))
+    .limit(1);
+  const reasons = drafted?.decision?.reasons ?? [];
+  const [senders, [approvedBy]] = await Promise.all([
+    reasons.includes("reply_to_redirect") && draft.replyToEmailId
+      ? answeredSenders(db, teamId, [draft.replyToEmailId])
+      : new Map<string, string>(),
+    actorNames(db, teamId, [draft.decidedBy]),
+  ]);
+  return {
+    reasons,
+    sender: senders.get(draft.replyToEmailId ?? "") ?? null,
+    approvedBy: approvedBy ?? { kind: "system" as const, name: null },
+  };
 }
 
 /**
