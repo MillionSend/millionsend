@@ -622,7 +622,8 @@
         "reputation": "Reputação de envio",
         "reputationSub": "Taxas de bounce ou reclamação ameaçando a região",
         "non_payment": "Inadimplência",
-        "manual": "Outro, explicado abaixo"
+        "manual": "Outro, explicado abaixo",
+        "review": "Em revisão"
       },
       "notePlaceholder": "O que você viu. Vai para o registro de auditoria e, exceto em phishing, para o proprietário.",
       "confirm": "Suspender equipe"
@@ -735,7 +736,8 @@
       "score": "A nota da conta caiu abaixo de 5 (de 0 a 10).",
       "report": "Um provedor de e-mail ou um destinatário denunciou abuso.",
       "manual": "Um operador sinalizou a equipe manualmente.",
-      "brand": "O nome da equipe bate com uma marca que golpistas costumam imitar. A checagem acontece quando a equipe é criada ou renomeada; o nome em si é permitido."
+      "brand": "O nome da equipe bate com uma marca que golpistas costumam imitar. A checagem acontece quando a equipe é criada ou renomeada; o nome em si é permitido.",
+      "linked": "A equipe compartilha evidências de envio (um domínio, uma impressão digital dos e-mails) com uma equipe suspensa por phishing; vínculos fortes também a deixam em revisão."
     },
     "reasonLabel": {
       "complaint": "Reclamações {rate} · 7d",

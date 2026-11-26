@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { DOMAIN_REGIONS } from "@/app/(dashboard)/domains/regions";
+import { DOMAIN_REGIONS, regionName } from "@/app/(dashboard)/domains/regions";
 import { KvRow } from "@/components/kv-row";
 import { NoticeStrip } from "@/components/notice-strip";
 import { PageHeader } from "@/components/page-header";
@@ -108,7 +108,7 @@ export function RegionsView() {
     const keyOf = (r: ServedRegion): string | number | null => {
       switch (sort.column) {
         case "region":
-          return domains(`regions.${r.region}`);
+          return regionName(r.region, domains);
         case "status":
           return STATUS_ORDER[r.status];
         case "plan":

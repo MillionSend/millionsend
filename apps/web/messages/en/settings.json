@@ -483,6 +483,8 @@
       "monitor_override_cleared": "Cleared monitor sampling override",
       "monitor_vouched": "Vouched for team",
       "monitor_vouch_revoked": "Revoked vouch",
+      "monitor_limit_bypassed": "Bypassed new-account limit",
+      "monitor_limit_bypass_revoked": "Revoked limit bypass",
       "monitor_broadcasts_paused": "Content monitor paused broadcasts",
       "monitor_broadcasts_resumed": "Resumed broadcasts after monitor pause",
       "warmup_trust_granted": "Lifted new-domain warm-up",

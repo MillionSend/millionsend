@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { regionFlag } from "@/app/(dashboard)/domains/regions";
+import { regionFlag, regionName } from "@/app/(dashboard)/domains/regions";
 import { mutedDash } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import type { ServedRegion } from "../region-actions";
@@ -14,7 +14,7 @@ export function RegionLabel({ region, tip }: { region: string; tip: string }) {
     <>
       {regionFlag(region)}{" "}
       <Tooltip inline text={tip}>
-        {domains(`regions.${region}`)}
+        {regionName(region, domains)}
       </Tooltip>
     </>
   );

@@ -622,7 +622,8 @@
         "reputation": "Sending reputation",
         "reputationSub": "Bounce or complaint rates threatening the region",
         "non_payment": "Non-payment",
-        "manual": "Other, explained below"
+        "manual": "Other, explained below",
+        "review": "Held for review"
       },
       "notePlaceholder": "What you saw. Goes to the audit log and, unless phishing, to the owner.",
       "confirm": "Suspend team"
@@ -735,7 +736,8 @@
       "score": "The account score dropped under 5 out of 10.",
       "report": "A mailbox provider or a recipient reported abuse.",
       "manual": "An operator flagged the team by hand.",
-      "brand": "The team's name matches a brand phishers often imitate. Checked when the team is created or renamed; the name itself is allowed."
+      "brand": "The team's name matches a brand phishers often imitate. Checked when the team is created or renamed; the name itself is allowed.",
+      "linked": "The team shares sending evidence (a domain, a fingerprint of its mail) with a team suspended for phishing; strong matches also hold it for review."
     },
     "reasonLabel": {
       "complaint": "Complaints {rate} · 7d",

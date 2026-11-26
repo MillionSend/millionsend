@@ -3,7 +3,7 @@
 import type { RevealSpan } from "@millionsend/core/content-reveal";
 import type { TeamFlagDetail } from "@millionsend/db/schema";
 import { useLocale, useTranslations } from "next-intl";
-import { type DomainRegion, regionFlag } from "@/app/(dashboard)/domains/regions";
+import { regionFlag, regionName } from "@/app/(dashboard)/domains/regions";
 import { mutedDash } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { Truncated } from "@/components/truncated";
@@ -96,7 +96,7 @@ export function RegionCell({ region }: { region: string | null }) {
   if (!region) return <span style={{ color: "var(--ms-muted)" }}>{common("unknownRegion")}</span>;
   return (
     <Tooltip inline text={region}>
-      {regionFlag(region)} {domains(`regions.${region as DomainRegion}`)}
+      {regionFlag(region)} {regionName(region, domains)}
     </Tooltip>
   );
 }

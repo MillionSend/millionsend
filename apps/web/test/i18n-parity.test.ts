@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AUDIT_ACTIONS } from "@millionsend/core/audit-actions";
 import { describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../messages", import.meta.url));
@@ -43,4 +44,18 @@ describe("hosted unsubscribe catalogs", () => {
       }
     });
   }
+});
+
+// Keys built from a value at runtime escape the parity check above: it only
+// compares the two catalogs, so a key missing from both passes.
+describe("i18n keys built from code values", () => {
+  it("every audit action has a label", () => {
+    const actions = (
+      JSON.parse(readFileSync(join(root, "en", "settings.json"), "utf8")) as {
+        audit: { actions: Record<string, string> };
+      }
+    ).audit.actions;
+    const missing = AUDIT_ACTIONS.map((a) => a.replace(".", "_")).filter((k) => !(k in actions));
+    expect(missing).toEqual([]);
+  });
 });
