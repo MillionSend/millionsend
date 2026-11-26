@@ -38,6 +38,7 @@ import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { escapeLike } from "@/lib/sql";
 import { planHoldUntil, sendingProgress } from "../broadcast-plan";
+import { approvedDraftOf } from "../inboxes";
 import { getKeyring } from "../keyring";
 import { supportViewEventData } from "../support-view";
 import { adminProcedure, router, teamProcedure } from "../trpc";
@@ -499,11 +500,13 @@ export const emailsRouter = router({
       }
     }
     const pending = await pendingSend(ctx.db, ctx.teamId, email, limit);
+    const approval = await approvedDraftOf(ctx.db, ctx.teamId, email.id);
 
     // Whitelisted shape: the ciphertext/key columns must never reach the client.
     return {
       broadcast,
       pending,
+      approval,
       sendingDomain,
       apiKeyName,
       id: email.id,

@@ -36,10 +36,13 @@ const transport = createTransport({ streamTransport: true, buffer: true });
 export const mime = async (options: SendMailOptions): Promise<Buffer> =>
   (await transport.sendMail(options)).message as Buffer;
 
-export async function seedWorld(db: Db, slug: string): Promise<World> {
+export async function seedWorld(
+  db: Db,
+  slug: string,
+  domain = `${slug}.acme.test`,
+): Promise<World> {
   const teamId = await createTeam(db, slug);
   await db.update(schema.teams).set({ plan: "pro" }).where(eq(schema.teams.id, teamId));
-  const domain = `${slug}.acme.test`;
   const [d] = await db
     .insert(schema.domains)
     .values({

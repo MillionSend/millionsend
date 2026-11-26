@@ -2,6 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
+import { Breakable } from "@/components/breakable";
 import { LeadCell } from "@/components/lead-cell";
 import { RelativeTime } from "@/components/relative-time";
 import { Skeleton } from "@/components/skeleton";
@@ -11,7 +13,7 @@ import { Tooltip } from "@/components/tooltip";
 import { Truncated } from "@/components/truncated";
 import { useTRPC } from "@/lib/trpc";
 import { StateCard } from "../../emails/list-parts";
-import { approvalReasonWords, type InboxDetail, TrustTile } from "../parts";
+import { approvalReasonList, confirmDiscard, type InboxDetail, TrustTile } from "../parts";
 import { ReleaseButton } from "../release-dialog";
 
 const heading: React.CSSProperties = { margin: "0 0 10px" };
@@ -41,11 +43,58 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
   const reject = useMutation(
     trpc.inboxes.drafts.reject.mutationOptions({ onSuccess: refresh, onError: fail }),
   );
-  const busy = approve.isPending || reject.isPending;
+  // Without the row mutations' callbacks: a bulk run toasts and refreshes once, at its end.
+  const bulkApprove = useMutation(trpc.inboxes.drafts.approve.mutationOptions());
+  const bulkReject = useMutation(trpc.inboxes.drafts.reject.mutationOptions());
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const busy = approve.isPending || reject.isPending || bulkBusy;
 
   if (drafts.isPending || held.isPending) return <Skeleton width="50%" height={14} />;
   const pending = (drafts.data?.items ?? []).filter((d) => d.status === "pending_approval");
   const quarantined = held.data?.items ?? [];
+  // A refresh can drop a selected draft; only what is still pending counts.
+  const chosen = pending.filter((draft) => selected.has(draft.id));
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
+  // One draft at a time through the same procedures as the row buttons, so
+  // each goes through every server check; one toast sums them up.
+  const runBulk = async (action: "approve" | "reject") => {
+    if (bulkBusy || chosen.length === 0) return;
+    if (action === "reject" && !(await confirmDiscard(t, chosen.length))) return;
+    setBulkBusy(true);
+    const tally = { sent: 0, draft: 0, discarded: 0, failed: 0 };
+    let firstError: string | undefined;
+    for (const draft of chosen) {
+      const ref = { inboxId: inbox.id, draftId: draft.id };
+      try {
+        if (action === "approve") tally[(await bulkApprove.mutateAsync(ref)).kind] += 1;
+        else {
+          await bulkReject.mutateAsync(ref);
+          tally.discarded += 1;
+        }
+      } catch (error) {
+        tally.failed += 1;
+        firstError ??= (error as { message?: string }).message;
+      }
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    refresh();
+    const summary = (["sent", "draft", "discarded", "failed"] as const)
+      .filter((key) => tally[key] > 0)
+      .map((key) => t(`review.bulk.${key}`, { count: tally[key] }))
+      .join(" · ");
+    toast(
+      firstError ? `${summary} — ${firstError}` : summary,
+      tally.failed > 0 ? "danger" : "success",
+    );
+  };
   if (pending.length === 0 && quarantined.length === 0) {
     return <StateCard headline={t("review.empty")} />;
   }
@@ -59,9 +108,27 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
           <h2 className="ms-microlabel" style={heading}>
             {t("review.drafts")}
           </h2>
-          <Table>
+          <Table gutter={28}>
             <thead>
               <tr>
+                <th className="ms-check-cell">
+                  <input
+                    type="checkbox"
+                    className="ms-checkbox"
+                    aria-label={t("review.bulk.selectAll")}
+                    disabled={busy}
+                    checked={chosen.length === pending.length}
+                    ref={(el) => {
+                      if (el)
+                        el.indeterminate = chosen.length > 0 && chosen.length < pending.length;
+                    }}
+                    onChange={() =>
+                      setSelected(
+                        chosen.length > 0 ? new Set() : new Set(pending.map((draft) => draft.id)),
+                      )
+                    }
+                  />
+                </th>
                 <th style={{ width: "26%" }}>{t("review.to")}</th>
                 <th style={{ width: "34%" }}>{t("review.subject")}</th>
                 <th style={{ width: "22%" }}>{t("review.reasons")}</th>
@@ -70,7 +137,17 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
             </thead>
             <tbody>
               {pending.map((draft) => (
-                <tr key={draft.id}>
+                <tr key={draft.id} className={selected.has(draft.id) ? "row-selected" : undefined}>
+                  <td className="ms-check-cell">
+                    <input
+                      type="checkbox"
+                      className="ms-checkbox"
+                      aria-label={t("review.bulk.selectRow", { to: draft.to?.[0] ?? "" })}
+                      disabled={busy}
+                      checked={selected.has(draft.id)}
+                      onChange={() => toggle(draft.id)}
+                    />
+                  </td>
                   <LeadCell value={draft.to?.[0] ?? ""} more={draft.to?.slice(1) ?? []} mono />
                   <LeadCell
                     value={draft.subject ?? t("noSubject")}
@@ -79,8 +156,14 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
                       : {})}
                     tail={draft.snippet}
                   />
-                  <td className="ms-cell-fill" style={{ fontSize: 12.5 }}>
-                    <Truncated text={approvalReasonWords(t, draft.approval_reasons)} />
+                  <td style={{ fontSize: 12.5, whiteSpace: "normal", minWidth: 200 }}>
+                    {approvalReasonList(t, draft.approval_reasons, draft.answered_from).map(
+                      (line) => (
+                        <div key={line}>
+                          <Breakable text={line} />
+                        </div>
+                      ),
+                    )}
                   </td>
                   <td className="right" style={{ whiteSpace: "nowrap" }}>
                     <span style={{ display: "inline-flex", gap: 6 }}>
@@ -88,7 +171,11 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
                         type="button"
                         className="ms-btn ms-btn-destructive"
                         disabled={busy}
-                        onClick={() => reject.mutate({ inboxId: inbox.id, draftId: draft.id })}
+                        onClick={async () => {
+                          if (await confirmDiscard(t, 1)) {
+                            reject.mutate({ inboxId: inbox.id, draftId: draft.id });
+                          }
+                        }}
                       >
                         {t("draft.discard")}
                       </button>
@@ -106,6 +193,39 @@ export function ReviewTab({ inbox }: { inbox: InboxDetail }) {
               ))}
             </tbody>
           </Table>
+          {chosen.length > 0 ? (
+            <div className="ms-bulk-bar" role="toolbar" aria-label={t("review.drafts")}>
+              <span className="ms-bulk-count">
+                {t("review.bulk.selected", { count: chosen.length })}
+              </span>
+              <button
+                type="button"
+                className="ms-menu-trigger-bare"
+                aria-label={t("review.bulk.clear")}
+                disabled={bulkBusy}
+                onClick={() => setSelected(new Set())}
+              >
+                ✕
+              </button>
+              <span className="ms-bulk-sep" aria-hidden="true" />
+              <button
+                type="button"
+                className="ms-btn ms-btn-destructive"
+                disabled={busy}
+                onClick={() => void runBulk("reject")}
+              >
+                {t("review.bulk.discard", { count: chosen.length })}
+              </button>
+              <button
+                type="button"
+                className="ms-btn ms-btn-primary"
+                disabled={busy}
+                onClick={() => void runBulk("approve")}
+              >
+                {t("review.bulk.approve", { count: chosen.length })}
+              </button>
+            </div>
+          ) : null}
         </section>
       ) : null}
 

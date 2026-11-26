@@ -381,7 +381,9 @@ retém como rascunho, com um motivo:
    param depois de uma rodada.
 5. **Reply-To.** Uma resposta a um `Reply-To` no domínio de outra
    organização, a não ser que o remetente seja responsável, esteja na lista
-   de permitidos ou seja uma conversa conhecida; no domínio compartilhado,
+   de permitidos ou seja uma conversa conhecida, ou que a mensagem tenha vindo
+   do próprio domínio da caixa e passado na autenticação (um formulário que
+   envia em seu nome com o visitante no `Reply-To`); no domínio compartilhado,
    seja quem for o remetente (`reply_to_redirect`). Isso impede que um
    estranho desvie as respostas para outra pessoa.
 6. **Regra de envio** (`send_policy`):

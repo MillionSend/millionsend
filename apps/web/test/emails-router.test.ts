@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
+  defaultSafety,
   EnvKeyring,
   encryptEmailBody,
   hashRecipient,
@@ -1031,5 +1032,86 @@ describe("emails.suppressions", () => {
         code: "NOT_FOUND",
       });
     });
+  });
+});
+
+describe("emails.get approval", () => {
+  it("says why a send from an approved draft waited, the sender it sidestepped and who approved it", async () => {
+    const team = await createTeam(db, "approval");
+    await db
+      .insert(schema.user)
+      .values({ id: "u1", name: "Ana Approver", email: "u1@example.com" });
+    const [domain] = await db
+      .insert(schema.domains)
+      .values({ teamId: team, name: "in.example.com", region: "us-east-1", status: "verified" })
+      .returning({ id: schema.domains.id });
+    const [inbox] = await db
+      .insert(schema.inboxes)
+      .values({
+        teamId: team,
+        kind: "agent",
+        emailAddress: "bot@in.example.com",
+        localPart: "bot",
+        domainId: domain?.id ?? "",
+        name: "Bot",
+        safety: defaultSafety("agent", false),
+      })
+      .returning({ id: schema.inboxes.id });
+    const inboxId = inbox?.id ?? "";
+    const [thread] = await db
+      .insert(schema.inboxThreads)
+      .values({ teamId: team, inboxId })
+      .returning({ id: schema.inboxThreads.id });
+    const [answered] = await db
+      .insert(schema.receivedEmails)
+      .values({
+        teamId: team,
+        domainIds: [domain?.id ?? ""],
+        rawSha256: randomUUID(),
+        messageId: `<${randomUUID()}@sender.example>`,
+        from: "ping@sender.example",
+        replyTo: ["x@other.example"],
+        receivedFor: ["bot@in.example.com"],
+        envelope: { mailFrom: "", clientIp: "192.0.2.1", helo: "h", tls: null },
+        authentication: { spf: "pass", dkim: "pass", dmarc: "pass", arc: "none" },
+        sizeBytes: 100,
+      })
+      .returning({ id: schema.receivedEmails.id });
+    const sent = await insertEmail({ ...baseEmail(team), to: ["x@other.example"] });
+    const plain = await insertEmail(baseEmail(team));
+    const heldAt = new Date(Date.now() - 60_000);
+    const [draft] = await db
+      .insert(schema.inboxDrafts)
+      .values({
+        teamId: team,
+        inboxId,
+        type: "reply",
+        threadId: thread?.id,
+        replyToEmailId: answered?.id,
+        to: ["x@other.example"],
+        status: "sent",
+        createdBy: "system",
+        decidedBy: "user:u1",
+        decidedAt: new Date(),
+        emailId: sent,
+        createdAt: heldAt,
+      })
+      .returning({ id: schema.inboxDrafts.id });
+    await db.insert(schema.inboxActivity).values({
+      teamId: team,
+      inboxId,
+      actor: "system",
+      action: "email.drafted",
+      draftId: draft?.id,
+      decision: { result: "draft", reasons: ["reply_to_redirect", "ramp"] },
+      createdAt: heldAt,
+    });
+
+    expect((await caller(team).emails.get({ id: sent })).approval).toEqual({
+      reasons: ["reply_to_redirect", "ramp"],
+      sender: "ping@sender.example",
+      approvedBy: { kind: "user", name: "Ana Approver" },
+    });
+    expect((await caller(team).emails.get({ id: plain })).approval).toBeNull();
   });
 });

@@ -65,6 +65,7 @@ import { escapeLike } from "@/lib/sql";
 import { fetchQuotaRow } from "../billing";
 import {
   actorNames,
+  answeredSenders,
   inboxDeps,
   inboxFailure,
   inboxSendDeps,
@@ -791,11 +792,21 @@ export const inboxesRouter = router({
           query: { limit: input.limit, after: input.cursor },
         });
         if (result === "bad_cursor") throw new TRPCError({ code: "NOT_FOUND" });
-        // A snippet is the body's opening: content, like the draft itself.
         const page = idPage(result);
-        return ctx.supportView
-          ? { ...page, items: page.items.map((item) => ({ ...item, snippet: null })) }
-          : page;
+        const redirectedFrom = (item: (typeof page.items)[number]) =>
+          item.approval_reasons.includes("reply_to_redirect") ? item.reply_to_email_id : null;
+        const senders = await answeredSenders(
+          ctx.db,
+          ctx.teamId,
+          page.items.flatMap((item) => redirectedFrom(item) ?? []),
+        );
+        const items = page.items.map((item) => ({
+          ...item,
+          answered_from: senders.get(redirectedFrom(item) ?? "") ?? null,
+          // A snippet is the body's opening: content, like the draft itself.
+          ...(ctx.supportView ? { snippet: null } : {}),
+        }));
+        return { ...page, items };
       }),
 
     get: receivingProcedure.input(z.object(draftRef)).query(async ({ ctx, input }) => {

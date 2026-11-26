@@ -229,6 +229,33 @@ describe("the shared domain's mode, on every inbox send", () => {
     }
   });
 
+  it("holds a reply to a Reply-To on aligned mail from the shared domain's own organization", async () => {
+    const w = await seedWorld(db, "shared-own-org");
+    await establish(w);
+    openSending();
+    const inbox = await addInbox(w, {
+      local: "forms",
+      shared: true,
+      safety: { send_policy: "open" },
+    });
+    const threadId = await addThread(w, inbox.id);
+    const received = await receive(w, {
+      inbox,
+      threadId,
+      message: { from: `ping@${w.sharedDomain}`, replyTo: "visitor@elsewhere.example" },
+    });
+    const out = await replyInThread(db, w.deps, {
+      teamId: w.teamId,
+      inboxId: inbox.id,
+      threadId,
+      emailId: received.id,
+      billing: await billing(w),
+      actor: TEAM_KEY,
+      body: { text: "Sure" },
+    });
+    expect(drafted(out).approval_reasons).toContain("reply_to_redirect");
+  });
+
   it("keeps an inbox replying only while its display name, address or team label fails the guards", async () => {
     const w = await seedWorld(db, "brand-names");
     openSending();

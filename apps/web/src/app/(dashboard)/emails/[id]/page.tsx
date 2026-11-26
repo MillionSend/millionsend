@@ -41,6 +41,7 @@ import {
 import { limitHoldCopy } from "@/lib/new-domain-limit";
 import { useTRPC } from "@/lib/trpc";
 import type { AppRouter } from "@/server/routers";
+import { approvalReasonWords } from "../../inboxes/parts";
 
 type EventType =
   | "queued"
@@ -532,6 +533,7 @@ export default function EmailDetailPage() {
   const { id } = useParams<{ id: string }>();
   const t = useTranslations("emails");
   const common = useTranslations("common");
+  const inboxT = useTranslations("inboxes");
   const locale = useLocale();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -870,6 +872,22 @@ export default function EmailDetailPage() {
               ))}
             </div>
           </div>
+        ) : null}
+        {email.approval ? (
+          <Meta label={t("detail.approval")}>
+            {email.approval.reasons.length > 0 ? (
+              <Breakable
+                text={approvalReasonWords(inboxT, email.approval.reasons, email.approval.sender)}
+              />
+            ) : null}
+            <div style={{ fontSize: 12.5, color: "var(--ms-muted)" }}>
+              {t("detail.approvedBy", {
+                name:
+                  email.approval.approvedBy.name ??
+                  inboxT(`activity.actor.${email.approval.approvedBy.kind}`),
+              })}
+            </div>
+          </Meta>
         ) : null}
         {email.apiKeyName ? (
           <Meta label={t("detail.apiKey")} mono>

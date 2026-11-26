@@ -5,6 +5,7 @@ import type { InboxSafety } from "@millionsend/db/schema";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useLocale, useTranslations } from "next-intl";
 import type { ReactNode } from "react";
+import { confirmDialog } from "@/components/confirm-dialog";
 import { EnvelopeGlyph } from "@/components/email-status-icon";
 import { Select } from "@/components/select";
 import type { BadgeTone } from "@/components/status-badge";
@@ -190,19 +191,28 @@ export function releaseErrorText(
 /**
  * Why a send waits for a person, in words. A reason may carry its detail
  * after a colon (loop_guard:auto_submitted); an unknown one shows its key.
+ * `sender` is the answered email's From, which reply_to_redirect names when known.
  */
+export function approvalReasonList(
+  t: ReturnType<typeof useTranslations>,
+  reasons: string[],
+  sender?: string | null,
+): string[] {
+  return reasons.map((reason) => {
+    const key = reason.split(":")[0] ?? reason;
+    // "none" can never be an address, so it selects the unnamed wording.
+    if (t.has(`reason.${key}`)) return t(`reason.${key}`, { sender: sender || "none" });
+    // Quarantine reasons, which activity rows name too.
+    return t.has(`qr.${key}`) ? t(`qr.${key}`) : reason;
+  });
+}
+
 export function approvalReasonWords(
   t: ReturnType<typeof useTranslations>,
   reasons: string[],
+  sender?: string | null,
 ): string {
-  return reasons
-    .map((reason) => {
-      const key = reason.split(":")[0] ?? reason;
-      if (t.has(`reason.${key}`)) return t(`reason.${key}`);
-      // Quarantine reasons, which activity rows name too.
-      return t.has(`qr.${key}`) ? t(`qr.${key}`) : reason;
-    })
-    .join(" · ");
+  return approvalReasonList(t, reasons, sender).join(" · ");
 }
 
 /** A thread message's own page: received mail under Inboxes, a send in the Emails log. */
@@ -401,4 +411,17 @@ export function FromLine({
       )}
     </p>
   );
+}
+
+/** Asks before discarding held drafts, which nothing brings back. */
+export function confirmDiscard(
+  t: ReturnType<typeof useTranslations>,
+  count: number,
+): Promise<boolean> {
+  return confirmDialog({
+    title: t("draft.discardTitle", { count }),
+    message: t("draft.discardBody", { count }),
+    confirmLabel: t("draft.discard"),
+    danger: true,
+  });
 }
