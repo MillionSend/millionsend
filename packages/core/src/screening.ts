@@ -838,7 +838,7 @@ async function coldSharedSend(
   const [members, senders, wroteIn] = await Promise.all([
     teamMemberEmails(db, email.teamId),
     inboxId && threadId
-      ? threadSenders(db, { inboxId, threadId, shared: true })
+      ? threadSenders(db, { inboxId, threadId, shared: true, ownOrg: null })
       : new Set<string>(),
     inboxId
       ? db

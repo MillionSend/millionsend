@@ -259,7 +259,7 @@
     "private_code": "it contains a code or sign-in link this inbox received",
     "loop_guard": "a reply to an automatic message",
     "loop_burst": "too many automatic replies to this address",
-    "reply_to_redirect": "the Reply-To points somewhere else",
+    "reply_to_redirect": "{sender, select, none {replies to the Reply-To, not the sender} other {replies to the Reply-To, not the sender {sender}}}",
     "inbox_send_policy": "the inbox's rules refused it",
     "inbox_send_cap_reached": "the inbox's daily send limit was reached",
     "restricted_api_key": "a key restricted to another inbox",
@@ -276,7 +276,19 @@
     "reasons": "Why it waits",
     "reason": "Reason",
     "scores": "Risk (0–100)",
-    "scoreLine": "injection {injection} · phishing {phishing}"
+    "scoreLine": "injection {injection} · phishing {phishing}",
+    "bulk": {
+      "selectAll": "Select every draft",
+      "selectRow": "Select the draft to {to}",
+      "selected": "{count} selected",
+      "clear": "Clear selection",
+      "approve": "Approve and send ({count})",
+      "discard": "Discard ({count})",
+      "sent": "{count} sent",
+      "draft": "{count} back for approval",
+      "discarded": "{count} discarded",
+      "failed": "{count} failed"
+    }
   },
   "release": "Release",
   "quarantine": {

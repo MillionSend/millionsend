@@ -376,6 +376,30 @@ describe("support view", () => {
     expect(core.sendDraft).not.toHaveBeenCalled();
   });
 
+  it("names the sender a reply_to_redirect hold answered, from the team's own mail only", async () => {
+    const ours = await received(acme, {
+      from: "ping@sender.example",
+      replyTo: ["x@other.example"],
+    });
+    const theirs = await received(beta, { from: "nope@sender.example" });
+    const draft = (id: string, target: string, reasons: string[]) => ({
+      id,
+      snippet: null,
+      reply_to_email_id: target,
+      approval_reasons: reasons,
+    });
+    core.listDrafts.mockResolvedValue({
+      data: [
+        draft("d1", ours, ["reply_to_redirect", "send_policy"]),
+        draft("d2", theirs, ["reply_to_redirect"]),
+        draft("d3", ours, ["ramp"]),
+      ],
+      hasMore: false,
+    });
+    const items = (await caller(acme).inboxes.drafts.list({ inboxId })).items;
+    expect(items.map((item) => item.answered_from)).toEqual(["ping@sender.example", null, null]);
+  });
+
   it("reads thread messages and drafts as their envelope only", async () => {
     core.listThreadEmails.mockResolvedValue({
       data: [
@@ -424,9 +448,18 @@ describe("support view", () => {
     expect(
       await caller(acme, "viewer", view()).inboxes.drafts.get({ inboxId, draftId: randomUUID() }),
     ).toEqual({ id: "d1", subject: "Re: Order", html: null, text: null });
-    core.listDrafts.mockResolvedValue({ data: [{ id: "d1", snippet: "hi" }], hasMore: false });
+    core.listDrafts.mockResolvedValue({
+      data: [{ id: "d1", snippet: "hi", reply_to_email_id: null, approval_reasons: [] }],
+      hasMore: false,
+    });
     expect((await caller(acme, "viewer", view()).inboxes.drafts.list({ inboxId })).items).toEqual([
-      { id: "d1", snippet: null },
+      {
+        id: "d1",
+        snippet: null,
+        reply_to_email_id: null,
+        approval_reasons: [],
+        answered_from: null,
+      },
     ]);
 
     // The owner reads the same message whole.

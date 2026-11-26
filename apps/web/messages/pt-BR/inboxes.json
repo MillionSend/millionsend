@@ -259,7 +259,7 @@
     "private_code": "contém um código ou link de acesso que esta caixa recebeu",
     "loop_guard": "resposta a uma mensagem automática",
     "loop_burst": "respostas automáticas demais para este endereço",
-    "reply_to_redirect": "o Reply-To aponta para outro lugar",
+    "reply_to_redirect": "{sender, select, none {responde ao Reply-To, não ao remetente} other {responde ao Reply-To, não ao remetente {sender}}}",
     "inbox_send_policy": "as regras da caixa recusaram",
     "inbox_send_cap_reached": "a caixa atingiu o limite diário de envios",
     "restricted_api_key": "chave restrita a outra caixa",
@@ -276,7 +276,19 @@
     "reasons": "Por que está esperando",
     "reason": "Motivo",
     "scores": "Risco (0–100)",
-    "scoreLine": "injeção {injection} · phishing {phishing}"
+    "scoreLine": "injeção {injection} · phishing {phishing}",
+    "bulk": {
+      "selectAll": "Selecionar todos os rascunhos",
+      "selectRow": "Selecionar o rascunho para {to}",
+      "selected": "{count, plural, one {# selecionado} other {# selecionados}}",
+      "clear": "Limpar seleção",
+      "approve": "Aprovar e enviar ({count})",
+      "discard": "Descartar ({count})",
+      "sent": "{count, plural, one {# enviado} other {# enviados}}",
+      "draft": "{count, plural, one {# voltou para aprovação} other {# voltaram para aprovação}}",
+      "discarded": "{count, plural, one {# descartado} other {# descartados}}",
+      "failed": "{count, plural, one {# falhou} other {# falharam}}"
+    }
   },
   "release": "Liberar",
   "quarantine": {

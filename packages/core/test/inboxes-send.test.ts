@@ -269,6 +269,48 @@ describe("replyInThread", () => {
     ).toEqual([]);
   });
 
+  it("answers the Reply-To of aligned mail from the inbox's own organization unattended", async () => {
+    const inbox = await addInbox(w, { local: "feedback" });
+    const relay = async (from: string, senderTrust: "external" | "unauthenticated") => {
+      const threadId = await addThread(w, inbox.id);
+      const message = { from, replyTo: "visitor@elsewhere.example" };
+      return { threadId, ...(await receive(w, { inbox, threadId, senderTrust, message })) };
+    };
+    const own = await relay("ping@forms.acme.test", "external");
+    expect(sent(await reply(inbox, own, { text: "Thanks" })).email.to).toEqual([
+      "visitor@elsewhere.example",
+    ]);
+    const forged = await relay("ping@acme.test", "unauthenticated");
+    expect(drafted(await reply(inbox, forged, { text: "Thanks" })).approval_reasons).toEqual([
+      "reply_to_redirect",
+      "send_policy",
+    ]);
+    const foreign = await relay("ping@forms.other.example", "external");
+    expect(drafted(await reply(inbox, foreign, { text: "Thanks" })).approval_reasons).toEqual([
+      "reply_to_redirect",
+      "send_policy",
+    ]);
+  });
+
+  it("holds the Reply-To of aligned mail from a stranger under the same free host", async () => {
+    const host = await seedWorld(db, "free-host", "shop.eu.org");
+    const inbox = await addInbox(host, { local: "feedback" });
+    const threadId = await addThread(host, inbox.id);
+    const message = { from: "ping@evil.eu.org", replyTo: "victim@third.example" };
+    const t = await receive(host, { inbox, threadId, senderTrust: "external", message });
+    const out = await replyInThread(db, host.deps, {
+      teamId: host.teamId,
+      billing: await billing(host),
+      actor: TEAM_KEY,
+      inboxId: inbox.id,
+      threadId,
+      emailId: t.id,
+      body: { text: "Thanks" },
+      idempotencyKey: null,
+    });
+    expect(drafted(out).approval_reasons).toEqual(["reply_to_redirect", "send_policy"]);
+  });
+
   it("holds a reply to automatic mail and a burst to one address (loop guard)", async () => {
     const inbox = await addInbox(w, { local: "loops" });
     const auto = await addThread(w, inbox.id);
