@@ -2066,6 +2066,8 @@ describe("console.teams.liftPause", () => {
       sent: 200,
       hardBounced: 20,
       rate: 0.1,
+      complained: 0,
+      complaintRate: 0,
       parked: 1,
       lastLiftAt: null,
     });
@@ -2082,7 +2084,11 @@ describe("console.teams.liftPause", () => {
       operator().console.teams.liftPause({ ...lift, reference: "  " }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
-    expect(await operator().console.teams.liftPause(lift)).toEqual({ sent: 200, hardBounces: 20 });
+    expect(await operator().console.teams.liftPause(lift)).toEqual({
+      sent: 200,
+      hardBounces: 20,
+      complaints: 0,
+    });
     expect(await sendRefusal(db, lifting)).toBeNull();
     const after = (await operator().console.safety.review({ teamId: lifting })).standing;
     expect(after).toMatchObject({
@@ -2108,6 +2114,7 @@ describe("console.teams.liftPause", () => {
       since: utcDay(Date.now() - DAY_MS),
       sent: 200,
       hardBounces: 20,
+      complaints: 0,
       notified: true,
     });
     const owner = await callerFor(MEMBER, lifting, "owner").audit.list({});
@@ -2120,7 +2127,11 @@ describe("console.teams.liftPause", () => {
     // 12 hard bounces in the 150 sends after the lift: past the line again.
     await db.update(c).set({ sent: 350, hardBounced: 32 }).where(eq(c.teamId, lifting));
     expect((await sendRefusal(db, lifting))?.reason).toBe("sending_paused");
-    expect(await operator().console.teams.liftPause(lift)).toEqual({ sent: 350, hardBounces: 32 });
+    expect(await operator().console.teams.liftPause(lift)).toEqual({
+      sent: 350,
+      hardBounces: 32,
+      complaints: 0,
+    });
     await db.delete(schema.teams).where(eq(schema.teams.id, lifting));
   });
 });
