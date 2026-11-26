@@ -640,11 +640,11 @@
     },
     "liftDialog": {
       "title": "Retirar pausa de envios · {team}",
-      "lead": "Tira das taxas da equipe os envios e hard bounces contados nos últimos {window} dias (UTC), e ela volta a enviar na hora. Todo envio e bounce daqui em diante conta, com os mesmos limites. Reclamações nunca saem da conta.",
+      "lead": "Tira das taxas da equipe os envios, hard bounces e reclamações contados nos últimos {window} dias (UTC), e ela volta a enviar na hora. Todo envio, bounce e reclamação daqui em diante conta, com os mesmos limites.",
       "pausedOn": "Pausada por",
-      "pausedOnValue": "Taxa de hard bounces de {rate} nos últimos {window} dias",
+      "pausedOnValue": "Taxa de hard bounces de {rate} · de reclamações de {complaintRate} nos últimos {window} dias",
       "leavesOut": "Tira da conta",
-      "leavesOutValue": "{bounces, plural, one {# hard bounce} other {# hard bounces}} em {sent, plural, one {# envio} other {# envios}} desde {since} (UTC)",
+      "leavesOutValue": "{bounces, plural, one {# hard bounce} other {# hard bounces}} e {complaints, plural, one {# reclamação} other {# reclamações}} em {sent, plural, one {# envio} other {# envios}} desde {since} (UTC)",
       "waiting": "Esperando para sair",
       "waitingValue": "{count, plural, =0 {Nada} one {# e-mail} other {# e-mails}}",
       "waitingTip": "Os e-mails retidos durante a pausa saem logo depois da retirada, e os bounces deles contam. Se eram para cadastros falsos, podem pausar a equipe de novo.",
@@ -660,7 +660,6 @@
       "suspended": "Equipe suspensa ou em revisão. Reative ou libere a equipe em vez disso.",
       "free": "As equipes Free de uma mesma pessoa dividem um só histórico de bounces, então a pausa sai sozinha em até {window} dias.",
       "not_paused": "A equipe não está mais pausada.",
-      "complaints": "Pausada por reclamações, e a retirada não vale para elas. A pausa sai sozinha quando esses dias de envio saírem da janela de {window} dias.",
       "flagged": "Decida antes sobre a sinalização aberta: encerre a sinalização ou suspenda a equipe.",
       "monitor": "O risco do monitor de conteúdo está acima do limite de sinalização. Só dá para retirar a pausa quando ele voltar a ficar abaixo."
     },

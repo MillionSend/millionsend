@@ -283,8 +283,10 @@ export function SuspendDialog({
 /** What a lift would take out, as the review page reads it. */
 interface PauseLiftPreview {
   rate: number;
+  complaintRate: number;
   sent: number;
   hardBounced: number;
+  complained: number;
   /** The pause window's first UTC day. */
   since: string;
   parked: number;
@@ -298,7 +300,7 @@ export function useLiftRefusal(): (refusal: PauseLiftRefusal) => string {
 }
 
 /**
- * Takes the pause window's sends and hard bounces out of the team's rates.
+ * Takes the pause window's sends, hard bounces and complaints out of the team's rates.
  * The reference and the note go on the record, so the confirm waits for both.
  */
 export function LiftPauseDialog({
@@ -342,11 +344,16 @@ export function LiftPauseDialog({
         </p>
         <dl className="ms-kv ms-kv-cols" style={{ marginBottom: 16 }}>
           <KvRow label={t("pausedOn")} valueStyle={KV_SENTENCE}>
-            {t("pausedOnValue", { rate: percent(lift.rate), window: PAUSE_WINDOW_DAYS })}
+            {t("pausedOnValue", {
+              rate: percent(lift.rate),
+              complaintRate: percent(lift.complaintRate),
+              window: PAUSE_WINDOW_DAYS,
+            })}
           </KvRow>
           <KvRow label={t("leavesOut")} valueStyle={KV_SENTENCE}>
             {t("leavesOutValue", {
               bounces: lift.hardBounced,
+              complaints: lift.complained,
               sent: lift.sent,
               since: formatDayUtc(lift.since, locale),
             })}

@@ -336,15 +336,22 @@ describe("the review page's Lift sending pause", () => {
     );
   }
 
-  it("is offered while a bounce pause holds, and not at all otherwise", async () => {
+  it("is offered while a bounce or complaint pause holds, and not at all otherwise", async () => {
     expect((await open("lift-quiet")).button).toBeUndefined();
     expect((await open("lift-paused", { sent: 200, hardBounced: 20 })).button?.disabled).toBe(
+      false,
+    );
+    expect((await open("lift-complaints", { sent: 200, complained: 4 })).button?.disabled).toBe(
       false,
     );
   });
 
   it("is disabled under a refusal, the reason one focus away", async () => {
-    const { button } = await open("lift-complaints", { sent: 200, complained: 4 });
+    const { button } = await open(
+      "lift-flagged",
+      { sent: 200, hardBounced: 20 },
+      { reason: "brand", detail: {} },
+    );
     expect(button?.disabled).toBe(true);
     // The wrapper takes the focus the disabled button cannot.
     const trigger = button?.parentElement;
@@ -352,7 +359,7 @@ describe("the review page's Lift sending pause", () => {
     expect(trigger?.tabIndex).toBe(0);
     await act(async () => trigger?.focus());
     expect(document.querySelector(".ms-tooltip")?.textContent).toBe(
-      "Paused on complaints, which a lift never covers. The pause lifts on its own once those send days leave the 2-day window.",
+      "Decide on the open flag first: clear it, or suspend the team.",
     );
   });
 
@@ -361,9 +368,10 @@ describe("the review page's Lift sending pause", () => {
     await act(async () => button?.click());
     const dialog = container.querySelector('[data-title="Lift sending pause · lift-confirm"]');
     const since = formatDayUtc(utcDay(Date.now() - DAY_MS), "en");
-    expect(dialog?.textContent).toContain("Paused onHard-bounce rate 10.00% over the last 2 days");
+    expect(dialog?.textContent).toContain("Paused onHard-bounce rate 10.00%");
+    expect(dialog?.textContent).toMatch(/complaint rate 0\S* over the last 2 days/);
     expect(dialog?.textContent).toContain(
-      `Leaves out20 hard bounces in 200 sends since ${since} UTC`,
+      `Leaves out20 hard bounces and 0 complaints in 200 sends since ${since} UTC`,
     );
     expect(dialog?.textContent).toContain("Waiting to go outNothing");
     expect(dialog?.textContent).toContain("Last liftNever");

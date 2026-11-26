@@ -526,6 +526,13 @@
       "when": 1795628752899,
       "tag": "0074_new_account_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1795700264490,
+      "tag": "0075_pause_lift_complaints",
+      "breakpoints": true
     }
   ]
 }

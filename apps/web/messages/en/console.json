@@ -640,11 +640,11 @@
     },
     "liftDialog": {
       "title": "Lift sending pause · {team}",
-      "lead": "Takes the sends and hard bounces counted over the last {window} UTC days out of this team's rates, so it sends again now. Every send and bounce from here on counts, against the same lines. Complaints never come out.",
+      "lead": "Takes the sends, hard bounces and complaints counted over the last {window} UTC days out of this team's rates, so it sends again now. Every send, bounce and complaint from here on counts, against the same lines.",
       "pausedOn": "Paused on",
-      "pausedOnValue": "Hard-bounce rate {rate} over the last {window} days",
+      "pausedOnValue": "Hard-bounce rate {rate} · complaint rate {complaintRate} over the last {window} days",
       "leavesOut": "Leaves out",
-      "leavesOutValue": "{bounces, plural, one {# hard bounce} other {# hard bounces}} in {sent, plural, one {# send} other {# sends}} since {since} UTC",
+      "leavesOutValue": "{bounces, plural, one {# hard bounce} other {# hard bounces}} and {complaints, plural, one {# complaint} other {# complaints}} in {sent, plural, one {# send} other {# sends}} since {since} UTC",
       "waiting": "Waiting to go out",
       "waitingValue": "{count, plural, =0 {Nothing} one {# email} other {# emails}}",
       "waitingTip": "Mail held during the pause goes out right after the lift, and its bounces count. If it was meant for fake sign-ups, it can pause the team again.",
@@ -660,7 +660,6 @@
       "suspended": "Suspended or held for review. Reinstate or release the team instead.",
       "free": "Free teams of one person share one bounce record, so the pause lifts on its own within {window} days.",
       "not_paused": "The team isn't paused anymore.",
-      "complaints": "Paused on complaints, which a lift never covers. The pause lifts on its own once those send days leave the {window}-day window.",
       "flagged": "Decide on the open flag first: clear it, or suspend the team.",
       "monitor": "The content monitor's risk is over its flag line. No lift until it drops back under."
     },

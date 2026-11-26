@@ -4,6 +4,7 @@ import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
 import { riskAt, teamMonitorRow, vouchActive } from "./abuse-monitor.js";
 import { auditRow } from "./audit.js";
 import {
+  counterComplaintSent,
   type DeliverabilityHealth,
   fetchDeliverabilityHealth,
   PAUSE_WINDOW_DAYS,
@@ -94,9 +95,9 @@ export async function pauseLiftStanding(
 }
 
 /**
- * Lifts a deliverability pause on bounces: the pause window's sends and hard
- * bounces are copied into the excluded columns the guardrail and the score
- * subtract, so the window counts afresh from the next send against the same
+ * Lifts a deliverability pause on bounces or complaints: the pause window's
+ * sends, hard bounces and complaints are copied into the excluded columns the
+ * guardrail and the score subtract, so the window counts afresh from the next send against the same
  * lines. The refusal is checked again under the team row's lock, and the
  * snapshot, its audit row and a fresh notice episode commit together; the
  * owners' mail and the drain are the caller's.
@@ -131,16 +132,26 @@ export async function liftDeliverabilityPause(
     });
     if (standing.refusal) return { refusal: standing.refusal };
     const uc = schema.usageCounters;
-    // ponytail: a bounce landing after the lift for mail sent before it counts
-    // against the fresh window; credit those at bounce time if lifted teams
-    // re-pause on leftovers.
+    // ponytail: a bounce or complaint landing after the lift for mail sent
+    // before it counts against the fresh window (complaints keep arriving for
+    // days); credit those at event time if lifted teams re-pause on leftovers.
     const rows = await t
       .update(uc)
-      .set({ excludedSent: sql`${uc.sent}`, excludedHardBounced: sql`${uc.hardBounced}` })
+      .set({
+        excludedSent: sql`${uc.sent}`,
+        excludedHardBounced: sql`${uc.hardBounced}`,
+        excludedComplaintSent: counterComplaintSent,
+        excludedComplained: sql`${uc.complained}`,
+      })
       .where(and(eq(uc.teamId, input.teamId), gte(uc.day, standing.since)))
-      .returning({ sent: uc.excludedSent, hardBounced: uc.excludedHardBounced });
+      .returning({
+        sent: uc.excludedSent,
+        hardBounced: uc.excludedHardBounced,
+        complained: uc.excludedComplained,
+      });
     const sent = rows.reduce((n, r) => n + r.sent, 0);
     const hardBounces = rows.reduce((n, r) => n + r.hardBounced, 0);
+    const complaints = rows.reduce((n, r) => n + r.complained, 0);
     await t.insert(schema.auditLog).values({
       ...auditRow({
         teamId: input.teamId,
@@ -155,12 +166,13 @@ export async function liftDeliverabilityPause(
           since: standing.since,
           sent,
           hardBounces,
+          complaints,
           notified: input.notified,
         },
       }),
       createdAt: now,
     });
     await clearNotifications(t, { teamId: input.teamId, kind: "deliverability" });
-    return { sent, hardBounces, parked: standing.parked };
+    return { sent, hardBounces, complaints, parked: standing.parked };
   });
 }

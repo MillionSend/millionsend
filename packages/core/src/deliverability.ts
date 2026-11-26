@@ -103,6 +103,9 @@ export const counterComplaintSent: SQL = sql`${schema.usageCounters.sent} - ${sc
 /** A usage_counters row's sends and hard bounces net of a pause lift: the bounce rate's inputs. */
 export const counterSent: SQL = sql`greatest(${schema.usageCounters.sent} - ${schema.usageCounters.excludedSent}, 0)`;
 export const counterHardBounced: SQL = sql`greatest(${schema.usageCounters.hardBounced} - ${schema.usageCounters.excludedHardBounced}, 0)`;
+/** A usage_counters row's complaint-rate sends and complaints net of a pause lift. */
+export const counterNetComplaintSent: SQL = sql`greatest(${counterComplaintSent} - ${schema.usageCounters.excludedComplaintSent}, 0)`;
+export const counterComplained: SQL = sql`greatest(${schema.usageCounters.complained} - ${schema.usageCounters.excludedComplained}, 0)`;
 
 export interface DeliverabilityEvaluation {
   /** Hard-bounce rate over the warning window. */
@@ -252,9 +255,9 @@ export async function fetchDeliverabilityHealth(
         day: c.day,
         sent: c.sent,
         bounceSent: counterSent,
-        complaintSent: counterComplaintSent,
+        complaintSent: counterNetComplaintSent,
         hardBounced: counterHardBounced,
-        complained: c.complained,
+        complained: counterComplained,
         liftedSent: c.excludedSent,
         liftedHardBounced: c.excludedHardBounced,
       };
@@ -308,18 +311,11 @@ export async function fetchDeliverabilityHealth(
   };
 }
 
-export type PauseLiftRefusal =
-  | "suspended"
-  | "free"
-  | "not_paused"
-  | "complaints"
-  | "flagged"
-  | "monitor";
+export type PauseLiftRefusal = "suspended" | "free" | "not_paused" | "flagged" | "monitor";
 
 /**
  * Why an operator may not lift the team's deliverability pause now, or null
- * when they may. A Free pool shares one record no lift touches, and a
- * complaint pause is never lifted.
+ * when they may. A Free pool shares one record no lift touches.
  */
 export function pauseLiftRefusal(f: {
   suspended: boolean;
@@ -335,7 +331,6 @@ export function pauseLiftRefusal(f: {
   if (f.freePool) return "free";
   const paused = f.reasons.filter((r) => r.tier === "paused");
   if (paused.length === 0) return "not_paused";
-  if (paused.some((r) => r.metric === "complaint")) return "complaints";
   // The cron's own guardrail flag is the pause itself; any other open flag waits on a decision.
   if (f.openFlag && (f.openFlag.reason !== "guardrail" || f.openFlag.openedBy !== null)) {
     return "flagged";
