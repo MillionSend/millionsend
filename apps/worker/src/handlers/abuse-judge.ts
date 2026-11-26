@@ -26,6 +26,7 @@ import {
   type MonitorTier,
   mailCarriesPix,
   mediaParks,
+  nextJudgeRetry,
   opaqueFacts,
   openAttachments,
   parseSingleSender,
@@ -35,6 +36,7 @@ import {
   screeningTeam,
   sendingDomainYoung,
   spareWaitingSamples,
+  TRANSIENT_JUDGE_ERRORS,
   teamDestinationStanding,
   teamMonitorOverview,
   teamMonitorRow,
@@ -47,7 +49,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   type MediaRead,
   type MediaReadDeps,
@@ -71,6 +73,10 @@ export interface JudgeDeps {
   /** Queues again what waited on a screening verdict: an unsent email, or a new team's fan-out. */
   enqueueSend?: ((emailId: string, priority: EmailSendPriority) => Promise<void>) | undefined;
   enqueueBroadcast?: ((broadcastId: string) => Promise<void>) | undefined;
+  /** Queues a later call on an after-send sample a transient judge failure left unjudged. */
+  enqueueRetry?:
+    | ((p: { sampleId: string; teamId: string; retry: number }, at: Date) => Promise<void>)
+    | undefined;
   /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
   platformDomains?: ReadonlySet<string> | undefined;
   /**
@@ -113,20 +119,52 @@ const MEDIA_UNREAD: ReadonlySet<MediaIssue> = new Set(["images_not_read", "visio
  * Judge one pending sample. The block is built in memory from the stored
  * body and discarded with the call; the row keeps the verdict fields only.
  * A judge failure of any class records the sample unjudged and changes
- * nothing else; only a throttle is retried, and only a few times. Database
- * and decrypt errors throw so pg-boss retries the job. Mail waiting on a
- * screening sample is queued again once it has its answer, either way.
+ * nothing else; a throttle is retried a few times in the queue. An
+ * after-send sample a failure that may clear left unjudged is reopened and
+ * judged again on JUDGE_RETRY_DELAYS_MS (`retry`); a screening sample has
+ * its own wait, which mail is held on. Database and decrypt errors throw so
+ * pg-boss retries the job. Mail waiting on a screening sample is queued
+ * again once it has its answer, either way.
  */
 export async function judgeSample(
   db: Db,
   deps: JudgeDeps,
-  payload: { sampleId: string },
+  payload: { sampleId: string; retry?: number | undefined },
 ): Promise<JudgeOutcome> {
   const now = deps.now?.() ?? new Date();
+  if (payload.retry !== undefined) {
+    // ponytail: the lost-sample sweep can mark a reopened row of 3 h or more
+    // lost mid-call, which ends its retries; key the sweep off judged_at if
+    // that ever shows in the unjudged share.
+    await db
+      .update(ms)
+      .set({ status: "pending", errorClass: null, judgedAt: null })
+      .where(
+        and(
+          eq(ms.id, payload.sampleId),
+          eq(ms.status, "unjudged"),
+          eq(ms.screening, false),
+          inArray(ms.errorClass, [...TRANSIENT_JUDGE_ERRORS]),
+        ),
+      );
+  }
   const [sample] = await db.select().from(ms).where(eq(ms.id, payload.sampleId));
   if (sample?.status !== "pending") return "skipped";
   const outcome = await judgePending(db, deps, sample, now);
   if (sample.screening && outcome !== "skipped") await resumeScreened(db, deps, sample);
+  if (outcome === "unjudged" && !sample.screening && deps.enqueueRetry) {
+    const [row] = await db
+      .select({ errorClass: ms.errorClass })
+      .from(ms)
+      .where(eq(ms.id, sample.id));
+    const next = row?.errorClass ? nextJudgeRetry(row.errorClass, payload.retry, now) : null;
+    if (next) {
+      await deps.enqueueRetry(
+        { sampleId: sample.id, teamId: sample.teamId, retry: next.retry },
+        next.at,
+      );
+    }
+  }
   return outcome;
 }
 

@@ -268,6 +268,46 @@ it("retries a throttle through the queue a few times, then gives the sample up",
   expect(await sample(id)).toMatchObject({ status: "unjudged", errorClass: "throttled" });
 });
 
+it("reopens an after-send sample a transient failure left unjudged, on the backoff", async () => {
+  const retries: { sampleId: string; retry: number; at: Date }[] = [];
+  const enqueueRetry: JudgeDeps["enqueueRetry"] = async (p, at) =>
+    void retries.push({ sampleId: p.sampleId, retry: p.retry, at });
+  const id = await insertSample({ emailId: await insertEmail("<p>x</p>") });
+  const down = fakeJudge(async () => {
+    throw new Error("boom");
+  });
+  expect(await judgeSample(db, deps(down, { enqueueRetry }), { sampleId: id })).toBe("unjudged");
+  expect(retries).toEqual([{ sampleId: id, retry: 0, at: new Date(NOW.getTime() + 60_000) }]);
+  expect(await judgeSample(db, deps(down, { enqueueRetry }), { sampleId: id, retry: 0 })).toBe(
+    "unjudged",
+  );
+  expect(retries[1]).toMatchObject({ retry: 1, at: new Date(NOW.getTime() + 2 * 60_000) });
+
+  const up = fakeJudge(async () => ({ score: 12 }));
+  expect(await judgeSample(db, deps(up, { enqueueRetry }), { sampleId: id, retry: 1 })).toBe(
+    "judged",
+  );
+  expect(await sample(id)).toMatchObject({ status: "judged", score: 12, errorClass: null });
+  // Judged stays judged; the last retry spent, or a class that won't clear, queues nothing.
+  expect(await judgeSample(db, deps(up, { enqueueRetry }), { sampleId: id, retry: 2 })).toBe(
+    "skipped",
+  );
+  const last = await insertSample({ emailId: await insertEmail("<p>x</p>") });
+  await judgeSample(db, deps(down), { sampleId: last });
+  expect(await judgeSample(db, deps(down, { enqueueRetry }), { sampleId: last, retry: 9 })).toBe(
+    "unjudged",
+  );
+  const broken = await insertSample({ emailId: await insertEmail("<p>x</p>") });
+  const parse = fakeJudge(async () => {
+    throw new JudgeError("parse_error");
+  });
+  await judgeSample(db, deps(parse, { enqueueRetry }), { sampleId: broken });
+  expect(await judgeSample(db, deps(up, { enqueueRetry }), { sampleId: broken, retry: 0 })).toBe(
+    "skipped",
+  );
+  expect(retries).toHaveLength(2);
+});
+
 it("gives up on a purged or missing body, and skips a sample already judged", async () => {
   const emailId = await insertEmail("<p>gone</p>");
   await db

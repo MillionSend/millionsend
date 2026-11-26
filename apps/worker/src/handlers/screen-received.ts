@@ -11,6 +11,8 @@ import {
   type MonitorSettings,
   markDelivered,
   markQuarantined,
+  markUnscreenedHeld,
+  nextJudgeRetry,
   openReceivedAttachments,
   type QuarantineReason,
   runAfterCommit,
@@ -28,6 +30,11 @@ type ScreenDeps = {
   timeoutMs: number;
   enqueueWebhookDeliveries: WebhookEnqueue;
   enqueueInboxForward: (p: { receivedEmailId: string; inboxId: string }) => Promise<void>;
+  /** Queues a later screening of mail a transient judge failure left unscreened. */
+  enqueueRetry: (
+    p: { receivedEmailId: string; inboxId: string; retry: number },
+    at: Date,
+  ) => Promise<void>;
   now?: (() => Date) | undefined;
   /** Waits between throttled calls; tests skip the wait. */
   sleep?: ((ms: number) => Promise<void>) | undefined;
@@ -37,13 +44,16 @@ type ScreenDeps = {
  * The received.screen job: the inbound judge for one membership held
  * pending. Over a cap the mail is quarantined screening_cap; a judge that
  * fails (after a few throttle retries) leaves it quarantined unscreened:
- * agent inboxes fail closed, and a person can release either. The verdict
- * moves this message only: no monitor sample, no team risk.
+ * agent inboxes fail closed, and a person can release either. A failure
+ * that may clear (timeout, upstream, throttled) is screened again on
+ * JUDGE_RETRY_DELAYS_MS while the hold stands: a clean verdict delivers it,
+ * a holding one swaps the reason. The verdict moves this message only: no
+ * monitor sample, no team risk.
  */
 export async function screenReceived(
   db: Db,
   deps: ScreenDeps,
-  job: { receivedEmailId: string; inboxId: string },
+  job: { receivedEmailId: string; inboxId: string; retry?: number | undefined },
 ): Promise<void> {
   const now = deps.now?.() ?? new Date();
   const m = schema.receivedEmailInboxes;
@@ -51,7 +61,13 @@ export async function screenReceived(
     .select()
     .from(m)
     .where(and(eq(m.receivedEmailId, job.receivedEmailId), eq(m.inboxId, job.inboxId)));
-  if (membership?.verdict !== "pending") return;
+  if (!membership) return;
+  const retrying =
+    job.retry !== undefined &&
+    membership.verdict === "quarantined" &&
+    membership.quarantineReason === "unscreened" &&
+    membership.deliveredAt === null;
+  if (membership.verdict !== "pending" && !retrying) return;
   const r = schema.receivedEmails;
   const [row] = await db.select().from(r).where(eq(r.id, job.receivedEmailId));
   const i = schema.inboxes;
@@ -80,7 +96,7 @@ export async function screenReceived(
       await markDelivered(tx, {
         row,
         key,
-        from: "pending",
+        from: retrying ? "quarantined" : "pending",
         set: { ...set, verdict },
         spam,
         forwardTo: inbox.safety.forward_to,
@@ -110,7 +126,12 @@ export async function screenReceived(
     judgeAvailable: false,
     forwardedContent: false,
   });
+  const scheduleRetry = async (status: string) => {
+    const next = nextJudgeRetry(status, job.retry, now);
+    if (next) await deps.enqueueRetry({ ...key, retry: next.retry }, next.at);
+  };
   if (!deps.judge?.screen) {
+    if (retrying) return;
     // No judge to ask (ABUSE_JUDGE off, or a judge without the inbound set).
     if (rules.action === "quarantine") await quarantine(rules.reason ?? "unscreened", undefined);
     else
@@ -132,9 +153,24 @@ export async function screenReceived(
       retries: JUDGE_THROTTLE_RETRIES,
       sleep: deps.sleep,
     },
-    { row, tier: membership.senderTrust, inboxId: job.inboxId, now },
+    { row, tier: membership.senderTrust, inboxId: job.inboxId, now, retry: retrying },
   );
   if (!verdict) {
+    if (retrying) {
+      await db
+        .update(m)
+        .set({ judge: record })
+        .where(
+          and(
+            eq(m.receivedEmailId, key.receivedEmailId),
+            eq(m.inboxId, key.inboxId),
+            eq(m.verdict, "quarantined"),
+            eq(m.quarantineReason, "unscreened"),
+          ),
+        );
+      await scheduleRetry(record.status);
+      return;
+    }
     if (record.status === "screening_cap") {
       await quarantine("screening_cap", { judge: record });
       return finish();
@@ -145,6 +181,7 @@ export async function screenReceived(
       );
     }
     await quarantine("unscreened", { judge: record });
+    await scheduleRetry(record.status);
     return finish();
   }
   const set = {
@@ -154,7 +191,9 @@ export async function screenReceived(
     judge: record,
   };
   const held = heldReason(verdict);
-  if (held) {
+  if (held && retrying) {
+    await markUnscreenedHeld(db, { row, key, reason: held, set });
+  } else if (held) {
     await quarantine(held, set);
   } else {
     const suspicious =

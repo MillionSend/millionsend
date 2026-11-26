@@ -79,6 +79,46 @@ export class JudgeError extends Error {
   }
 }
 
+/** Failures a later call may not meet: the provider slow, erroring or throttling. */
+export const TRANSIENT_JUDGE_ERRORS: ReadonlySet<string> = new Set<JudgeErrorClass>([
+  "timeout",
+  "upstream",
+  "throttled",
+]);
+
+/**
+ * The waits before each later call on a transiently failed judgement: a short
+ * outage is covered within minutes, a long one within a day, and after the
+ * last a person decides.
+ */
+export const JUDGE_RETRY_DELAYS_MS: readonly number[] = [
+  60_000,
+  2 * 60_000,
+  5 * 60_000,
+  15 * 60_000,
+  30 * 60_000,
+  3_600_000,
+  2 * 3_600_000,
+  4 * 3_600_000,
+  8 * 3_600_000,
+  8 * 3_600_000,
+];
+
+/**
+ * When the judge is next asked after the failure of retry `retry` (undefined:
+ * the first call), or null when the class won't clear or the retries are spent.
+ */
+export function nextJudgeRetry(
+  errorClass: string,
+  retry: number | undefined,
+  now: Date,
+): { retry: number; at: Date } | null {
+  if (!TRANSIENT_JUDGE_ERRORS.has(errorClass)) return null;
+  const next = retry === undefined ? 0 : retry + 1;
+  const delay = JUDGE_RETRY_DELAYS_MS[next];
+  return delay === undefined ? null : { retry: next, at: new Date(now.getTime() + delay) };
+}
+
 /** The class of any error a judge call threw: its own, an abort, or an upstream fault. */
 export function judgeErrorClass(err: unknown): JudgeErrorClass {
   if (err instanceof JudgeError) return err.class;

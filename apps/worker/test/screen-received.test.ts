@@ -111,9 +111,12 @@ const hookTypes = async (emailId: string) =>
     .map((h) => h.type)
     .sort();
 
+type Retry = { job: { receivedEmailId: string; inboxId: string; retry: number }; at: Date };
+let retries: Retry[] = [];
+
 const run = (
   judge: AbuseJudge | null,
-  job: { receivedEmailId: string; inboxId: string },
+  job: { receivedEmailId: string; inboxId: string; retry?: number },
   extra: { sleep?: (ms: number) => Promise<void> } = {},
 ) =>
   screenReceived(
@@ -125,6 +128,7 @@ const run = (
       timeoutMs: 5_000,
       enqueueWebhookDeliveries: async () => {},
       enqueueInboxForward: async () => {},
+      enqueueRetry: async (job, at) => void retries.push({ job, at }),
       now: () => NOW,
       ...extra,
     },
@@ -303,6 +307,65 @@ describe("received.screen", () => {
     expect((await membership(throttled.receivedEmailId))[0]).toMatchObject({
       quarantineReason: "unscreened",
     });
+  });
+
+  it("screens a transient failure again on the backoff, delivering or holding it then", async () => {
+    retries = [];
+    const down = fakeJudge(async () => Promise.reject(new JudgeError("upstream")));
+    const job = await pending();
+    await run(down, job);
+    expect((await membership(job.receivedEmailId))[0]).toMatchObject({
+      verdict: "quarantined",
+      quarantineReason: "unscreened",
+    });
+    expect(retries).toEqual([{ job: { ...job, retry: 0 }, at: new Date(NOW.getTime() + 60_000) }]);
+
+    // Still down: the hold stands, the record moves on, the wait doubles.
+    await run(down, { ...job, retry: 0 });
+    expect(retries[1]).toEqual({
+      job: { ...job, retry: 1 },
+      at: new Date(NOW.getTime() + 2 * 60_000),
+    });
+    expect((await membership(job.receivedEmailId))[0]?.verdict).toBe("quarantined");
+
+    // Back: a clean verdict delivers it, announced as received.
+    await run(
+      fakeJudge(async () => verdict()),
+      { ...job, retry: 1 },
+    );
+    expect((await membership(job.receivedEmailId))[0]).toMatchObject({
+      verdict: "clean",
+      judge: { status: "judged" },
+    });
+    expect(await hookTypes(job.receivedEmailId)).toContain("inbox.email.received");
+    expect(retries).toHaveLength(2);
+
+    // A holding verdict swaps the reason and delivers nothing.
+    const lure = await pending();
+    await run(down, lure);
+    await run(
+      fakeJudge(async () => verdict({ phishingScore: 97 })),
+      { ...lure, retry: 0 },
+    );
+    expect((await membership(lure.receivedEmailId))[0]).toMatchObject({
+      verdict: "quarantined",
+      quarantineReason: "phishing",
+      phishingScore: 97,
+      deliveredAt: null,
+    });
+
+    // The last retry spent, a failure that won't clear, or a hold that is not unscreened: no more calls.
+    retries = [];
+    await run(down, { ...lure, retry: 0 });
+    const last = await pending();
+    await run(down, last);
+    await run(down, { ...last, retry: 9 });
+    const broken = await pending();
+    await run(
+      fakeJudge(async () => Promise.reject(new JudgeError("parse_error"))),
+      broken,
+    );
+    expect(retries.map((r) => r.job.receivedEmailId)).toEqual([last.receivedEmailId]);
   });
 
   it("quarantines screening_cap over the team, instance or inbox day, without calling the judge", async () => {

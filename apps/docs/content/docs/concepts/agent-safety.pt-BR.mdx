@@ -226,7 +226,11 @@ painel, ao lado de cada mensagem.
 
 - **Na dúvida, retém.** Um avaliador que estoura o tempo ou dá erro manda a
   mensagem para a quarentena como `unscreened`; limitação de uso (throttling)
-  é tentada de novo antes. Depois de 200 mensagens analisadas numa caixa no
+  é tentada de novo antes. Enquanto ela continua retida, a análise é
+  repetida depois de 1, 2, 5, 15 e 30 minutos e de 1, 2, 4, 8 e 8 horas:
+  um resultado limpo entrega a mensagem como se ela tivesse acabado de
+  chegar, e um que retém troca o motivo. Você pode liberá-la a qualquer
+  momento. Depois de 200 mensagens analisadas numa caixa no
   mesmo dia, ou depois da cota diária de análises da equipe ou da instância,
   o e-mail que precisa de análise vai para a quarentena como
   `screening_cap`, então uma enxurrada vira quarentena, nunca entrega sem

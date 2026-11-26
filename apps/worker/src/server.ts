@@ -871,7 +871,7 @@ await queue.work(
 // through the queue's backoff, not in-process.
 await queue.work(
   "abuse.judge",
-  async ({ sampleId }) => {
+  async ({ sampleId, retry }) => {
     await judgeSample(
       db,
       {
@@ -890,8 +890,20 @@ await queue.work(
         linkDomainAged: (domains, at) =>
           linkDomainsAged(db, domainAge, domains, at, { budgetMs: LINK_AGE_BUDGET_MS }),
         media: { vision, judgeImages },
+        enqueueRetry: async (p, at) => {
+          await queue.send(
+            "abuse.judge",
+            { sampleId: p.sampleId, retry: p.retry },
+            {
+              dedupeKey: p.sampleId,
+              group: p.teamId,
+              priority: JUDGE_PRIORITY.sample,
+              startAfter: at,
+            },
+          );
+        },
       },
-      { sampleId },
+      { sampleId, retry },
     );
   },
   { concurrency: 4, batchSize: 2, groupConcurrency: 2 },
@@ -910,6 +922,7 @@ await queue.work(
         timeoutMs: judgeConfig?.timeoutMs ?? ABUSE_JUDGE_TIMEOUT_MS_DEFAULT,
         enqueueWebhookDeliveries: enqueueWebhook,
         enqueueInboxForward: (p) => queue.enqueueInboxForward(p),
+        enqueueRetry: (p, at) => queue.enqueueScreening(p, at),
       },
       job,
     );
