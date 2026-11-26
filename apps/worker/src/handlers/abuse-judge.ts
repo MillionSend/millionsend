@@ -26,6 +26,7 @@ import {
   type MonitorTier,
   mailCarriesPix,
   mediaParks,
+  nextJudgeRetry,
   opaqueFacts,
   openAttachments,
   parseSingleSender,
@@ -35,6 +36,7 @@ import {
   screeningTeam,
   sendingDomainYoung,
   spareWaitingSamples,
+  TRANSIENT_JUDGE_ERRORS,
   teamDestinationStanding,
   teamMonitorOverview,
   teamMonitorRow,
@@ -71,6 +73,10 @@ export interface JudgeDeps {
   /** Queues again what waited on a screening verdict: an unsent email, or a new team's fan-out. */
   enqueueSend?: ((emailId: string, priority: EmailSendPriority) => Promise<void>) | undefined;
   enqueueBroadcast?: ((broadcastId: string) => Promise<void>) | undefined;
+  /** Queues a later call on an after-send sample a transient judge failure left unjudged. */
+  enqueueRetry?:
+    | ((p: { sampleId: string; teamId: string; retry: number }, at: Date) => Promise<void>)
+    | undefined;
   /** The platform's own link domains (unsubscribe, tracking): never a customer's destination. */
   platformDomains?: ReadonlySet<string> | undefined;
   /**
@@ -113,20 +119,43 @@ const MEDIA_UNREAD: ReadonlySet<MediaIssue> = new Set(["images_not_read", "visio
  * Judge one pending sample. The block is built in memory from the stored
  * body and discarded with the call; the row keeps the verdict fields only.
  * A judge failure of any class records the sample unjudged and changes
- * nothing else; only a throttle is retried, and only a few times. Database
- * and decrypt errors throw so pg-boss retries the job. Mail waiting on a
- * screening sample is queued again once it has its answer, either way.
+ * nothing else; a throttle is retried a few times in the queue. An
+ * after-send sample a failure that may clear left unjudged is judged again
+ * on JUDGE_RETRY_DELAYS_MS (`retry`); a screening sample has
+ * its own wait, which mail is held on. Database and decrypt errors throw so
+ * pg-boss retries the job. Mail waiting on a screening sample is queued
+ * again once it has its answer, either way.
  */
 export async function judgeSample(
   db: Db,
   deps: JudgeDeps,
-  payload: { sampleId: string },
+  payload: { sampleId: string; retry?: number | undefined },
 ): Promise<JudgeOutcome> {
   const now = deps.now?.() ?? new Date();
   const [sample] = await db.select().from(ms).where(eq(ms.id, payload.sampleId));
-  if (sample?.status !== "pending") return "skipped";
-  const outcome = await judgePending(db, deps, sample, now);
+  // Judged in place from unjudged, never reopened: the lost-sample sweep only
+  // reads pending rows, so it can't take a late retry's verdict away.
+  const retryable =
+    sample?.status === "unjudged" &&
+    !sample.screening &&
+    sample.errorClass !== null &&
+    TRANSIENT_JUDGE_ERRORS.has(sample.errorClass);
+  if (!sample || (sample.status !== "pending" && !retryable)) return "skipped";
+  const outcome = await judgePending(db, deps, sample, now, retryable ? "unjudged" : "pending");
   if (sample.screening && outcome !== "skipped") await resumeScreened(db, deps, sample);
+  if (outcome === "unjudged" && !sample.screening && deps.enqueueRetry) {
+    const [row] = await db
+      .select({ errorClass: ms.errorClass })
+      .from(ms)
+      .where(eq(ms.id, sample.id));
+    const next = row?.errorClass ? nextJudgeRetry(row.errorClass, payload.retry, now) : null;
+    if (next) {
+      await deps.enqueueRetry(
+        { sampleId: sample.id, teamId: sample.teamId, retry: next.retry },
+        next.at,
+      );
+    }
+  }
   return outcome;
 }
 
@@ -135,6 +164,7 @@ async function judgePending(
   deps: JudgeDeps,
   sample: typeof schema.monitorSamples.$inferSelect,
   now: Date,
+  from: "pending" | "unjudged",
 ): Promise<JudgeOutcome> {
   const unjudged = async (errorClass: string, latencyMs?: number, mediaIssues?: MediaIssue[]) => {
     await db
@@ -147,7 +177,7 @@ async function judgePending(
         judgedAt: now,
         mediaIssues: mediaIssues ?? null,
       })
-      .where(and(eq(ms.id, sample.id), eq(ms.status, "pending")));
+      .where(and(eq(ms.id, sample.id), eq(ms.status, from)));
     console.warn(`abuse.judge: sample ${sample.id} unjudged (${errorClass})`);
     return "unjudged" as const;
   };
@@ -348,6 +378,7 @@ async function judgePending(
       .update(ms)
       .set({
         status: "judged",
+        errorClass: null,
         score: verdict.score,
         verdict: verdict.verdict,
         categories: verdict.categories,
@@ -361,7 +392,7 @@ async function judgePending(
         mediaIssues: issues,
         judgedAt: now,
       })
-      .where(and(eq(ms.id, sample.id), eq(ms.status, "pending")))
+      .where(and(eq(ms.id, sample.id), eq(ms.status, from)))
       .returning({ id: ms.id });
     // A concurrent run already wrote this sample: its verdict stands, the risk moved once.
     if (!judged) return null;

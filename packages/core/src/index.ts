@@ -49,11 +49,14 @@ export {
   type InboundJudgeVerdict,
   JUDGE_ERROR_CLASSES,
   JUDGE_PROVIDERS,
+  JUDGE_RETRY_DELAYS_MS,
   JudgeError,
   type JudgeErrorClass,
   type JudgeProvider,
   type JudgeVerdict,
   judgeErrorClass,
+  nextJudgeRetry,
+  TRANSIENT_JUDGE_ERRORS,
 } from "./abuse-judge/types.js";
 export { createTypesafeJudge, type FetchLike } from "./abuse-judge/typesafe.js";
 export {

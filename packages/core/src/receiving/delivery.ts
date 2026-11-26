@@ -179,6 +179,8 @@ export async function markDelivered(
     row: ReceivedEmailMeta;
     key: MembershipKey;
     from: "pending" | "quarantined";
+    /** From quarantine, only a hold still for this reason: one a release just changed stays. */
+    fromReason?: QuarantineReason | undefined;
     set: Partial<
       Pick<
         Membership,
@@ -211,6 +213,7 @@ export async function markDelivered(
         eq(m.receivedEmailId, p.key.receivedEmailId),
         eq(m.inboxId, p.key.inboxId),
         eq(m.verdict, p.from),
+        p.fromReason ? eq(m.quarantineReason, p.fromReason) : undefined,
         isNull(m.deliveredAt),
       ),
     )
@@ -349,6 +352,47 @@ export async function markQuarantined(
     ],
     p.after,
   );
+  await recordInboxActivity(tx, {
+    teamId: p.row.teamId,
+    inboxId: p.key.inboxId,
+    actor: { kind: "system" },
+    action: "email.quarantined",
+    threadId: membership.threadId,
+    emailId: p.row.id,
+    decision: { result: "quarantined", reasons: [p.reason] },
+  });
+  return membership;
+}
+
+/**
+ * Mail a judge failure quarantined unscreened, held now for what a later
+ * screening found: the reason and scores change, nothing is announced again.
+ * A release or another verdict since leaves it as it is (null).
+ */
+export async function markUnscreenedHeld(
+  tx: Db,
+  p: {
+    row: ReceivedEmailMeta;
+    key: MembershipKey;
+    reason: QuarantineReason;
+    set: Partial<Pick<Membership, "reasons" | "injectionScore" | "phishingScore" | "judge">>;
+  },
+): Promise<Membership | null> {
+  const m = schema.receivedEmailInboxes;
+  const [membership] = await tx
+    .update(m)
+    .set({ ...p.set, quarantineReason: p.reason })
+    .where(
+      and(
+        eq(m.receivedEmailId, p.key.receivedEmailId),
+        eq(m.inboxId, p.key.inboxId),
+        eq(m.verdict, "quarantined"),
+        eq(m.quarantineReason, "unscreened"),
+        isNull(m.deliveredAt),
+      ),
+    )
+    .returning();
+  if (!membership) return null;
   await recordInboxActivity(tx, {
     teamId: p.row.teamId,
     inboxId: p.key.inboxId,

@@ -93,7 +93,14 @@ export async function judgeReceived(
     /** Waits between throttled calls; tests skip the wait. */
     sleep?: ((ms: number) => Promise<void>) | undefined;
   },
-  p: { row: ReceivedEmailRow; tier: SenderTrust; inboxId: string; now: Date },
+  p: {
+    row: ReceivedEmailRow;
+    tier: SenderTrust;
+    inboxId: string;
+    now: Date;
+    /** A later call on a message that already spent the day's caps once. */
+    retry?: boolean | undefined;
+  },
 ): Promise<InboundJudgeRun> {
   const record = (status: string, latencyMs: number, model?: string): InboxJudgeRecord => ({
     version: abuseRules().judge.inbound.version,
@@ -105,6 +112,7 @@ export async function judgeReceived(
   if (!screen) return { verdict: null, record: record("off", 0) };
   const teamId = p.row.teamId;
   if (
+    !p.retry &&
     !(await spendJudgeCaps(db, {
       teamId,
       inboxId: p.inboxId,

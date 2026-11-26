@@ -210,7 +210,11 @@ concealed. The scores are always shown: on reads in `screening`, and in the
 dashboard next to each message.
 
 - **It fails closed.** A judge that times out or errors quarantines the
-  message as `unscreened`; throttling is retried first. Past 200 screened
+  message as `unscreened`; throttling is retried first. While it stays
+  held, the message is screened again after 1, 2, 5, 15 and 30 minutes,
+  then 1, 2, 4, 8 and 8 hours: a clean verdict delivers it as if it had
+  just arrived, and a holding one changes its reason. You can release it
+  at any point. Past 200 screened
   messages in one inbox in a day, or past the team's or the instance's daily
   screening budget, mail that needs screening is quarantined as
   `screening_cap`, so a flood turns into quarantine, never into unscreened

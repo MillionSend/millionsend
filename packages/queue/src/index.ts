@@ -23,7 +23,9 @@ export interface JobPayloads {
   "recipient.erase": { teamId: string; address: string };
   // The content monitor's judge call for one pending sample; the sample row
   // names the email, the job carries nothing else.
-  "abuse.judge": { sampleId: string };
+  // `retry` names a later call on an after-send sample a transient judge
+  // failure left unjudged (JUDGE_RETRY_DELAYS_MS).
+  "abuse.judge": { sampleId: string; retry?: number };
   // Retry of a team's SES tenant status the console could not set; the
   // handler applies whatever the team's standing is when it runs.
   "tenant.status": { teamId: string };
@@ -31,7 +33,9 @@ export interface JobPayloads {
   // looked up when the domain is added and again when it verifies.
   "domain.age": { domainId: string };
   // The inbound judge for one pending inbox membership.
-  "received.screen": { receivedEmailId: string; inboxId: string };
+  // `retry` names a later call on mail a transient judge failure left
+  // quarantined unscreened (JUDGE_RETRY_DELAYS_MS).
+  "received.screen": { receivedEmailId: string; inboxId: string; retry?: number };
   // A delivered message passed on to its inbox's forward_to owners.
   "inbox.forward": { receivedEmailId: string; inboxId: string };
   // A team's subdomain label on the shared inbox domain, settled once its
@@ -459,12 +463,15 @@ export class Queue {
   }
 
   /** The inbound judge for one membership held pending. */
-  async enqueueScreening(p: JobPayloads["received.screen"]): Promise<void> {
+  async enqueueScreening(p: JobPayloads["received.screen"], startAfter?: Date): Promise<void> {
     // ponytail: fairness per inbox, the payload names no team; carry the team
     // id if one team's many inboxes ever starve the lanes.
     await this.send("received.screen", p, {
       dedupeKey: `${p.receivedEmailId}:${p.inboxId}`,
       group: p.inboxId,
+      // Mail an agent waits on goes ahead of a retry of mail already held.
+      priority: p.retry === undefined ? 1 : 0,
+      startAfter,
     });
   }
 
