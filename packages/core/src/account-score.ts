@@ -5,8 +5,9 @@ import type { Db } from "@millionsend/db";
 import * as schema from "@millionsend/db/schema";
 import { and, eq, gte, type SQL, sql } from "drizzle-orm";
 import {
-  counterComplaintSent,
+  counterComplained,
   counterHardBounced,
+  counterNetComplaintSent,
   counterSent,
   type DeliverabilityStatus,
   fetchDeliverabilityHealth,
@@ -232,8 +233,8 @@ export async function fetchAccountScoreInput(
     .select({
       sent: sql<string>`coalesce(sum(${c.sent}), 0)::bigint`,
       bounceSent: sql<string>`coalesce(sum(${counterSent}), 0)::bigint`,
-      complaintSent: sql<string>`coalesce(sum(${counterComplaintSent}), 0)::bigint`,
-      complained: sql<string>`coalesce(sum(${c.complained}), 0)::bigint`,
+      complaintSent: sql<string>`coalesce(sum(${counterNetComplaintSent}), 0)::bigint`,
+      complained: sql<string>`coalesce(sum(${counterComplained}), 0)::bigint`,
       hardBounced: sql<string>`coalesce(sum(${counterHardBounced}), 0)::bigint`,
     })
     .from(c)

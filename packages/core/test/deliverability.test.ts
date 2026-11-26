@@ -221,8 +221,7 @@ describe("pauseLiftRefusal", () => {
       windowDays: GUARDRAIL_WINDOW_DAYS,
     };
     expect(refusal({ reasons: [warning] })).toBe("not_paused");
-    expect(refusal({ reasons: [pause("complaint")] })).toBe("complaints");
-    expect(refusal({ reasons: [pause("bounce"), pause("complaint")] })).toBe("complaints");
+    expect(refusal({ reasons: [pause("complaint")] })).toBeNull();
     expect(refusal({ openFlag: { reason: "guardrail", openedBy: "op-1" } })).toBe("flagged");
     expect(refusal({ openFlag: { reason: "brand", openedBy: null } })).toBe("flagged");
     expect(refusal({ monitorRisk: 0.5 })).toBe("monitor");

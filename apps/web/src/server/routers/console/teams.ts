@@ -617,7 +617,7 @@ export const consoleTeamsRouter = router({
       await kickQuotaDrain();
     }),
 
-  /** A bounce pause lifted after review; a refusal comes back as its code. */
+  /** A bounce or complaint pause lifted after review; a refusal comes back as its code. */
   liftPause: operatorProcedure
     .input(
       z.object({
@@ -655,7 +655,7 @@ export const consoleTeamsRouter = router({
       // The guardrail flag is the cron's to clear: cleared in the operator's
       // name, it would stay cleared through a new pause.
       await kickCron("safety.flags");
-      return { sent: lifted.sent, hardBounces: lifted.hardBounces };
+      return { sent: lifted.sent, hardBounces: lifted.hardBounces, complaints: lifted.complaints };
     }),
 
   /**

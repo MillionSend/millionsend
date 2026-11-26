@@ -1,0 +1,2 @@
+ALTER TABLE "usage_counters" ADD COLUMN "excluded_complaint_sent" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "usage_counters" ADD COLUMN "excluded_complained" integer DEFAULT 0 NOT NULL;

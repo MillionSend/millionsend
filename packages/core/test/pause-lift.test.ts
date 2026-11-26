@@ -75,7 +75,7 @@ describe("liftDeliverabilityPause", () => {
     ]);
     expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("paused");
 
-    expect(await lift(teamId)).toEqual({ sent: 300, hardBounces: 20, parked: 1 });
+    expect(await lift(teamId)).toEqual({ sent: 300, hardBounces: 20, complaints: 0, parked: 1 });
 
     expect(await countersOf(teamId)).toEqual([
       { day: day(3), sent: 100, hardBounced: 2, excludedSent: 0, excludedHardBounced: 0 },
@@ -101,6 +101,7 @@ describe("liftDeliverabilityPause", () => {
       since: day(1),
       sent: 300,
       hardBounces: 20,
+      complaints: 0,
       notified: true,
     });
     const notices = await db
@@ -114,6 +115,33 @@ describe("liftDeliverabilityPause", () => {
       .from(schema.teamFlags)
       .where(eq(schema.teamFlags.teamId, teamId));
     expect(flag?.status).toBe("open");
+  });
+
+  it("lifts a complaint pause, and complaints after it count afresh", async () => {
+    const teamId = await createTeam(db, "complained");
+    // 3 complaints in 500 sends a provider could report: 0.6%, over the pause line.
+    await db
+      .insert(uc)
+      .values({ teamId, day: day(0), sent: 600, sentNoFeedback: 100, complained: 3 });
+    const before = await fetchDeliverabilityHealth(db, teamId, { now });
+    expect(before.status).toBe("paused");
+    expect(before.reasons.some((r) => r.metric === "complaint" && r.tier === "paused")).toBe(true);
+    expect((await pauseLiftStanding(db, teamId, { now, monitorFlagRisk })).refusal).toBeNull();
+
+    expect(await lift(teamId)).toEqual({ sent: 600, hardBounces: 0, complaints: 3, parked: 0 });
+    const [row] = await db
+      .select({ s: uc.excludedComplaintSent, c: uc.excludedComplained })
+      .from(uc)
+      .where(eq(uc.teamId, teamId));
+    expect(row).toEqual({ s: 500, c: 3 });
+    expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("ok");
+
+    // New mail and new complaints on the same day count against the same lines.
+    await db
+      .update(uc)
+      .set({ sent: 1100, sentNoFeedback: 100, complained: 6 })
+      .where(eq(uc.teamId, teamId));
+    expect((await fetchDeliverabilityHealth(db, teamId, { now })).status).toBe("paused");
   });
 
   it("refuses a second lift while unpaused, and lifts again once new bounces pause the team", async () => {
