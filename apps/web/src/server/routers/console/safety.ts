@@ -771,7 +771,6 @@ export const consoleSafetyRouter = router({
           rate: health.pause.sent > 0 ? health.pause.hardBounced / health.pause.sent : 0,
           parked: pauseLift.parked,
           lastLiftAt: pauseLift.lastLiftAt,
-          nextLiftAt: pauseLift.nextLiftAt,
         },
       },
       checks: factors.map((factor) => ({

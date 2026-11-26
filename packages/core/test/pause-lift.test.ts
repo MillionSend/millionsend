@@ -116,7 +116,7 @@ describe("liftDeliverabilityPause", () => {
     expect(flag?.status).toBe("open");
   });
 
-  it("refuses a second lift, and holds the cooldown once new bounces pause the team again", async () => {
+  it("refuses a second lift while unpaused, and lifts again once new bounces pause the team", async () => {
     const teamId = await pausedTeam("acme-again");
     await lift(teamId);
     const counters = await countersOf(teamId);
@@ -127,9 +127,9 @@ describe("liftDeliverabilityPause", () => {
     await db.update(uc).set({ sent: 350, hardBounced: 32 }).where(eq(uc.teamId, teamId));
     const standing = await pauseLiftStanding(db, teamId, { now, monitorFlagRisk });
     expect(standing.health.status).toBe("paused");
-    expect(standing.refusal).toBe("cooldown");
+    expect(standing.refusal).toBeNull();
     expect(standing.lastLiftAt).toEqual(now);
-    expect(standing.nextLiftAt).toEqual(new Date("2026-09-14T00:00:00.000Z"));
+    expect(await lift(teamId)).toMatchObject({ sent: 350, hardBounces: 32 });
   });
 
   it("refuses a suspended team, a Free pool's team, another open flag and the monitor's risk", async () => {

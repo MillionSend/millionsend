@@ -8,7 +8,6 @@ import {
   fetchDeliverabilityHealth,
   PAUSE_WINDOW_DAYS,
   type PauseLiftRefusal,
-  pauseLiftCooldownEnd,
   pauseLiftRefusal,
 } from "./deliverability.js";
 import { clearNotifications } from "./notifications.js";
@@ -23,7 +22,6 @@ export interface PauseLiftStanding {
   /** Mail parked while paused, which the drain sends once the pause lifts. */
   parked: number;
   lastLiftAt: Date | null;
-  nextLiftAt: Date | null;
   name: string;
 }
 
@@ -86,14 +84,11 @@ export async function pauseLiftStanding(
       monitorRisk: riskAt(monitor, now),
       monitorFlagRisk: opts.monitorFlagRisk,
       monitorVouched: vouchActive(monitor, now),
-      lastLiftAt,
-      now,
     }),
     health,
     since: windowStartDay(PAUSE_WINDOW_DAYS, now),
     parked: parked?.n ?? 0,
     lastLiftAt,
-    nextLiftAt: lastLiftAt ? pauseLiftCooldownEnd(lastLiftAt) : null,
     name: team.name,
   };
 }

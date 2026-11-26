@@ -12,7 +12,6 @@ import {
   MIN_PAUSE_COMPLAINTS,
   MIN_PAUSE_HARD_BOUNCES,
   PAUSE_WINDOW_DAYS,
-  pauseLiftCooldownEnd,
   pauseLiftRefusal,
   THROTTLED_BROADCAST_RATE_PER_SECOND,
   type WindowCounts,
@@ -195,7 +194,6 @@ describe("broadcastSendSpacingMs", () => {
 });
 
 describe("pauseLiftRefusal", () => {
-  const now = new Date("2026-08-14T12:00:00.000Z");
   const pause = (metric: "bounce" | "complaint") =>
     ({ metric, rate: 0.08, tier: "paused", windowDays: PAUSE_WINDOW_DAYS }) as const;
   const refusal = (over: Partial<Parameters<typeof pauseLiftRefusal>[0]> = {}) =>
@@ -206,11 +204,8 @@ describe("pauseLiftRefusal", () => {
       openFlag: { reason: "guardrail", openedBy: null },
       monitorRisk: null,
       monitorFlagRisk: 0.5,
-      lastLiftAt: null,
-      now,
       ...over,
     });
-  const daysAgo = (n: number) => new Date(now.getTime() - n * DAY_MS);
 
   it("lifts a bounce pause whose only flag is the cron's own guardrail flag", () => {
     expect(refusal()).toBeNull();
@@ -241,11 +236,6 @@ describe("pauseLiftRefusal", () => {
         openFlag: { reason: "manual", openedBy: "op-1" },
       }),
     ).toBe("flagged");
-    expect(refusal({ lastLiftAt: daysAgo(29) })).toBe("cooldown");
-    // The cooldown runs to the UTC midnight after 30 days, the day its refusal names.
-    expect(refusal({ lastLiftAt: daysAgo(30) })).toBe("cooldown");
-    expect(pauseLiftCooldownEnd(daysAgo(30))).toEqual(new Date("2026-08-15T00:00:00.000Z"));
-    expect(refusal({ lastLiftAt: new Date("2026-07-15T00:00:00.000Z") })).toBeNull();
   });
 });
 

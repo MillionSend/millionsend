@@ -640,14 +640,14 @@
     },
     "liftDialog": {
       "title": "Lift sending pause · {team}",
-      "lead": "Takes the sends and hard bounces counted over the last {window} UTC days out of this team's rates, so it sends again now. Every send and bounce from here on counts, against the same lines. Complaints never come out, and a team gets one lift every {days} days.",
+      "lead": "Takes the sends and hard bounces counted over the last {window} UTC days out of this team's rates, so it sends again now. Every send and bounce from here on counts, against the same lines. Complaints never come out.",
       "pausedOn": "Paused on",
       "pausedOnValue": "Hard-bounce rate {rate} over the last {window} days",
       "leavesOut": "Leaves out",
       "leavesOutValue": "{bounces, plural, one {# hard bounce} other {# hard bounces}} in {sent, plural, one {# send} other {# sends}} since {since} UTC",
       "waiting": "Waiting to go out",
       "waitingValue": "{count, plural, =0 {Nothing} one {# email} other {# emails}}",
-      "waitingTip": "Mail held during the pause goes out right after the lift, and its bounces count. If it was meant for fake sign-ups, it can pause the team again, and the next lift is {days} days away.",
+      "waitingTip": "Mail held during the pause goes out right after the lift, and its bounces count. If it was meant for fake sign-ups, it can pause the team again.",
       "lastLift": "Last lift",
       "lastLiftNever": "Never",
       "reference": "Where the owner explained it",
@@ -662,8 +662,7 @@
       "not_paused": "The team isn't paused anymore.",
       "complaints": "Paused on complaints, which a lift never covers. The pause lifts on its own once those send days leave the {window}-day window.",
       "flagged": "Decide on the open flag first: clear it, or suspend the team.",
-      "monitor": "The content monitor's risk is over its flag line. No lift until it drops back under.",
-      "cooldown": "Lifted on {last}. The next lift is possible from {next}."
+      "monitor": "The content monitor's risk is over its flag line. No lift until it drops back under."
     },
     "viewDialog": {
       "title": "View {team} as its owner",
