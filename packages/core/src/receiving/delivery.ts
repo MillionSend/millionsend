@@ -179,6 +179,8 @@ export async function markDelivered(
     row: ReceivedEmailMeta;
     key: MembershipKey;
     from: "pending" | "quarantined";
+    /** From quarantine, only a hold still for this reason: one a release just changed stays. */
+    fromReason?: QuarantineReason | undefined;
     set: Partial<
       Pick<
         Membership,
@@ -211,6 +213,7 @@ export async function markDelivered(
         eq(m.receivedEmailId, p.key.receivedEmailId),
         eq(m.inboxId, p.key.inboxId),
         eq(m.verdict, p.from),
+        p.fromReason ? eq(m.quarantineReason, p.fromReason) : undefined,
         isNull(m.deliveredAt),
       ),
     )

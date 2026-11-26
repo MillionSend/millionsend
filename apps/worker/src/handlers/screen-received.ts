@@ -16,6 +16,7 @@ import {
   openReceivedAttachments,
   type QuarantineReason,
   runAfterCommit,
+  TRANSIENT_JUDGE_ERRORS,
   type WebhookEnqueue,
 } from "@millionsend/core";
 import type { Db } from "@millionsend/db";
@@ -62,11 +63,13 @@ export async function screenReceived(
     .from(m)
     .where(and(eq(m.receivedEmailId, job.receivedEmailId), eq(m.inboxId, job.inboxId)));
   if (!membership) return;
+  // Any job on such a hold screens it again, so a first job rerun after its
+  // retry failed to enqueue still starts the chain.
   const retrying =
-    job.retry !== undefined &&
     membership.verdict === "quarantined" &&
     membership.quarantineReason === "unscreened" &&
-    membership.deliveredAt === null;
+    membership.deliveredAt === null &&
+    TRANSIENT_JUDGE_ERRORS.has(membership.judge?.status ?? "");
   if (membership.verdict !== "pending" && !retrying) return;
   const r = schema.receivedEmails;
   const [row] = await db.select().from(r).where(eq(r.id, job.receivedEmailId));
@@ -93,10 +96,11 @@ export async function screenReceived(
   ) =>
     db.transaction(async (raw) => {
       const tx = raw as unknown as Db;
-      await markDelivered(tx, {
+      const delivered = await markDelivered(tx, {
         row,
         key,
         from: retrying ? "quarantined" : "pending",
+        fromReason: retrying ? "unscreened" : undefined,
         set: { ...set, verdict },
         spam,
         forwardTo: inbox.safety.forward_to,
@@ -104,7 +108,7 @@ export async function screenReceived(
         now,
         after,
       });
-      await announceIfVisible(tx, { row, attachments, now, after });
+      if (delivered || !retrying) await announceIfVisible(tx, { row, attachments, now, after });
     });
   const finish = () =>
     runAfterCommit(
@@ -181,8 +185,9 @@ export async function screenReceived(
       );
     }
     await quarantine("unscreened", { judge: record });
+    await finish();
     await scheduleRetry(record.status);
-    return finish();
+    return;
   }
   const set = {
     reasons: verdict.reasons,

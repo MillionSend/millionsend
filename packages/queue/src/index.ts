@@ -469,6 +469,8 @@ export class Queue {
     await this.send("received.screen", p, {
       dedupeKey: `${p.receivedEmailId}:${p.inboxId}`,
       group: p.inboxId,
+      // Mail an agent waits on goes ahead of a retry of mail already held.
+      priority: p.retry === undefined ? 1 : 0,
       startAfter,
     });
   }

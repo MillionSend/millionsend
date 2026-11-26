@@ -49,7 +49,7 @@ import {
 import type { Db } from "@millionsend/db";
 import { schema } from "@millionsend/db";
 import { type EmailSendPriority, emailSendPriority } from "@millionsend/queue";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   type MediaRead,
   type MediaReadDeps,
@@ -120,8 +120,8 @@ const MEDIA_UNREAD: ReadonlySet<MediaIssue> = new Set(["images_not_read", "visio
  * body and discarded with the call; the row keeps the verdict fields only.
  * A judge failure of any class records the sample unjudged and changes
  * nothing else; a throttle is retried a few times in the queue. An
- * after-send sample a failure that may clear left unjudged is reopened and
- * judged again on JUDGE_RETRY_DELAYS_MS (`retry`); a screening sample has
+ * after-send sample a failure that may clear left unjudged is judged again
+ * on JUDGE_RETRY_DELAYS_MS (`retry`); a screening sample has
  * its own wait, which mail is held on. Database and decrypt errors throw so
  * pg-boss retries the job. Mail waiting on a screening sample is queued
  * again once it has its answer, either way.
@@ -132,25 +132,16 @@ export async function judgeSample(
   payload: { sampleId: string; retry?: number | undefined },
 ): Promise<JudgeOutcome> {
   const now = deps.now?.() ?? new Date();
-  if (payload.retry !== undefined) {
-    // ponytail: the lost-sample sweep can mark a reopened row of 3 h or more
-    // lost mid-call, which ends its retries; key the sweep off judged_at if
-    // that ever shows in the unjudged share.
-    await db
-      .update(ms)
-      .set({ status: "pending", errorClass: null, judgedAt: null })
-      .where(
-        and(
-          eq(ms.id, payload.sampleId),
-          eq(ms.status, "unjudged"),
-          eq(ms.screening, false),
-          inArray(ms.errorClass, [...TRANSIENT_JUDGE_ERRORS]),
-        ),
-      );
-  }
   const [sample] = await db.select().from(ms).where(eq(ms.id, payload.sampleId));
-  if (sample?.status !== "pending") return "skipped";
-  const outcome = await judgePending(db, deps, sample, now);
+  // Judged in place from unjudged, never reopened: the lost-sample sweep only
+  // reads pending rows, so it can't take a late retry's verdict away.
+  const retryable =
+    sample?.status === "unjudged" &&
+    !sample.screening &&
+    sample.errorClass !== null &&
+    TRANSIENT_JUDGE_ERRORS.has(sample.errorClass);
+  if (!sample || (sample.status !== "pending" && !retryable)) return "skipped";
+  const outcome = await judgePending(db, deps, sample, now, retryable ? "unjudged" : "pending");
   if (sample.screening && outcome !== "skipped") await resumeScreened(db, deps, sample);
   if (outcome === "unjudged" && !sample.screening && deps.enqueueRetry) {
     const [row] = await db
@@ -173,6 +164,7 @@ async function judgePending(
   deps: JudgeDeps,
   sample: typeof schema.monitorSamples.$inferSelect,
   now: Date,
+  from: "pending" | "unjudged",
 ): Promise<JudgeOutcome> {
   const unjudged = async (errorClass: string, latencyMs?: number, mediaIssues?: MediaIssue[]) => {
     await db
@@ -185,7 +177,7 @@ async function judgePending(
         judgedAt: now,
         mediaIssues: mediaIssues ?? null,
       })
-      .where(and(eq(ms.id, sample.id), eq(ms.status, "pending")));
+      .where(and(eq(ms.id, sample.id), eq(ms.status, from)));
     console.warn(`abuse.judge: sample ${sample.id} unjudged (${errorClass})`);
     return "unjudged" as const;
   };
@@ -386,6 +378,7 @@ async function judgePending(
       .update(ms)
       .set({
         status: "judged",
+        errorClass: null,
         score: verdict.score,
         verdict: verdict.verdict,
         categories: verdict.categories,
@@ -399,7 +392,7 @@ async function judgePending(
         mediaIssues: issues,
         judgedAt: now,
       })
-      .where(and(eq(ms.id, sample.id), eq(ms.status, "pending")))
+      .where(and(eq(ms.id, sample.id), eq(ms.status, from)))
       .returning({ id: ms.id });
     // A concurrent run already wrote this sample: its verdict stands, the risk moved once.
     if (!judged) return null;

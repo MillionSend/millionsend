@@ -268,7 +268,7 @@ it("retries a throttle through the queue a few times, then gives the sample up",
   expect(await sample(id)).toMatchObject({ status: "unjudged", errorClass: "throttled" });
 });
 
-it("reopens an after-send sample a transient failure left unjudged, on the backoff", async () => {
+it("judges again an after-send sample a transient failure left unjudged, on the backoff", async () => {
   const retries: { sampleId: string; retry: number; at: Date }[] = [];
   const enqueueRetry: JudgeDeps["enqueueRetry"] = async (p, at) =>
     void retries.push({ sampleId: p.sampleId, retry: p.retry, at });
@@ -306,6 +306,11 @@ it("reopens an after-send sample a transient failure left unjudged, on the backo
     "skipped",
   );
   expect(retries).toHaveLength(2);
+
+  // A first job run again after its retry failed to queue judges the sample in place.
+  const rerun = await insertSample({ emailId: await insertEmail("<p>x</p>") });
+  await judgeSample(db, deps(down), { sampleId: rerun });
+  expect(await judgeSample(db, deps(up), { sampleId: rerun })).toBe("judged");
 });
 
 it("gives up on a purged or missing body, and skips a sample already judged", async () => {

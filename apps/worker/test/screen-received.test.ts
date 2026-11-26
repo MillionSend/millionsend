@@ -354,6 +354,36 @@ describe("received.screen", () => {
       deliveredAt: null,
     });
 
+    // A release that held it again while the retry's call ran: the clean answer delivers nothing.
+    const raced = await pending();
+    await run(down, raced);
+    const m = schema.receivedEmailInboxes;
+    await run(
+      fakeJudge(async () => {
+        await db
+          .update(m)
+          .set({ quarantineReason: "phishing" })
+          .where(eq(m.receivedEmailId, raced.receivedEmailId));
+        return verdict();
+      }),
+      { ...raced, retry: 0 },
+    );
+    expect((await membership(raced.receivedEmailId))[0]).toMatchObject({
+      verdict: "quarantined",
+      quarantineReason: "phishing",
+      deliveredAt: null,
+    });
+    expect(await hookTypes(raced.receivedEmailId)).not.toContain("inbox.email.received");
+
+    // A first job run again (its retry never queued) still screens the hold.
+    const rerun = await pending();
+    await run(down, rerun);
+    await run(
+      fakeJudge(async () => verdict()),
+      rerun,
+    );
+    expect((await membership(rerun.receivedEmailId))[0]?.verdict).toBe("clean");
+
     // The last retry spent, a failure that won't clear, or a hold that is not unscreened: no more calls.
     retries = [];
     await run(down, { ...lure, retry: 0 });
